@@ -1,5 +1,8 @@
+mod cache;
 mod config;
 mod db;
+mod middleware;
+mod models;
 mod redis;
 mod routes;
 
@@ -22,12 +25,19 @@ async fn main() -> Result<()> {
     let db_pool = db::create_pool(&config).await?;
     tracing::info!("Connected to PostgreSQL");
 
+    sqlx::migrate!("./migrations")
+        .run(&db_pool)
+        .await?;
+    tracing::info!("Migrations applied");
+
     let redis_pool = redis::create_pool(&config)?;
     tracing::info!("Redis pool created");
 
     let state = routes::AppState {
         db: db_pool,
         redis: redis_pool,
+        admin_token: config.admin_token,
+        http_client: reqwest::Client::new(),
     };
 
     let app = routes::router(state);
