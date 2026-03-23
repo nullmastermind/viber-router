@@ -26,11 +26,17 @@ export default defineRouter((/* { store, ssrContext } */) => {
 	const Router = createRouter({
 		scrollBehavior: () => ({ left: 0, top: 0 }),
 		routes,
-
-		// Leave this as is and make changes in quasar.conf.js instead!
-		// quasar.conf.js -> build -> vueRouterMode
-		// quasar.conf.js -> build -> publicPath
 		history: createHistory(process.env.VUE_ROUTER_BASE),
+	});
+
+	Router.beforeEach((to) => {
+		const token = localStorage.getItem('admin_token');
+		if (to.path !== '/login' && !token) {
+			return '/login';
+		}
+		if (to.path === '/login' && token) {
+			return '/servers';
+		}
 	});
 
 	return Router;
