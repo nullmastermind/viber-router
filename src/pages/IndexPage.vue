@@ -10,9 +10,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import type { Todo, Meta } from 'components/models';
 import ExampleComponent from 'components/ExampleComponent.vue';
+import type { Meta, Todo } from 'components/models';
+import { ref } from 'vue';
 
 const todos = ref<Todo[]>([
   {

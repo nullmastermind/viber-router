@@ -25,8 +25,8 @@
 </template>
 
 <script setup lang="ts">
+import type { EssentialLinkProps } from 'components/EssentialLink.vue';
 import { ref } from 'vue';
-import EssentialLink, { type EssentialLinkProps } from 'components/EssentialLink.vue';
 
 const linksList: EssentialLinkProps[] = [
   {

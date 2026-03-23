@@ -14,7 +14,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { Todo, Meta } from './models';
+import type { Meta, Todo } from './models';
 
 interface Props {
   title: string;
