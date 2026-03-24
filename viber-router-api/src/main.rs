@@ -8,6 +8,8 @@ mod partition;
 mod redis;
 mod routes;
 
+use std::time::Duration;
+
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
@@ -46,7 +48,17 @@ async fn main() -> Result<()> {
         db: db_pool.clone(),
         redis: redis_pool,
         admin_token: config.admin_token,
-        http_client: reqwest::Client::new(),
+        http_client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(8 * 3600))
+            .connect_timeout(Duration::from_secs(10))
+            .pool_idle_timeout(Duration::from_secs(3600))
+            .tcp_keepalive(Duration::from_secs(30))
+            .tcp_nodelay(true)
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .http2_keep_alive_timeout(Duration::from_secs(10))
+            .http2_keep_alive_while_idle(true)
+            .build()
+            .expect("Failed to build HTTP client"),
         log_tx,
     };
 
