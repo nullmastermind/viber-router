@@ -1,0 +1,9 @@
+node_modules
+dist
+**/target
+.env
+viber-router-api/.env
+.git
+.claude
+openspec
+*.md

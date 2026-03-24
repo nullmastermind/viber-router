@@ -12,3 +12,9 @@ check:
     cd {{justfile_directory()}} && bun run biome lint ./src
     cd {{justfile_directory()}}/viber-router-api && cargo check
     cd {{justfile_directory()}}/viber-router-api && cargo clippy -- -D warnings
+
+docker-build:
+    cd {{justfile_directory()}} && docker build -t nullmastermind/viber-router:latest .
+
+docker-push:
+    cd {{justfile_directory()}} && docker push nullmastermind/viber-router:latest
