@@ -9,6 +9,7 @@ pub struct Group {
     pub api_key: String,
     pub failover_status_codes: serde_json::Value,
     pub is_active: bool,
+    pub ttft_timeout_ms: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -20,6 +21,7 @@ pub struct GroupListItem {
     pub api_key: String,
     pub failover_status_codes: serde_json::Value,
     pub is_active: bool,
+    pub ttft_timeout_ms: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub servers_count: i64,
@@ -36,6 +38,7 @@ pub struct UpdateGroup {
     pub name: Option<String>,
     pub failover_status_codes: Option<Vec<u16>>,
     pub is_active: Option<bool>,
+    pub ttft_timeout_ms: Option<Option<i32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -7,6 +7,7 @@ mod models;
 mod partition;
 mod redis;
 mod routes;
+mod ttft_buffer;
 
 use std::time::Duration;
 
@@ -35,7 +36,8 @@ async fn main() -> Result<()> {
     tracing::info!("Migrations applied");
 
     // Ensure partitions exist for current and next month
-    partition::ensure_partitions(&db_pool).await;
+    partition::ensure_partitions(&db_pool, "proxy_logs").await;
+    partition::ensure_partitions(&db_pool, "ttft_logs").await;
     tracing::info!("Partitions ensured");
 
     let redis_pool = redis::create_pool(&config)?;
@@ -43,6 +45,9 @@ async fn main() -> Result<()> {
 
     // Create log buffer
     let (log_tx, log_rx) = tokio::sync::mpsc::channel(10_000);
+
+    // Create TTFT log buffer
+    let (ttft_tx, ttft_rx) = tokio::sync::mpsc::channel(10_000);
 
     let state = routes::AppState {
         db: db_pool.clone(),
@@ -60,10 +65,14 @@ async fn main() -> Result<()> {
             .build()
             .expect("Failed to build HTTP client"),
         log_tx,
+        ttft_tx,
     };
 
     // Spawn log buffer flush task
     let flush_handle = tokio::spawn(log_buffer::flush_task(log_rx, db_pool.clone()));
+
+    // Spawn TTFT buffer flush task
+    let ttft_flush_handle = tokio::spawn(ttft_buffer::flush_task(ttft_rx, db_pool.clone()));
 
     // Spawn daily partition maintenance
     let retention_days = config.log_retention_days;
@@ -73,8 +82,10 @@ async fn main() -> Result<()> {
         interval.tick().await; // skip immediate tick
         loop {
             interval.tick().await;
-            partition::ensure_partitions(&partition_pool).await;
-            partition::drop_expired_partitions(&partition_pool, retention_days).await;
+            partition::ensure_partitions(&partition_pool, "proxy_logs").await;
+            partition::ensure_partitions(&partition_pool, "ttft_logs").await;
+            partition::drop_expired_partitions(&partition_pool, "proxy_logs", retention_days).await;
+            partition::drop_expired_partitions(&partition_pool, "ttft_logs", retention_days).await;
             tracing::info!("Daily partition maintenance complete");
         }
     });
@@ -88,9 +99,10 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Drop state to close the log channel sender, then drain the flush task
+    // Drop state to close the log channel sender, then drain the flush tasks
     drop(state);
     let _ = flush_handle.await;
+    let _ = ttft_flush_handle.await;
 
     tracing::info!("Server shut down");
     Ok(())

@@ -13,6 +13,7 @@
           <div class="text-subtitle1 q-mb-sm">Properties</div>
           <q-input v-model="group.name" label="Name" outlined dense class="q-mb-sm" />
           <q-input v-model="failoverCodesStr" label="Failover Status Codes (comma-separated)" outlined dense class="q-mb-sm" />
+          <q-input v-model="ttftTimeoutStr" label="TTFT Timeout (ms, empty = disabled)" outlined dense type="number" class="q-mb-sm" hint="Auto-switch to next server if first token takes longer" />
           <q-btn color="primary" label="Save" @click="saveGroup" />
         </q-card-section>
       </q-card>
@@ -91,6 +92,48 @@
         </q-card-section>
       </q-card>
 
+      <q-card flat bordered>
+        <q-card-section>
+          <div class="text-subtitle1 q-mb-sm">TTFT (Time to First Token) — Last Hour</div>
+          <div v-if="ttftLoading && !ttftStats" class="flex flex-center q-pa-lg">
+            <q-spinner size="md" />
+          </div>
+          <q-banner v-else-if="ttftError" class="bg-negative text-white q-mb-sm" rounded>
+            {{ ttftError }}
+          </q-banner>
+          <div v-else-if="ttftChartData" style="height: 300px">
+            <Line :data="ttftChartData" :options="ttftChartOptions" />
+          </div>
+          <div v-else class="text-grey text-center q-pa-lg">
+            No TTFT data in the last hour
+          </div>
+          <div v-if="ttftStats && ttftStats.servers.length > 0" class="q-mt-md">
+            <q-markup-table flat bordered dense>
+              <thead>
+                <tr>
+                  <th class="text-left">Server</th>
+                  <th class="text-right">Avg</th>
+                  <th class="text-right">P50</th>
+                  <th class="text-right">P95</th>
+                  <th class="text-right">Timeouts</th>
+                  <th class="text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in ttftStats.servers" :key="s.server_id">
+                  <td>{{ s.server_name }}</td>
+                  <td class="text-right">{{ s.avg_ttft_ms != null ? `${Math.round(s.avg_ttft_ms)}ms` : '—' }}</td>
+                  <td class="text-right">{{ s.p50_ttft_ms != null ? `${Math.round(s.p50_ttft_ms)}ms` : '—' }}</td>
+                  <td class="text-right">{{ s.p95_ttft_ms != null ? `${Math.round(s.p95_ttft_ms)}ms` : '—' }}</td>
+                  <td class="text-right">{{ s.timeout_count }}</td>
+                  <td class="text-right">{{ s.total_count }}</td>
+                </tr>
+              </tbody>
+            </q-markup-table>
+          </div>
+        </q-card-section>
+      </q-card>
+
       <q-dialog v-model="showAddServer" @hide="resetAddForm">
         <q-card style="width: 400px">
           <q-card-section><div class="text-h6">Add Server</div></q-card-section>
@@ -158,11 +201,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useQuasar, copyToClipboard } from 'quasar';
-import { useGroupsStore, type GroupWithServers, type GroupServerDetail } from 'stores/groups';
+import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type TtftStatsResponse } from 'stores/groups';
 import { useServersStore } from 'stores/servers';
+import { Line } from 'vue-chartjs';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  TimeScale,
+} from 'chart.js';
+
+import type { TooltipItem } from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, TimeScale);
+
+const CHART_COLORS = ['#1976D2', '#26A69A', '#FF6F00', '#AB47BC', '#EF5350', '#66BB6A', '#42A5F5', '#FFA726'];
 
 const $q = useQuasar();
 const route = useRoute();
@@ -194,6 +255,12 @@ const savingServer = ref(false);
 
 const keyBuilderEntries = ref<{ server_id: string; server_name: string; short_id: number; key: string; defaultKey: string }[]>([]);
 const showAllKeyBuilderServers = ref(false);
+
+const ttftTimeoutStr = ref('');
+const ttftStats = ref<TtftStatsResponse | null>(null);
+const ttftLoading = ref(false);
+const ttftError = ref('');
+let ttftRefreshTimer: ReturnType<typeof setInterval> | null = null;
 const visibleKeyBuilderEntries = computed(() =>
   showAllKeyBuilderServers.value
     ? keyBuilderEntries.value
@@ -219,6 +286,15 @@ onMounted(async () => {
   if (sData) {
     allServers.value = sData.data.map((s) => ({ label: `${s.name} (#${s.short_id})`, value: s.id }));
   }
+  loadTtftStats();
+  ttftRefreshTimer = setInterval(loadTtftStats, 30_000);
+});
+
+onUnmounted(() => {
+  if (ttftRefreshTimer) {
+    clearInterval(ttftRefreshTimer);
+    ttftRefreshTimer = null;
+  }
 });
 
 async function loadGroup() {
@@ -227,6 +303,7 @@ async function loadGroup() {
   group.value = data;
   servers.value = data.servers;
   failoverCodesStr.value = (data.failover_status_codes || []).join(', ');
+  ttftTimeoutStr.value = data.ttft_timeout_ms != null ? String(data.ttft_timeout_ms) : '';
   keyBuilderEntries.value = data.servers.map((s) => ({
     server_id: s.server_id,
     server_name: s.server_name,
@@ -242,10 +319,13 @@ async function saveGroup() {
     .split(',')
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => !Number.isNaN(n));
+  const ttftVal = ttftTimeoutStr.value.trim();
+  const ttft_timeout_ms = ttftVal === '' ? null : parseInt(ttftVal, 10);
   await groupsStore.updateGroup(group.value.id, {
     name: group.value.name,
     failover_status_codes: codes,
     is_active: group.value.is_active,
+    ttft_timeout_ms: Number.isNaN(ttft_timeout_ms as number) ? null : ttft_timeout_ms,
   });
   $q.notify({ type: 'positive', message: 'Saved' });
 }
@@ -385,4 +465,118 @@ async function onSaveEditServer() {
     savingServer.value = false;
   }
 }
+
+async function loadTtftStats() {
+  if (!group.value) return;
+  ttftLoading.value = true;
+  ttftError.value = '';
+  try {
+    ttftStats.value = await groupsStore.fetchTtftStats(group.value.id);
+  } catch {
+    ttftError.value = 'Failed to load TTFT data';
+  } finally {
+    ttftLoading.value = false;
+  }
+}
+
+const ttftChartData = computed(() => {
+  if (!ttftStats.value || ttftStats.value.servers.length === 0) return null;
+
+  // Build shared label array from all data points
+  const allTimes = ttftStats.value.servers
+    .flatMap((s) => s.data_points.map((p) => p.created_at))
+    .sort();
+  const uniqueTimes = [...new Set(allTimes)];
+
+  if (uniqueTimes.length === 0) return null;
+
+  // Build a lookup map: created_at -> data point for each server
+  const datasets = ttftStats.value.servers.flatMap((server, idx) => {
+    const color = CHART_COLORS[idx % CHART_COLORS.length] as string;
+
+    // Build maps for quick lookup
+    const normalMap = new Map<string, number | null>();
+    const timeoutSet = new Set<string>();
+    for (const p of server.data_points) {
+      if (p.timed_out) {
+        timeoutSet.add(p.created_at);
+      } else if (p.ttft_ms != null) {
+        normalMap.set(p.created_at, p.ttft_ms);
+      }
+    }
+
+    const result: {
+      label: string;
+      data: (number | null)[];
+      borderColor: string;
+      backgroundColor: string;
+      pointRadius: number;
+      tension?: number;
+      fill?: boolean;
+      pointStyle?: string;
+      showLine?: boolean;
+      spanGaps?: boolean;
+    }[] = [
+      {
+        label: server.server_name,
+        data: uniqueTimes.map((t) => normalMap.get(t) ?? null),
+        borderColor: color,
+        backgroundColor: color,
+        pointRadius: 3,
+        tension: 0.2,
+        fill: false,
+        spanGaps: true,
+      },
+    ];
+
+    if (timeoutSet.size > 0) {
+      result.push({
+        label: `${server.server_name} (timeout)`,
+        data: uniqueTimes.map((t) => (timeoutSet.has(t) ? 0 : null)),
+        borderColor: 'transparent',
+        backgroundColor: '#EF5350',
+        pointRadius: 6,
+        pointStyle: 'crossRot',
+        showLine: false,
+      });
+    }
+
+    return result;
+  });
+
+  return { labels: uniqueTimes, datasets };
+});
+
+const ttftChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  scales: {
+    x: {
+      type: 'category' as const,
+      ticks: { maxTicksLimit: 10, callback: function (this: unknown, val: string | number) {
+        if (typeof val === 'number' && ttftChartData.value?.labels) {
+          const label = ttftChartData.value.labels[val];
+          if (label) {
+            const d = new Date(label);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          }
+        }
+        return val;
+      }},
+    },
+    y: { beginAtZero: true, title: { display: true, text: 'TTFT (ms)' } },
+  },
+  plugins: {
+    legend: { position: 'top' as const },
+    tooltip: {
+      callbacks: {
+        label: function (this: unknown, ctx: TooltipItem<'line'>) {
+          const label = ctx.dataset?.label || '';
+          if (label.includes('timeout')) return `${label}`;
+          return `${label}: ${ctx.parsed?.y}ms`;
+        },
+      },
+    },
+  },
+};
 </script>

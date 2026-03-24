@@ -8,6 +8,7 @@ export interface Group {
   api_key: string;
   failover_status_codes: number[];
   is_active: boolean;
+  ttft_timeout_ms: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +32,27 @@ interface PaginatedResponse {
   total: number;
   page: number;
   total_pages: number;
+}
+
+export interface TtftDataPoint {
+  created_at: string;
+  ttft_ms: number | null;
+  timed_out: boolean;
+}
+
+export interface ServerTtftStats {
+  server_id: string;
+  server_name: string;
+  avg_ttft_ms: number | null;
+  p50_ttft_ms: number | null;
+  p95_ttft_ms: number | null;
+  timeout_count: number;
+  total_count: number;
+  data_points: TtftDataPoint[];
+}
+
+export interface TtftStatsResponse {
+  servers: ServerTtftStats[];
 }
 
 export const useGroupsStore = defineStore('groups', () => {
@@ -65,7 +87,7 @@ export const useGroupsStore = defineStore('groups', () => {
     return data;
   }
 
-  async function updateGroup(id: string, input: { name?: string; failover_status_codes?: number[]; is_active?: boolean }) {
+  async function updateGroup(id: string, input: { name?: string; failover_status_codes?: number[]; is_active?: boolean; ttft_timeout_ms?: number | null }) {
     const { data } = await api.put<Group>(`/api/admin/groups/${id}`, input);
     return data;
   }
@@ -112,10 +134,18 @@ export const useGroupsStore = defineStore('groups', () => {
     await api.put(`/api/admin/groups/${groupId}/servers/reorder`, { server_ids: serverIds });
   }
 
+  async function fetchTtftStats(groupId: string) {
+    const { data } = await api.get<TtftStatsResponse>('/api/admin/ttft-stats', {
+      params: { group_id: groupId, period: '1h' },
+    });
+    return data;
+  }
+
   return {
     groups, total, totalPages, loading,
     fetchGroups, getGroup, createGroup, updateGroup, deleteGroup, regenerateKey,
     bulkActivate, bulkDeactivate, bulkDelete, bulkAssignServer,
     assignServer, updateAssignment, removeServer, reorderServers,
+    fetchTtftStats,
   };
 });

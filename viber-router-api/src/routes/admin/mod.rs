@@ -2,6 +2,7 @@ pub mod servers;
 pub mod groups;
 pub mod group_servers;
 pub mod logs;
+pub mod ttft;
 
 use axum::{
     Json, Router,
@@ -37,6 +38,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/servers", servers::router())
         .nest("/groups", groups::router())
         .nest("/logs", logs::router())
+        .nest("/ttft-stats", ttft::router())
         .layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::admin_auth::admin_auth,

@@ -47,5 +47,6 @@ pub struct GroupConfig {
     pub api_key: String,
     pub is_active: bool,
     pub failover_status_codes: Vec<u16>,
+    pub ttft_timeout_ms: Option<i32>,
     pub servers: Vec<GroupServerDetail>,
 }

@@ -181,11 +181,18 @@ async fn update_group(
         .transpose()
         .map_err(internal)?;
 
+    // For ttft_timeout_ms: None means "don't change", Some(None) means "set to NULL", Some(Some(v)) means "set to v"
+    let (update_ttft, ttft_val) = match input.ttft_timeout_ms {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
     let group = sqlx::query_as::<_, Group>(
         "UPDATE groups SET \
          name = COALESCE($1, name), \
          failover_status_codes = COALESCE($2, failover_status_codes), \
          is_active = COALESCE($3, is_active), \
+         ttft_timeout_ms = CASE WHEN $5 THEN $6 ELSE ttft_timeout_ms END, \
          updated_at = now() \
          WHERE id = $4 RETURNING *",
     )
@@ -193,6 +200,8 @@ async fn update_group(
     .bind(&codes_json)
     .bind(input.is_active)
     .bind(id)
+    .bind(update_ttft)
+    .bind(ttft_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

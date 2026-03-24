@@ -14,6 +14,7 @@ use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
 use crate::models::{GroupConfig, GroupServerDetail};
 use crate::routes::AppState;
 use crate::routes::key_parser::parse_api_key;
+use crate::ttft_buffer::TtftLogEntry;
 
 pub fn router() -> Router<AppState> {
     Router::new().fallback(proxy_handler)
@@ -63,6 +64,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         api_key: group.api_key.clone(),
         is_active: group.is_active,
         failover_status_codes: failover_codes,
+        ttft_timeout_ms: group.ttft_timeout_ms,
         servers,
     };
 
@@ -196,7 +198,7 @@ async fn proxy_handler(
     let mut last_server_name = String::new();
 
     // Failover waterfall with key resolution
-    for server in &config.servers {
+    for (server_idx, server) in config.servers.iter().enumerate() {
         // Key resolution: dynamic key > server default > skip
         let resolved_key = if let Some(dk) = parsed.dynamic_keys.get(&server.short_id) {
             dk.clone()
@@ -302,8 +304,11 @@ async fn proxy_handler(
                 &failover_chain, &request_model,
                 None, None, None,
             );
-        } else if failover_chain.len() > 1 {
-            // Success after failover — log the chain
+            return build_response(upstream_resp).await;
+        }
+
+        // Success (200) — log failover chain if applicable
+        if failover_chain.len() > 1 {
             emit_log_entry(
                 &state, &config, &parsed.group_key,
                 last_server_id, &last_server_name,
@@ -315,8 +320,89 @@ async fn proxy_handler(
             );
         }
 
-        // Success or non-failover error — return this response
-        return build_response(upstream_resp).await;
+        // Check if this is an SSE response
+        let is_sse = upstream_resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|ct| ct.contains("text/event-stream"));
+
+        if !is_sse {
+            // Non-SSE: no TTFT measurement, use existing path
+            return build_response(upstream_resp).await;
+        }
+
+        // SSE response — measure TTFT
+        let ttft_enabled = config.ttft_timeout_ms.is_some();
+        let total_servers = config.servers.len();
+        let is_last_server = server_idx == total_servers - 1;
+        let should_timeout = ttft_enabled && total_servers > 1 && !is_last_server;
+
+        // Build response headers before consuming the stream
+        let resp_status = StatusCode::from_u16(upstream_resp.status().as_u16())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let mut response_headers = HeaderMap::new();
+        for (name, value) in upstream_resp.headers().iter() {
+            if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
+            {
+                response_headers.insert(axum_name, axum_value);
+            }
+        }
+
+        let mut stream = upstream_resp.bytes_stream();
+
+        if should_timeout {
+            let timeout_ms = config.ttft_timeout_ms.unwrap() as u64;
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                stream.next(),
+            ).await {
+                Ok(Some(Ok(first_chunk))) => {
+                    // First chunk received within timeout
+                    let ttft_ms = server_start.elapsed().as_millis() as i32;
+                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, Some(ttft_ms), false, &request_path);
+
+                    let first = futures_util::stream::once(async move { Ok::<_, std::io::Error>(first_chunk) });
+                    let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
+                    let body = Body::from_stream(first.chain(rest));
+                    let mut resp = Response::builder().status(resp_status);
+                    *resp.headers_mut().unwrap() = response_headers;
+                    return resp.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                }
+                Ok(Some(Err(_))) | Ok(None) => {
+                    // Empty stream or stream error — treat as connection error, try next
+                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, false, &request_path);
+                    continue;
+                }
+                Err(_) => {
+                    // Timeout — record timed_out, drop stream, try next server
+                    drop(stream);
+                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, true, &request_path);
+                    continue;
+                }
+            }
+        } else {
+            // No timeout: measure TTFT but always wait
+            match stream.next().await {
+                Some(Ok(first_chunk)) => {
+                    let ttft_ms = server_start.elapsed().as_millis() as i32;
+                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, Some(ttft_ms), false, &request_path);
+
+                    let first = futures_util::stream::once(async move { Ok::<_, std::io::Error>(first_chunk) });
+                    let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
+                    let body = Body::from_stream(first.chain(rest));
+                    let mut resp = Response::builder().status(resp_status);
+                    *resp.headers_mut().unwrap() = response_headers;
+                    return resp.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                }
+                Some(Err(_)) | None => {
+                    // Empty stream or error — treat as connection error
+                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, false, &request_path);
+                    continue;
+                }
+            }
+        }
     }
 
     // All servers skipped — no key available for any server
@@ -403,6 +489,30 @@ fn emit_log_entry(
 
     if state.log_tx.try_send(entry).is_err() {
         tracing::warn!("Log buffer full, dropping proxy log entry");
+    }
+}
+
+fn emit_ttft_entry(
+    state: &AppState,
+    group_id: uuid::Uuid,
+    server_id: uuid::Uuid,
+    request_model: &Option<String>,
+    ttft_ms: Option<i32>,
+    timed_out: bool,
+    request_path: &str,
+) {
+    let entry = TtftLogEntry {
+        group_id,
+        server_id,
+        request_model: request_model.clone(),
+        ttft_ms,
+        timed_out,
+        request_path: request_path.to_string(),
+        created_at: Utc::now(),
+    };
+
+    if state.ttft_tx.try_send(entry).is_err() {
+        tracing::warn!("TTFT buffer full, dropping TTFT log entry");
     }
 }
 
