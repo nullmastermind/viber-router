@@ -235,7 +235,7 @@ const errorTypeOptions = [
 const columns = [
   { name: 'created_at', label: 'Time', field: 'created_at', align: 'left' as const },
   { name: 'status_code', label: 'Status', field: 'status_code', align: 'left' as const },
-  { name: 'error_type', label: 'Error Type', field: 'error_type', align: 'left' as const },
+  { name: 'error_type', label: 'Type', field: 'error_type', align: 'left' as const },
   { name: 'server_name', label: 'Server', field: (row: ProxyLog) => {
     if (row.failover_chain.length > 1) {
       return row.failover_chain.map(a => a.server_name).join(' → ');
