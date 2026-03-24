@@ -313,7 +313,7 @@ const hasActiveFilters = computed(() =>
 
 const pagination = ref({
   page: 1,
-  rowsPerPage: 100,
+  rowsPerPage: 10,
   rowsNumber: 0,
 });
 
@@ -400,7 +400,7 @@ function buildParams(page: number, rowsPerPage: number) {
   return params;
 }
 
-async function fetchLogs(page = 1, rowsPerPage = 100) {
+async function fetchLogs(page = 1, rowsPerPage = 10) {
   loading.value = true;
   error.value = false;
   try {
