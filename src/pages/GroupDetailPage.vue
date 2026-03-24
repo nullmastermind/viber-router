@@ -31,6 +31,28 @@
       <q-card flat bordered>
         <q-card-section>
           <div class="row items-center q-mb-sm">
+            <div class="text-subtitle1">Key Builder</div>
+            <q-space />
+            <q-toggle v-model="showAllKeyBuilderServers" label="Show all servers" dense />
+          </div>
+          <div v-for="entry in visibleKeyBuilderEntries" :key="entry.server_id" class="row items-center q-gutter-sm q-mb-sm">
+            <span class="text-body2" style="min-width: 160px">{{ entry.server_name }} (#{{ entry.short_id }})</span>
+            <q-input v-model="entry.key" :placeholder="entry.defaultKey || 'API Key'" outlined dense style="flex: 1" />
+          </div>
+          <div v-if="visibleKeyBuilderEntries.length === 0" class="text-grey q-mb-sm">No servers without predefined key</div>
+          <div v-if="builtKey" class="q-mt-sm">
+            <div class="text-caption q-mb-xs">Dynamic Key</div>
+            <div class="row items-center q-gutter-sm">
+              <code class="text-body2" style="word-break: break-all">{{ builtKey }}</code>
+              <q-btn flat dense icon="content_copy" @click="copyText(builtKey)" />
+            </div>
+          </div>
+        </q-card-section>
+      </q-card>
+
+      <q-card flat bordered>
+        <q-card-section>
+          <div class="row items-center q-mb-sm">
             <div class="text-subtitle1">Servers (priority order)</div>
             <q-space />
             <q-btn flat dense icon="add" label="Add Server" @click="showAddServer = true" />
@@ -45,7 +67,13 @@
                 </div>
               </q-item-section>
               <q-item-section>
-                <q-item-label>{{ s.server_name }}</q-item-label>
+                <q-item-label>
+                  {{ s.server_name }}
+                  <q-badge outline class="q-ml-sm">
+                    #{{ s.short_id }}
+                    <q-btn flat dense size="xs" icon="content_copy" class="q-ml-xs" @click.stop="copyShortId(s.short_id)" />
+                  </q-badge>
+                </q-item-label>
                 <q-item-label caption>{{ s.base_url }}</q-item-label>
               </q-item-section>
               <q-item-section side>
@@ -122,6 +150,22 @@ const showMappings = ref(false);
 const editingMapping = ref<GroupServerDetail | null>(null);
 const mappingEntries = ref<{ from: string; to: string }[]>([]);
 
+const keyBuilderEntries = ref<{ server_id: string; server_name: string; short_id: number; key: string; defaultKey: string }[]>([]);
+const showAllKeyBuilderServers = ref(false);
+const visibleKeyBuilderEntries = computed(() =>
+  showAllKeyBuilderServers.value
+    ? keyBuilderEntries.value
+    : keyBuilderEntries.value.filter((e) => !e.defaultKey)
+);
+const builtKey = computed(() => {
+  if (!group.value) return '';
+  const parts = [group.value.api_key];
+  for (const e of keyBuilderEntries.value) {
+    if (e.key) parts.push(`-rsv-${e.short_id}-${e.key}`);
+  }
+  return parts.length > 1 ? parts.join('') : '';
+});
+
 const allServers = ref<{ label: string; value: string }[]>([]);
 const availableServers = computed(() =>
   allServers.value.filter((s) => !servers.value.some((gs) => gs.server_id === s.value))
@@ -131,7 +175,7 @@ onMounted(async () => {
   await loadGroup();
   const sData = await serversStore.fetchServers({ limit: 100 });
   if (sData) {
-    allServers.value = sData.data.map((s) => ({ label: s.name, value: s.id }));
+    allServers.value = sData.data.map((s) => ({ label: `${s.name} (#${s.short_id})`, value: s.id }));
   }
 });
 
@@ -141,6 +185,13 @@ async function loadGroup() {
   group.value = data;
   servers.value = data.servers;
   failoverCodesStr.value = (data.failover_status_codes || []).join(', ');
+  keyBuilderEntries.value = data.servers.map((s) => ({
+    server_id: s.server_id,
+    server_name: s.server_name,
+    short_id: s.short_id,
+    key: '',
+    defaultKey: s.api_key || '',
+  }));
 }
 
 async function saveGroup() {
@@ -163,6 +214,18 @@ function copyKey() {
       $q.notify({ message: 'Copied', type: 'positive' })
     );
   }
+}
+
+function copyText(text: string) {
+  copyToClipboard(text).then(() =>
+    $q.notify({ message: 'Copied', type: 'positive' })
+  );
+}
+
+function copyShortId(shortId: number) {
+  copyToClipboard(String(shortId)).then(() =>
+    $q.notify({ message: 'Copied', type: 'positive' })
+  );
 }
 
 async function onRegenerate() {

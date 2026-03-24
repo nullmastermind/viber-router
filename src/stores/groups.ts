@@ -14,9 +14,10 @@ export interface Group {
 
 export interface GroupServerDetail {
   server_id: string;
+  short_id: number;
   server_name: string;
   base_url: string;
-  api_key: string;
+  api_key: string | null;
   priority: number;
   model_mappings: Record<string, string>;
 }

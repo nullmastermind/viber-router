@@ -124,7 +124,7 @@ onMounted(async () => {
   await reload();
   const sData = await serversStore.fetchServers({ limit: 100 });
   if (sData) {
-    serverOptions.value = sData.data.map((s) => ({ label: s.name, value: s.id }));
+    serverOptions.value = sData.data.map((s) => ({ label: `${s.name} (#${s.short_id})`, value: s.id }));
   }
 });
 

@@ -14,9 +14,10 @@ pub struct GroupServer {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct GroupServerDetail {
     pub server_id: Uuid,
+    pub short_id: i32,
     pub server_name: String,
     pub base_url: String,
-    pub api_key: String,
+    pub api_key: Option<String>,
     pub priority: i32,
     pub model_mappings: serde_json::Value,
 }

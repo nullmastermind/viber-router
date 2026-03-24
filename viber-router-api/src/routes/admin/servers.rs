@@ -111,20 +111,56 @@ async fn update_server(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateServer>,
 ) -> Result<Json<Server>, (StatusCode, Json<serde_json::Value>)> {
-    let server = sqlx::query_as::<_, Server>(
-        "UPDATE servers SET \
-         name = COALESCE($1, name), \
-         base_url = COALESCE($2, base_url), \
-         api_key = COALESCE($3, api_key), \
-         updated_at = now() \
-         WHERE id = $4 RETURNING *",
-    )
-    .bind(&input.name)
-    .bind(&input.base_url)
-    .bind(&input.api_key)
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
+    let server = match &input.api_key {
+        // None = don't change api_key, use COALESCE to keep current
+        None => {
+            sqlx::query_as::<_, Server>(
+                "UPDATE servers SET \
+                 name = COALESCE($1, name), \
+                 base_url = COALESCE($2, base_url), \
+                 updated_at = now() \
+                 WHERE id = $3 RETURNING *",
+            )
+            .bind(&input.name)
+            .bind(&input.base_url)
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+        }
+        // Some(None) = explicitly set api_key to NULL
+        Some(None) => {
+            sqlx::query_as::<_, Server>(
+                "UPDATE servers SET \
+                 name = COALESCE($1, name), \
+                 base_url = COALESCE($2, base_url), \
+                 api_key = NULL, \
+                 updated_at = now() \
+                 WHERE id = $3 RETURNING *",
+            )
+            .bind(&input.name)
+            .bind(&input.base_url)
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+        }
+        // Some(Some(v)) = set api_key to the provided value
+        Some(Some(v)) => {
+            sqlx::query_as::<_, Server>(
+                "UPDATE servers SET \
+                 name = COALESCE($1, name), \
+                 base_url = COALESCE($2, base_url), \
+                 api_key = $3, \
+                 updated_at = now() \
+                 WHERE id = $4 RETURNING *",
+            )
+            .bind(&input.name)
+            .bind(&input.base_url)
+            .bind(v)
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+        }
+    }
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?
     .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))))?;
 

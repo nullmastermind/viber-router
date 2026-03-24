@@ -4,9 +4,10 @@ import { api } from 'boot/axios';
 
 export interface Server {
   id: string;
+  short_id: number;
   name: string;
   base_url: string;
-  api_key: string;
+  api_key: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,12 +36,12 @@ export const useServersStore = defineStore('servers', () => {
     }
   }
 
-  async function createServer(input: { name: string; base_url: string; api_key: string }) {
+  async function createServer(input: { name: string; base_url: string; api_key?: string }) {
     const { data } = await api.post<Server>('/api/admin/servers', input);
     return data;
   }
 
-  async function updateServer(id: string, input: { name?: string; base_url?: string; api_key?: string }) {
+  async function updateServer(id: string, input: { name?: string; base_url?: string; api_key?: string | null }) {
     const { data } = await api.put<Server>(`/api/admin/servers/${id}`, input);
     return data;
   }
