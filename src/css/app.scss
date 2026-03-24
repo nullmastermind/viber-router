@@ -384,7 +384,13 @@ code, pre, .text-mono {
   }
 
   &.q-field--dense .q-field__control {
-    height: 36px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  // Hide the empty bottom slot (removes the extra line below the field)
+  .q-field__bottom {
+    display: none;
   }
 }
 

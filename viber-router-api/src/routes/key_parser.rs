@@ -101,4 +101,16 @@ mod tests {
         assert_eq!(result.group_key, input);
         assert!(result.dynamic_keys.is_empty());
     }
+
+    #[test]
+    fn test_real_dynamic_key() {
+        let input = "sk-vibervn-MSzAkXQV8uEiaWwqvZBcmUou-rsv-2-sk-1H1wxUZk9ID5cDxzLlae6QfjFmqPHu9BD9sGY7FErfrxCDn2H";
+        let result = parse_api_key(input);
+        assert_eq!(result.group_key, "sk-vibervn-MSzAkXQV8uEiaWwqvZBcmUou");
+        assert_eq!(result.dynamic_keys.len(), 1);
+        assert_eq!(
+            result.dynamic_keys[&2],
+            "sk-1H1wxUZk9ID5cDxzLlae6QfjFmqPHu9BD9sGY7FErfrxCDn2H"
+        );
+    }
 }

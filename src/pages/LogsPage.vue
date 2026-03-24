@@ -45,41 +45,83 @@
       </div>
       <div class="col-auto">
         <q-input
-          v-model="filters.from"
+          :model-value="fromDate"
           label="From"
-          outlined dense type="datetime-local"
-          style="min-width: 200px"
-          @update:model-value="onFilterChange"
+          outlined dense readonly
+          style="min-width: 180px; max-width: 180px"
+        >
+          <template #append>
+            <q-icon v-if="fromDate" name="cancel" class="cursor-pointer text-grey-5" @click="clearFrom" />
+            <q-icon name="event" class="cursor-pointer">
+              <q-popup-proxy ref="fromPopup" transition-show="scale" transition-hide="scale">
+                <q-date :model-value="fromDateModel" @update:model-value="onFromDatePick" />
+              </q-popup-proxy>
+            </q-icon>
+          </template>
+        </q-input>
+      </div>
+      <div v-if="fromDate" class="col-auto">
+        <q-input
+          v-model="fromTimeInput"
+          label="Time"
+          outlined dense
+          mask="##:##"
+          placeholder="00:00"
+          style="min-width: 80px; max-width: 80px"
+          @update:model-value="onFromTimeChange"
         />
       </div>
       <div class="col-auto">
         <q-input
-          v-model="filters.to"
+          :model-value="toDate"
           label="To"
-          outlined dense type="datetime-local"
-          style="min-width: 200px"
-          @update:model-value="onFilterChange"
+          outlined dense readonly
+          style="min-width: 180px; max-width: 180px"
+        >
+          <template #append>
+            <q-icon v-if="toDate" name="cancel" class="cursor-pointer text-grey-5" @click="clearTo" />
+            <q-icon name="event" class="cursor-pointer">
+              <q-popup-proxy ref="toPopup" transition-show="scale" transition-hide="scale">
+                <q-date :model-value="toDateModel" @update:model-value="onToDatePick" />
+              </q-popup-proxy>
+            </q-icon>
+          </template>
+        </q-input>
+      </div>
+      <div v-if="toDate" class="col-auto">
+        <q-input
+          v-model="toTimeInput"
+          label="Time"
+          outlined dense
+          mask="##:##"
+          placeholder="23:59"
+          style="min-width: 80px; max-width: 80px"
+          @update:model-value="onToTimeChange"
         />
       </div>
       <div class="col-auto">
         <q-input
           v-model="apiKeySearch"
           label="API Key"
-          outlined dense
+          outlined dense clearable
           style="min-width: 200px"
           @keyup.enter="onApiKeySearch"
+          @clear="onApiKeySearch"
         >
           <template #append>
             <q-icon name="search" class="cursor-pointer" @click="onApiKeySearch" />
           </template>
         </q-input>
       </div>
+      <div v-if="hasActiveFilters" class="col-auto self-center">
+        <q-btn flat dense no-caps color="grey" icon="clear_all" label="Clear all" @click="clearAllFilters" />
+      </div>
     </div>
 
     <q-banner v-if="error" class="bg-negative text-white q-mb-md">
       Failed to load logs
       <template #action>
-        <q-btn flat label="Retry" @click="() => fetchLogs()" />
+        <q-btn flat label="Retry" @click="() => fetchLogs(pagination.page, pagination.rowsPerPage)" />
       </template>
     </q-banner>
 
@@ -89,13 +131,20 @@
       row-key="id"
       :loading="loading"
       flat bordered
-      hide-pagination
+      v-model:pagination="pagination"
+      @request="onRequest"
     >
       <template #body="props">
         <q-tr :props="props" class="cursor-pointer" @click="props.expand = !props.expand">
           <q-td v-for="col in props.cols" :key="col.name" :props="props">
             <template v-if="col.name === 'status_code'">
-              <q-badge :color="statusColor(props.row.status_code)" :label="String(props.row.status_code)" />
+              <span v-if="props.row.failover_chain.length > 1" class="status-chain">
+                <template v-for="(attempt, i) in props.row.failover_chain" :key="i">
+                  <q-badge :color="statusColor(attempt.status)" :label="String(attempt.status)" />
+                  <q-icon v-if="Number(i) < props.row.failover_chain.length - 1" name="arrow_forward" size="xs" class="q-mx-xs text-grey" />
+                </template>
+              </span>
+              <q-badge v-else :color="statusColor(props.row.status_code)" :label="String(props.row.status_code)" />
             </template>
             <template v-else-if="col.name === 'error_type'">
               <q-badge
@@ -188,14 +237,12 @@
       </template>
     </q-table>
 
-    <div class="row justify-center q-mt-md" v-if="nextCursor">
-      <q-btn flat label="Load More" @click="loadMore" :loading="loading" />
-    </div>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue';
+import { ref, computed, onMounted, reactive } from 'vue';
+import type { QPopupProxy } from 'quasar';
 import { api } from 'boot/axios';
 
 interface FailoverAttempt {
@@ -229,14 +276,46 @@ interface ProxyLog {
 
 interface LogListResponse {
   data: ProxyLog[];
-  next_cursor: string | null;
+  total: number;
 }
 
 const logs = ref<ProxyLog[]>([]);
 const loading = ref(false);
 const error = ref(false);
-const nextCursor = ref<string | null>(null);
 const apiKeySearch = ref('');
+const fromPopup = ref<InstanceType<typeof QPopupProxy>>();
+const toPopup = ref<InstanceType<typeof QPopupProxy>>();
+
+const fromDateModel = computed(() =>
+  filters.from ? filters.from.slice(0, 10).replace(/-/g, '/') : null,
+);
+const toDateModel = computed(() =>
+  filters.to ? filters.to.slice(0, 10).replace(/-/g, '/') : null,
+);
+const fromDate = computed(() =>
+  filters.from ? filters.from.slice(0, 10) : '',
+);
+const fromTimeInput = ref('');
+const toDate = computed(() =>
+  filters.to ? filters.to.slice(0, 10) : '',
+);
+const toTimeInput = ref('');
+
+const hasActiveFilters = computed(() =>
+  filters.status_code !== null ||
+  filters.group_id !== null ||
+  filters.server_id !== null ||
+  filters.error_type !== null ||
+  filters.from !== null ||
+  filters.to !== null ||
+  apiKeySearch.value !== '',
+);
+
+const pagination = ref({
+  page: 1,
+  rowsPerPage: 100,
+  rowsNumber: 0,
+});
 
 const filters = reactive({
   status_code: null as number | null,
@@ -306,7 +385,7 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function buildParams(cursor?: string | null) {
+function buildParams(page: number, rowsPerPage: number) {
   const params: Record<string, string | number> = {};
   if (filters.status_code) params.status_code = filters.status_code;
   if (filters.group_id) params.group_id = filters.group_id;
@@ -315,24 +394,22 @@ function buildParams(cursor?: string | null) {
   if (filters.from) params.from = new Date(filters.from).toISOString();
   if (filters.to) params.to = new Date(filters.to).toISOString();
   if (apiKeySearch.value) params.api_key = apiKeySearch.value;
-  if (cursor) params.cursor = cursor;
-  params.page_size = 20;
+  params.page = page;
+  params.page_size = rowsPerPage;
   return params;
 }
 
-async function fetchLogs(cursor?: string | null) {
+async function fetchLogs(page = 1, rowsPerPage = 100) {
   loading.value = true;
   error.value = false;
   try {
     const { data } = await api.get<LogListResponse>('/api/admin/logs', {
-      params: buildParams(cursor),
+      params: buildParams(page, rowsPerPage),
     });
-    if (cursor) {
-      logs.value.push(...data.data);
-    } else {
-      logs.value = data.data;
-    }
-    nextCursor.value = data.next_cursor;
+    logs.value = data.data;
+    pagination.value.rowsNumber = data.total;
+    pagination.value.page = page;
+    pagination.value.rowsPerPage = rowsPerPage;
   } catch {
     error.value = true;
   } finally {
@@ -340,20 +417,71 @@ async function fetchLogs(cursor?: string | null) {
   }
 }
 
+function onRequest(props: { pagination: { page: number; rowsPerPage: number } }) {
+  fetchLogs(props.pagination.page, props.pagination.rowsPerPage);
+}
+
 function onFilterChange() {
-  nextCursor.value = null;
-  fetchLogs();
+  fetchLogs(1, pagination.value.rowsPerPage);
+}
+
+function onFromDatePick(val: string) {
+  const date = val.replace(/\//g, '-');
+  if (!fromTimeInput.value) fromTimeInput.value = '00:00';
+  filters.from = `${date}T${fromTimeInput.value}`;
+  fromPopup.value?.hide();
+  onFilterChange();
+}
+
+function onToDatePick(val: string) {
+  const date = val.replace(/\//g, '-');
+  if (!toTimeInput.value) toTimeInput.value = '23:59';
+  filters.to = `${date}T${toTimeInput.value}`;
+  toPopup.value?.hide();
+  onFilterChange();
+}
+
+function onFromTimeChange(val: string | number | null) {
+  if (typeof val === 'string' && val.length === 5 && filters.from) {
+    filters.from = `${fromDate.value}T${val}`;
+    onFilterChange();
+  }
+}
+
+function onToTimeChange(val: string | number | null) {
+  if (typeof val === 'string' && val.length === 5 && filters.to) {
+    filters.to = `${toDate.value}T${val}`;
+    onFilterChange();
+  }
+}
+
+function clearFrom() {
+  filters.from = null;
+  fromTimeInput.value = '';
+  onFilterChange();
+}
+
+function clearTo() {
+  filters.to = null;
+  toTimeInput.value = '';
+  onFilterChange();
+}
+
+function clearAllFilters() {
+  filters.status_code = null;
+  filters.group_id = null;
+  filters.server_id = null;
+  filters.error_type = null;
+  filters.from = null;
+  filters.to = null;
+  fromTimeInput.value = '';
+  toTimeInput.value = '';
+  apiKeySearch.value = '';
+  onFilterChange();
 }
 
 function onApiKeySearch() {
-  nextCursor.value = null;
-  fetchLogs();
-}
-
-function loadMore() {
-  if (nextCursor.value) {
-    fetchLogs(nextCursor.value);
-  }
+  fetchLogs(1, pagination.value.rowsPerPage);
 }
 
 function shellEscape(s: string): string {

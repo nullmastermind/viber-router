@@ -14,7 +14,7 @@ pub struct LogQueryParams {
     pub to: Option<DateTime<Utc>>,
     pub api_key: Option<String>,
     pub error_type: Option<String>,
-    pub cursor: Option<DateTime<Utc>>,
+    pub page: Option<i64>,
     pub page_size: Option<i64>,
 }
 
@@ -41,7 +41,7 @@ pub struct ProxyLogRow {
 #[derive(Debug, Serialize)]
 pub struct LogListResponse {
     pub data: Vec<ProxyLogRow>,
-    pub next_cursor: Option<DateTime<Utc>>,
+    pub total: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,25 +66,22 @@ async fn list_logs(
     State(state): State<AppState>,
     Query(params): Query<LogQueryParams>,
 ) -> Result<Json<LogListResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
+    let page_size = params.page_size.unwrap_or(100).clamp(1, 100);
+    let page = params.page.unwrap_or(1).clamp(1, 100);
+    let offset = (page - 1) * page_size;
 
-    // Build dynamic query
-    let mut sql = String::from(
-        "SELECT id, created_at, group_id, group_api_key, server_id, server_name, \
-         request_path, request_method, status_code, error_type, latency_ms, \
-         failover_chain, request_model, request_body, request_headers, upstream_url \
-         FROM proxy_logs WHERE 1=1",
-    );
-    let mut param_idx = 0u32;
-    // We'll use a QueryBuilder approach with raw SQL + positional params
-    // Since sqlx doesn't have a great dynamic query builder, we'll build SQL strings
-    // and bind params via a macro-like approach using query_as with bind chains
-
+    // Build shared WHERE clause
     let mut conditions = Vec::new();
+    let mut param_idx = 0u32;
 
     if params.status_code.is_some() {
         param_idx += 1;
-        conditions.push(format!("status_code = ${param_idx}"));
+        conditions.push(format!(
+            "(status_code = ${p} OR EXISTS (\
+             SELECT 1 FROM jsonb_array_elements(failover_chain) elem \
+             WHERE (elem->>'status')::smallint = ${p}))",
+            p = param_idx
+        ));
     }
     if params.group_id.is_some() {
         param_idx += 1;
@@ -104,69 +101,81 @@ async fn list_logs(
     }
     if params.api_key.is_some() {
         param_idx += 1;
-        conditions.push(format!("group_api_key = ${param_idx}"));
+        conditions.push(format!(
+            "(group_api_key = ${p} OR EXISTS (\
+             SELECT 1 FROM jsonb_array_elements(failover_chain) elem \
+             WHERE elem->>'resolved_key' = ${p}))",
+            p = param_idx
+        ));
     }
     if params.error_type.is_some() {
         param_idx += 1;
         conditions.push(format!("error_type = ${param_idx}"));
     }
-    if params.cursor.is_some() {
-        param_idx += 1;
-        conditions.push(format!("created_at < ${param_idx}"));
-    }
 
-    for cond in &conditions {
-        sql.push_str(" AND ");
-        sql.push_str(cond);
-    }
-
-    param_idx += 1;
-    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT ${param_idx}"));
-
-    let mut query = sqlx::query_as::<_, ProxyLogRow>(&sql);
-
-    if let Some(v) = params.status_code {
-        query = query.bind(v);
-    }
-    if let Some(v) = params.group_id {
-        query = query.bind(v);
-    }
-    if let Some(v) = params.server_id {
-        query = query.bind(v);
-    }
-    if let Some(v) = params.from {
-        query = query.bind(v);
-    }
-    if let Some(v) = params.to {
-        query = query.bind(v);
-    }
-    if let Some(ref v) = params.api_key {
-        query = query.bind(v);
-    }
-    if let Some(ref v) = params.error_type {
-        query = query.bind(v);
-    }
-    if let Some(v) = params.cursor {
-        query = query.bind(v);
-    }
-    query = query.bind(page_size + 1); // fetch one extra to determine next_cursor
-
-    let rows = query
-        .fetch_all(&state.db)
-        .await
-        .map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
-        })?;
-
-    let has_more = rows.len() as i64 > page_size;
-    let data: Vec<ProxyLogRow> = rows.into_iter().take(page_size as usize).collect();
-    let next_cursor = if has_more {
-        data.last().map(|r| r.created_at)
+    let where_clause = if conditions.is_empty() {
+        String::new()
     } else {
-        None
+        format!(" AND {}", conditions.join(" AND "))
     };
 
-    Ok(Json(LogListResponse { data, next_cursor }))
+    // Data query with OFFSET pagination
+    let data_sql = format!(
+        "SELECT id, created_at, group_id, group_api_key, server_id, server_name, \
+         request_path, request_method, status_code, error_type, latency_ms, \
+         failover_chain, request_model, request_body, request_headers, upstream_url \
+         FROM proxy_logs WHERE 1=1{where_clause} \
+         ORDER BY created_at DESC LIMIT ${} OFFSET ${}",
+        param_idx + 1,
+        param_idx + 2
+    );
+
+    // Count query with same filters
+    let count_sql = format!("SELECT COUNT(*) FROM proxy_logs WHERE 1=1{where_clause}");
+
+    // Bind helper macro — bind filter params to a query
+    macro_rules! bind_filters {
+        ($query:expr) => {{
+            let mut q = $query;
+            if let Some(v) = params.status_code {
+                q = q.bind(v);
+            }
+            if let Some(v) = params.group_id {
+                q = q.bind(v);
+            }
+            if let Some(v) = params.server_id {
+                q = q.bind(v);
+            }
+            if let Some(v) = params.from {
+                q = q.bind(v);
+            }
+            if let Some(v) = params.to {
+                q = q.bind(v);
+            }
+            if let Some(ref v) = params.api_key {
+                q = q.bind(v);
+            }
+            if let Some(ref v) = params.error_type {
+                q = q.bind(v);
+            }
+            q
+        }};
+    }
+
+    let data_query = bind_filters!(sqlx::query_as::<_, ProxyLogRow>(&data_sql));
+    let data_query = data_query.bind(page_size).bind(offset);
+
+    let count_query = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql));
+
+    let (rows, total) = tokio::try_join!(
+        data_query.fetch_all(&state.db),
+        count_query.fetch_one(&state.db),
+    )
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
+    })?;
+
+    Ok(Json(LogListResponse { data: rows, total }))
 }
 
 async fn log_stats(

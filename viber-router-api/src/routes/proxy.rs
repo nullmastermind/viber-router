@@ -183,7 +183,6 @@ async fn proxy_handler(
     let mut failover_chain: Vec<FailoverAttempt> = Vec::new();
     let mut last_server_id = uuid::Uuid::nil();
     let mut last_server_name = String::new();
-    let mut last_status: u16 = 0;
 
     // Failover waterfall with key resolution
     for server in &config.servers {
@@ -247,13 +246,13 @@ async fn proxy_handler(
                     server_name: server.server_name.clone(),
                     status: 0,
                     latency_ms: server_start.elapsed().as_millis() as i32,
+                    resolved_key: Some(resolved_key.clone()),
                     upstream_url: Some(attempt_url),
                     request_headers: Some(attempt_headers),
                     request_body: attempt_body,
                 });
                 last_server_id = server.server_id;
                 last_server_name = server.server_name.clone();
-                last_status = 0;
                 continue;
             }
         };
@@ -266,13 +265,13 @@ async fn proxy_handler(
             server_name: server.server_name.clone(),
             status,
             latency_ms: server_latency,
+            resolved_key: Some(resolved_key.clone()),
             upstream_url: Some(attempt_url),
             request_headers: Some(attempt_headers),
             request_body: attempt_body,
         });
         last_server_id = server.server_id;
         last_server_name = server.server_name.clone();
-        last_status = status;
 
         // Check if this is a failover status code
         if config.failover_status_codes.contains(&status) {
@@ -317,12 +316,19 @@ async fn proxy_handler(
     }
 
     // All servers with keys exhausted (failover codes or connection errors)
-    let error_type = if last_status == 0 {
+    let all_connection_errors = failover_chain.iter().all(|a| a.status == 0);
+    let error_type = if all_connection_errors {
         "connection_error"
     } else {
         "all_servers_exhausted"
     };
-    let final_status: i16 = if last_status == 0 { 429 } else { last_status as i16 };
+    // Use the last non-zero status from the chain, or 429 if all were connection errors
+    let final_status: i16 = failover_chain
+        .iter()
+        .rev()
+        .find(|a| a.status != 0)
+        .map(|a| a.status as i16)
+        .unwrap_or(429);
 
     emit_log_entry(
         &state, &config, &parsed.group_key,
