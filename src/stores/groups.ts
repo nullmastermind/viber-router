@@ -136,10 +136,15 @@ export const useGroupsStore = defineStore('groups', () => {
     await api.put(`/api/admin/groups/${groupId}/servers/reorder`, { server_ids: serverIds });
   }
 
-  async function fetchTtftStats(groupId: string) {
-    const { data } = await api.get<TtftStatsResponse>('/api/admin/ttft-stats', {
-      params: { group_id: groupId, period: '1h' },
-    });
+  async function fetchTtftStats(groupId: string, range?: { start: string; end: string }) {
+    const params: Record<string, string> = { group_id: groupId };
+    if (range) {
+      params.start = range.start;
+      params.end = range.end;
+    } else {
+      params.period = '1h';
+    }
+    const { data } = await api.get<TtftStatsResponse>('/api/admin/ttft-stats', { params });
     return data;
   }
 

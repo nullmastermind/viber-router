@@ -23,6 +23,9 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 pub struct TtftStatsParams {
     pub group_id: Option<Uuid>,
     pub period: Option<String>,
+    /// Absolute time range (ISO 8601). When both are provided, `period` is ignored.
+    pub start: Option<chrono::DateTime<chrono::Utc>>,
+    pub end: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,36 +92,72 @@ async fn get_ttft_stats(
     let group_id = params.group_id
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "group_id is required"))?;
 
-    let interval = resolve_interval(params.period.as_deref().unwrap_or("1h"));
+    // Absolute range takes priority; fall back to relative period
+    let (agg_rows, all_points) = if let (Some(start), Some(end)) = (params.start, params.end) {
+        let agg = sqlx::query_as::<_, AggRow>(
+            "SELECT t.server_id, s.name as server_name, \
+             AVG(t.ttft_ms)::float8 as avg_ttft_ms, \
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p50_ttft_ms, \
+             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p95_ttft_ms, \
+             COUNT(*) FILTER (WHERE t.timed_out) as timeout_count, \
+             COUNT(*) as total_count \
+             FROM ttft_logs t JOIN servers s ON s.id = t.server_id \
+             WHERE t.group_id = $1 AND t.created_at >= $2 AND t.created_at < $3 \
+             GROUP BY t.server_id, s.name \
+             ORDER BY s.name",
+        )
+        .bind(group_id)
+        .bind(start)
+        .bind(end)
+        .fetch_all(&state.db)
+        .await
+        .map_err(internal)?;
 
-    // Single query for aggregated stats
-    let agg_rows = sqlx::query_as::<_, AggRow>(&format!(
-        "SELECT t.server_id, s.name as server_name, \
-         AVG(t.ttft_ms)::float8 as avg_ttft_ms, \
-         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p50_ttft_ms, \
-         PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p95_ttft_ms, \
-         COUNT(*) FILTER (WHERE t.timed_out) as timeout_count, \
-         COUNT(*) as total_count \
-         FROM ttft_logs t JOIN servers s ON s.id = t.server_id \
-         WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}' \
-         GROUP BY t.server_id, s.name \
-         ORDER BY s.name"
-    ))
-    .bind(group_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(internal)?;
+        let pts = sqlx::query_as::<_, TtftDataPoint>(
+            "SELECT t.server_id, t.created_at, t.ttft_ms, t.timed_out FROM ttft_logs t \
+             WHERE t.group_id = $1 AND t.created_at >= $2 AND t.created_at < $3 \
+             ORDER BY t.created_at",
+        )
+        .bind(group_id)
+        .bind(start)
+        .bind(end)
+        .fetch_all(&state.db)
+        .await
+        .map_err(internal)?;
 
-    // Single query for all data points (no N+1)
-    let all_points = sqlx::query_as::<_, TtftDataPoint>(&format!(
-        "SELECT t.server_id, t.created_at, t.ttft_ms, t.timed_out FROM ttft_logs t \
-         WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}' \
-         ORDER BY t.created_at"
-    ))
-    .bind(group_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(internal)?;
+        (agg, pts)
+    } else {
+        let interval = resolve_interval(params.period.as_deref().unwrap_or("1h"));
+
+        let agg = sqlx::query_as::<_, AggRow>(&format!(
+            "SELECT t.server_id, s.name as server_name, \
+             AVG(t.ttft_ms)::float8 as avg_ttft_ms, \
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p50_ttft_ms, \
+             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.ttft_ms)::float8 as p95_ttft_ms, \
+             COUNT(*) FILTER (WHERE t.timed_out) as timeout_count, \
+             COUNT(*) as total_count \
+             FROM ttft_logs t JOIN servers s ON s.id = t.server_id \
+             WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}' \
+             GROUP BY t.server_id, s.name \
+             ORDER BY s.name"
+        ))
+        .bind(group_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(internal)?;
+
+        let pts = sqlx::query_as::<_, TtftDataPoint>(&format!(
+            "SELECT t.server_id, t.created_at, t.ttft_ms, t.timed_out FROM ttft_logs t \
+             WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}' \
+             ORDER BY t.created_at"
+        ))
+        .bind(group_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(internal)?;
+
+        (agg, pts)
+    };
 
     // Group data points by server_id
     let mut points_by_server: std::collections::HashMap<Uuid, Vec<TtftDataPointOut>> =
