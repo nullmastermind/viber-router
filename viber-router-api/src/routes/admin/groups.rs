@@ -187,12 +187,24 @@ async fn update_group(
         None => (false, None),
     };
 
+    // Same pattern for count_tokens_server_id
+    let (update_ct_server, ct_server_val) = match input.count_tokens_server_id {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
+    // For count_tokens_model_mappings: None means "don't change", Some(v) means "set to v"
+    let update_ct_mappings = input.count_tokens_model_mappings.is_some();
+    let ct_mappings_val = input.count_tokens_model_mappings.unwrap_or_default();
+
     let group = sqlx::query_as::<_, Group>(
         "UPDATE groups SET \
          name = COALESCE($1, name), \
          failover_status_codes = COALESCE($2, failover_status_codes), \
          is_active = COALESCE($3, is_active), \
          ttft_timeout_ms = CASE WHEN $5 THEN $6 ELSE ttft_timeout_ms END, \
+         count_tokens_server_id = CASE WHEN $7 THEN $8 ELSE count_tokens_server_id END, \
+         count_tokens_model_mappings = CASE WHEN $9 THEN $10 ELSE count_tokens_model_mappings END, \
          updated_at = now() \
          WHERE id = $4 RETURNING *",
     )
@@ -202,6 +214,10 @@ async fn update_group(
     .bind(id)
     .bind(update_ttft)
     .bind(ttft_val)
+    .bind(update_ct_server)
+    .bind(ct_server_val)
+    .bind(update_ct_mappings)
+    .bind(&ct_mappings_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

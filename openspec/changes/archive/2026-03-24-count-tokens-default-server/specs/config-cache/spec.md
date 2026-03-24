@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Cache group config in Redis on lookup
 The system SHALL cache the full group configuration (group details, server list with priorities and model mappings, and optional count-tokens server detail) in Redis keyed by API key after the first database lookup.

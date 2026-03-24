@@ -10,6 +10,8 @@ pub struct Group {
     pub failover_status_codes: serde_json::Value,
     pub is_active: bool,
     pub ttft_timeout_ms: Option<i32>,
+    pub count_tokens_server_id: Option<Uuid>,
+    pub count_tokens_model_mappings: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -22,6 +24,8 @@ pub struct GroupListItem {
     pub failover_status_codes: serde_json::Value,
     pub is_active: bool,
     pub ttft_timeout_ms: Option<i32>,
+    pub count_tokens_server_id: Option<Uuid>,
+    pub count_tokens_model_mappings: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub servers_count: i64,
@@ -39,6 +43,8 @@ pub struct UpdateGroup {
     pub failover_status_codes: Option<Vec<u16>>,
     pub is_active: Option<bool>,
     pub ttft_timeout_ms: Option<Option<i32>>,
+    pub count_tokens_server_id: Option<Option<Uuid>>,
+    pub count_tokens_model_mappings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

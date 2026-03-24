@@ -31,7 +31,10 @@ pub async fn invalidate_groups_by_server(redis: &Pool, db: &PgPool, server_id: U
     let api_keys: Vec<(String,)> = sqlx::query_as(
         "SELECT g.api_key FROM groups g \
          JOIN group_servers gs ON g.id = gs.group_id \
-         WHERE gs.server_id = $1",
+         WHERE gs.server_id = $1 \
+         UNION \
+         SELECT g.api_key FROM groups g \
+         WHERE g.count_tokens_server_id = $1",
     )
     .bind(server_id)
     .fetch_all(db)

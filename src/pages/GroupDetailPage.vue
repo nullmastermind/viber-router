@@ -20,6 +20,34 @@
 
       <q-card flat bordered>
         <q-card-section>
+          <div class="text-subtitle1 q-mb-sm">Count Tokens Default Server</div>
+          <q-select
+            v-model="group.count_tokens_server_id"
+            :options="allServers"
+            label="Default server for /v1/messages/count_tokens"
+            outlined
+            dense
+            emit-value
+            map-options
+            clearable
+            class="q-mb-sm"
+            @update:model-value="saveGroup"
+          />
+          <div class="text-subtitle2 q-mb-xs q-mt-md">Count Tokens Model Mappings</div>
+          <div v-for="(entry, idx) in ctMappingEntries" :key="idx" class="row q-gutter-sm q-mb-sm">
+            <q-input v-model="entry.from" label="From model" outlined dense style="flex:1" />
+            <q-input v-model="entry.to" label="To model" outlined dense style="flex:1" />
+            <q-btn flat dense icon="close" @click="ctMappingEntries.splice(idx, 1)" />
+          </div>
+          <div class="row q-gutter-sm">
+            <q-btn flat dense icon="add" label="Add mapping" @click="ctMappingEntries.push({ from: '', to: '' })" />
+            <q-btn color="primary" label="Save Mappings" dense @click="saveCtMappings" />
+          </div>
+        </q-card-section>
+      </q-card>
+
+      <q-card flat bordered>
+        <q-card-section>
           <div class="text-subtitle1 q-mb-sm">API Key</div>
           <div class="row items-center q-gutter-sm">
             <code class="text-body1">{{ group.api_key }}</code>
@@ -261,6 +289,7 @@ const ttftStats = ref<TtftStatsResponse | null>(null);
 const ttftLoading = ref(false);
 const ttftError = ref('');
 let ttftRefreshTimer: ReturnType<typeof setInterval> | null = null;
+const ctMappingEntries = ref<{ from: string; to: string }[]>([]);
 const visibleKeyBuilderEntries = computed(() =>
   showAllKeyBuilderServers.value
     ? keyBuilderEntries.value
@@ -304,6 +333,8 @@ async function loadGroup() {
   servers.value = data.servers;
   failoverCodesStr.value = (data.failover_status_codes || []).join(', ');
   ttftTimeoutStr.value = data.ttft_timeout_ms != null ? String(data.ttft_timeout_ms) : '';
+  const ctm = data.count_tokens_model_mappings || {};
+  ctMappingEntries.value = Object.entries(ctm).map(([from, to]) => ({ from, to }));
   keyBuilderEntries.value = data.servers.map((s) => ({
     server_id: s.server_id,
     server_name: s.server_name,
@@ -326,8 +357,22 @@ async function saveGroup() {
     failover_status_codes: codes,
     is_active: group.value.is_active,
     ttft_timeout_ms: Number.isNaN(ttft_timeout_ms as number) ? null : ttft_timeout_ms,
+    count_tokens_server_id: group.value.count_tokens_server_id,
   });
   $q.notify({ type: 'positive', message: 'Saved' });
+}
+
+async function saveCtMappings() {
+  if (!group.value) return;
+  const mappings: Record<string, string> = {};
+  for (const e of ctMappingEntries.value) {
+    if (e.from && e.to) mappings[e.from] = e.to;
+  }
+  await groupsStore.updateGroup(group.value.id, {
+    count_tokens_model_mappings: mappings,
+  });
+  group.value.count_tokens_model_mappings = mappings;
+  $q.notify({ type: 'positive', message: 'Count tokens mappings saved' });
 }
 
 function copyKey() {

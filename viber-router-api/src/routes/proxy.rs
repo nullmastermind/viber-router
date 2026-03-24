@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::cache;
 use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
-use crate::models::{GroupConfig, GroupServerDetail};
+use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail};
 use crate::routes::AppState;
 use crate::routes::key_parser::parse_api_key;
 use crate::ttft_buffer::TtftLogEntry;
@@ -59,6 +59,28 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     let failover_codes: Vec<u16> = serde_json::from_value(group.failover_status_codes.clone())
         .unwrap_or_else(|_| vec![429, 500, 502, 503]);
 
+    // Resolve count-tokens default server if configured
+    let count_tokens_server = if let Some(ct_server_id) = group.count_tokens_server_id {
+        sqlx::query_as::<_, (uuid::Uuid, i32, String, String, Option<String>)>(
+            "SELECT id, short_id, name, base_url, api_key FROM servers WHERE id = $1",
+        )
+        .bind(ct_server_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|(server_id, short_id, server_name, base_url, api_key)| CountTokensServer {
+            server_id,
+            short_id,
+            server_name,
+            base_url,
+            api_key,
+            model_mappings: group.count_tokens_model_mappings.clone(),
+        })
+    } else {
+        None
+    };
+
     let config = GroupConfig {
         group_id: group.id,
         api_key: group.api_key.clone(),
@@ -66,6 +88,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         failover_status_codes: failover_codes,
         ttft_timeout_ms: group.ttft_timeout_ms,
         servers,
+        count_tokens_server,
     };
 
     // Cache it for next time
@@ -197,8 +220,131 @@ async fn proxy_handler(
     let mut last_server_id = uuid::Uuid::nil();
     let mut last_server_name = String::new();
 
+    // Count-tokens default server: try before the failover waterfall
+    let is_count_tokens = request_path == "/v1/messages/count_tokens";
+    let mut ct_default_attempted = false;
+
+    if is_count_tokens
+        && let Some(ref ct_server) = config.count_tokens_server
+    {
+        // Key resolution for default server: dynamic key > server default > skip
+        let ct_resolved_key = if let Some(dk) = parsed.dynamic_keys.get(&ct_server.short_id) {
+            Some(dk.clone())
+        } else {
+            ct_server.api_key.clone()
+        };
+
+        if let Some(resolved_key) = ct_resolved_key {
+            ct_default_attempted = true;
+            any_server_attempted = true;
+            let transformed_body = transform_model(&body_bytes, &ct_server.model_mappings);
+
+            let path = original_uri.path();
+            let upstream_url = if let Some(query) = original_uri.query() {
+                format!("{}{path}?{query}", ct_server.base_url.trim_end_matches('/'))
+            } else {
+                format!("{}{path}", ct_server.base_url.trim_end_matches('/'))
+            };
+
+            let mut upstream_req = client.request(method.clone(), &upstream_url);
+
+            let mut server_log_headers = log_headers.clone();
+            server_log_headers.insert("x-api-key".to_string(), Value::String(resolved_key.clone()));
+            server_log_headers.insert("authorization".to_string(), Value::String(format!("Bearer {}", resolved_key)));
+
+            for (name, value) in headers.iter() {
+                if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                    continue;
+                }
+                if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                    && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+                {
+                    upstream_req = upstream_req.header(reqwest_name, reqwest_value);
+                }
+            }
+            upstream_req = upstream_req.header("x-api-key", &resolved_key);
+            upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
+
+            let attempt_body: Option<serde_json::Value> = serde_json::from_slice(&transformed_body).ok();
+            let attempt_headers = Value::Object(server_log_headers);
+            let attempt_url = upstream_url.clone();
+
+            upstream_req = upstream_req.body(transformed_body);
+
+            let server_start = std::time::Instant::now();
+            match upstream_req.send().await {
+                Ok(resp) => {
+                    let server_latency = server_start.elapsed().as_millis() as i32;
+                    let status = resp.status().as_u16();
+
+                    failover_chain.push(FailoverAttempt {
+                        server_id: ct_server.server_id,
+                        server_name: ct_server.server_name.clone(),
+                        status,
+                        latency_ms: server_latency,
+                        resolved_key: Some(resolved_key.clone()),
+                        upstream_url: Some(attempt_url),
+                        request_headers: Some(attempt_headers),
+                        request_body: attempt_body,
+                    });
+                    last_server_id = ct_server.server_id;
+                    last_server_name = ct_server.server_name.clone();
+
+                    if status == 200 {
+                        if failover_chain.len() > 1 {
+                            emit_log_entry(
+                                &state, &config, &parsed.group_key,
+                                last_server_id, &last_server_name,
+                                &request_path, &request_method,
+                                status as i16, "failover_success",
+                                loop_start.elapsed().as_millis() as i32,
+                                &failover_chain, &request_model,
+                                None, None, None,
+                            );
+                        }
+                        return build_response(resp).await;
+                    } else if !config.failover_status_codes.contains(&status) {
+                        emit_log_entry(
+                            &state, &config, &parsed.group_key,
+                            last_server_id, &last_server_name,
+                            &request_path, &request_method,
+                            status as i16, "upstream_error",
+                            loop_start.elapsed().as_millis() as i32,
+                            &failover_chain, &request_model,
+                            None, None, None,
+                        );
+                        return build_response(resp).await;
+                    }
+                    // Failover status code — fall through to waterfall
+                }
+                Err(_) => {
+                    failover_chain.push(FailoverAttempt {
+                        server_id: ct_server.server_id,
+                        server_name: ct_server.server_name.clone(),
+                        status: 0,
+                        latency_ms: server_start.elapsed().as_millis() as i32,
+                        resolved_key: Some(resolved_key.clone()),
+                        upstream_url: Some(attempt_url),
+                        request_headers: Some(attempt_headers),
+                        request_body: attempt_body,
+                    });
+                    last_server_id = ct_server.server_id;
+                    last_server_name = ct_server.server_name.clone();
+                }
+            }
+        }
+    }
+
     // Failover waterfall with key resolution
     for (server_idx, server) in config.servers.iter().enumerate() {
+        // Skip the count-tokens default server if already attempted
+        if ct_default_attempted
+            && let Some(ref ct) = config.count_tokens_server
+            && server.server_id == ct.server_id
+        {
+            continue;
+        }
+
         // Key resolution: dynamic key > server default > skip
         let resolved_key = if let Some(dk) = parsed.dynamic_keys.get(&server.short_id) {
             dk.clone()

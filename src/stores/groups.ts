@@ -9,6 +9,8 @@ export interface Group {
   failover_status_codes: number[];
   is_active: boolean;
   ttft_timeout_ms: number | null;
+  count_tokens_server_id: string | null;
+  count_tokens_model_mappings: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
@@ -87,7 +89,7 @@ export const useGroupsStore = defineStore('groups', () => {
     return data;
   }
 
-  async function updateGroup(id: string, input: { name?: string; failover_status_codes?: number[]; is_active?: boolean; ttft_timeout_ms?: number | null }) {
+  async function updateGroup(id: string, input: { name?: string; failover_status_codes?: number[]; is_active?: boolean; ttft_timeout_ms?: number | null; count_tokens_server_id?: string | null; count_tokens_model_mappings?: Record<string, string> }) {
     const { data } = await api.put<Group>(`/api/admin/groups/${id}`, input);
     return data;
   }
