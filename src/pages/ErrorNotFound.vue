@@ -1,18 +1,14 @@
 <template>
-  <div class="fullscreen bg-blue text-white text-center q-pa-md flex flex-center">
+  <div class="fullscreen text-center q-pa-md flex flex-center" style="background-color: var(--vr-bg-page)">
     <div>
-      <div style="font-size: 30vh">404</div>
-
-      <div class="text-h2" style="opacity: 0.4">Oops. Nothing here...</div>
-
+      <div style="font-size: 20vh; font-weight: 700; color: var(--vr-border)">404</div>
+      <div class="text-h5" style="color: var(--vr-text-secondary)">Page not found</div>
       <q-btn
-        class="q-mt-xl"
-        color="white"
-        text-color="blue"
+        class="q-mt-lg"
+        color="primary"
         unelevated
         to="/"
         label="Go Home"
-        no-caps
       />
     </div>
   </div>

@@ -1,25 +1,29 @@
-// Quasar SCSS (& Sass) Variables
-// --------------------------------------------------
-// To customize the look and feel of this app, you can override
-// the Sass/SCSS variables found in Quasar's source Sass/SCSS files.
+// Viber Router — Vercel-inspired enterprise theme
 
-// Check documentation for full list of Quasar variables
+$primary:   #0070F3;
+$secondary: #6B7280;
+$accent:    #0A0A0A;
 
-// Your own variables (that are declared here) and Quasar's own
-// ones will be available out of the box in your .vue/.scss/.sass files
+$dark:      #18181B;
+$dark-page: #09090B;
 
-// It's highly recommended to change the default colors
-// to match your app's branding.
-// Tip: Use the "Theme Builder" on Quasar's documentation website.
+$positive:  #17C964;
+$negative:  #F31260;
+$info:      #006FEE;
+$warning:   #F5A524;
 
-$primary: #1976d2;
-$secondary: #26a69a;
-$accent: #9c27b0;
+$separator-color: #E5E7EB;
 
-$dark: #1d1d1d;
-$dark-page: #121212;
+$button-border-radius: 6px;
+$button-font-size: 13px;
+$button-font-weight: 500;
+$button-padding: 5px 14px;
+$button-dense-padding: 4px 8px;
 
-$positive: #21ba45;
-$negative: #c10015;
-$info: #31ccec;
-$warning: #f2c037;
+$input-font-size: 14px;
+
+$table-border-color: #E5E7EB;
+
+$toolbar-min-height: 48px;
+$toolbar-title-font-size: 15px;
+$toolbar-title-font-weight: 600;

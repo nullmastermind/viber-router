@@ -1,8 +1,9 @@
 <template>
-  <div class="flex flex-center" style="min-height: 100vh">
-    <q-card style="width: 400px">
+  <div class="login-page flex flex-center">
+    <q-card bordered style="width: 400px">
       <q-card-section>
-        <div class="text-h5 text-center">Viber Router Admin</div>
+        <div class="text-h5 text-center">Viber Router</div>
+        <div class="text-center login-subtitle">Admin Dashboard</div>
       </q-card-section>
       <q-card-section>
         <q-input
@@ -12,7 +13,7 @@
           outlined
           @keyup.enter="login"
         />
-        <div v-if="error" class="text-negative q-mt-sm">{{ error }}</div>
+        <div v-if="error" class="text-negative q-mt-sm" style="font-size: 13px">{{ error }}</div>
       </q-card-section>
       <q-card-actions align="right">
         <q-btn label="Login" color="primary" :loading="loading" @click="login" />
@@ -45,3 +46,16 @@ async function login() {
   }
 }
 </script>
+
+<style scoped lang="scss">
+.login-page {
+  min-height: 100vh;
+  background-color: var(--vr-bg-page);
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: var(--vr-text-secondary);
+  margin-top: 4px;
+}
+</style>

@@ -9,6 +9,7 @@ pub struct Config {
     pub redis_max_connections: usize,
     pub rust_log: String,
     pub admin_token: String,
+    pub log_retention_days: u32,
 }
 
 impl Config {
@@ -36,6 +37,10 @@ impl Config {
         let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into());
         let admin_token = std::env::var("ADMIN_TOKEN")
             .context("ADMIN_TOKEN is required")?;
+        let log_retention_days = std::env::var("LOG_RETENTION_DAYS")
+            .unwrap_or_else(|_| "30".into())
+            .parse::<u32>()
+            .context("LOG_RETENTION_DAYS must be a valid u32")?;
 
         Ok(Self {
             host,
@@ -46,6 +51,7 @@ impl Config {
             redis_max_connections,
             rust_log,
             admin_token,
+            log_retention_days,
         })
     }
 }

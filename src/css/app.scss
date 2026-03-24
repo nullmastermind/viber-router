@@ -1,1 +1,625 @@
-// app global css in SCSS form
+// Viber Router — Vercel-inspired enterprise theme
+// All component overrides for light + dark mode
+
+// ─── Font Import ───────────────────────────────────────────────────────────
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+// ─── CSS Custom Properties (Light Mode) ────────────────────────────────────
+:root {
+  --vr-bg-page: #FAFAFA;
+  --vr-bg-surface: #FFFFFF;
+  --vr-border: #E5E7EB;
+  --vr-border-hover: #D1D5DB;
+  --vr-text: #0A0A0A;
+  --vr-text-secondary: #6B7280;
+  --vr-text-disabled: #9CA3AF;
+  --vr-hover-bg: #F4F4F5;
+  --vr-table-hover: #F9FAFB;
+  --vr-code-bg: #F4F4F5;
+  --vr-primary: #0070F3;
+  --vr-primary-hover: #0060D1;
+  --vr-badge-positive-bg: #ECFDF5;
+  --vr-badge-positive-text: #059669;
+  --vr-badge-negative-bg: #FFF1F3;
+  --vr-badge-negative-text: #E11D48;
+  --vr-badge-warning-bg: #FFFBEB;
+  --vr-badge-warning-text: #D97706;
+  --vr-badge-grey-bg: #F4F4F5;
+  --vr-badge-grey-text: #6B7280;
+  --vr-card-actions-bg: #FAFAFA;
+  --vr-row-border: #F3F4F6;
+  --vr-active-item-bg: #EFF6FF;
+}
+
+// ─── Dark Mode Custom Properties ───────────────────────────────────────────
+body.body--dark {
+  --vr-bg-page: #09090B;
+  --vr-bg-surface: #18181B;
+  --vr-border: #27272A;
+  --vr-border-hover: #3F3F46;
+  --vr-text: #FAFAFA;
+  --vr-text-secondary: #A1A1AA;
+  --vr-text-disabled: #52525B;
+  --vr-hover-bg: #27272A;
+  --vr-table-hover: #1C1C1F;
+  --vr-code-bg: #27272A;
+  --vr-primary: #3291FF;
+  --vr-primary-hover: #1A7FFF;
+  --vr-badge-positive-bg: #052E16;
+  --vr-badge-positive-text: #4ADE80;
+  --vr-badge-negative-bg: #350A12;
+  --vr-badge-negative-text: #FB7185;
+  --vr-badge-warning-bg: #351C05;
+  --vr-badge-warning-text: #FBBF24;
+  --vr-badge-grey-bg: #27272A;
+  --vr-badge-grey-text: #A1A1AA;
+  --vr-card-actions-bg: #111113;
+  --vr-row-border: #1E1E21;
+  --vr-active-item-bg: #0C1929;
+}
+
+// ─── Global Base ───────────────────────────────────────────────────────────
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: var(--vr-text);
+  background-color: var(--vr-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre, .text-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  background-color: var(--vr-code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--vr-text);
+}
+
+.text-h5 {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.3 !important;
+  color: var(--vr-text) !important;
+}
+
+.text-h6 {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--vr-text) !important;
+}
+
+.text-subtitle1 {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--vr-text) !important;
+}
+
+.text-subtitle2 {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--vr-text) !important;
+}
+
+.text-caption {
+  font-size: 12px !important;
+  color: var(--vr-text-secondary) !important;
+}
+
+.text-grey {
+  color: var(--vr-text-secondary) !important;
+}
+
+.text-weight-medium {
+  font-weight: 500 !important;
+}
+
+// ─── q-header ──────────────────────────────────────────────────────────────
+.q-header {
+  background-color: var(--vr-bg-surface) !important;
+  color: var(--vr-text) !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid var(--vr-border) !important;
+
+  .q-toolbar__title {
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--vr-text);
+    letter-spacing: -0.01em;
+  }
+
+  .q-btn {
+    color: var(--vr-text-secondary) !important;
+
+    &:hover {
+      color: var(--vr-text) !important;
+      background-color: var(--vr-hover-bg) !important;
+    }
+  }
+}
+
+// ─── q-drawer ──────────────────────────────────────────────────────────────
+.q-drawer {
+  background-color: var(--vr-bg-surface) !important;
+  border-right: 1px solid var(--vr-border) !important;
+  box-shadow: none !important;
+
+  .q-item-label--header {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    color: var(--vr-text-disabled) !important;
+    padding: 16px 16px 6px !important;
+  }
+
+  .q-item {
+    border-radius: 6px !important;
+    margin: 1px 8px !important;
+    padding: 8px 10px !important;
+    min-height: 36px !important;
+    color: var(--vr-text-secondary) !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    transition: background-color 0.1s ease, color 0.1s ease !important;
+
+    &:hover {
+      background-color: var(--vr-hover-bg) !important;
+      color: var(--vr-text) !important;
+    }
+
+    &.q-router-link--active,
+    &.q-item--active {
+      background-color: var(--vr-hover-bg) !important;
+      color: var(--vr-text) !important;
+      font-weight: 600 !important;
+    }
+
+    .q-icon {
+      font-size: 18px !important;
+      color: inherit !important;
+    }
+  }
+}
+
+// ─── q-btn ─────────────────────────────────────────────────────────────────
+.q-btn {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  border-radius: 6px !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+  cursor: pointer !important;
+
+  &.bg-primary {
+    background-color: var(--vr-primary) !important;
+    color: #FFFFFF !important;
+    box-shadow: none !important;
+
+    &:hover {
+      background-color: var(--vr-primary-hover) !important;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--vr-primary) !important;
+      outline-offset: 2px !important;
+    }
+  }
+
+  &.q-btn--flat {
+    background-color: transparent !important;
+    box-shadow: none !important;
+
+    &:hover {
+      background-color: var(--vr-hover-bg) !important;
+    }
+  }
+
+  &.q-btn--flat.text-negative {
+    color: #F31260 !important;
+
+    &:hover {
+      background-color: var(--vr-badge-negative-bg) !important;
+    }
+  }
+
+  &.q-btn--flat.text-positive {
+    color: #17C964 !important;
+  }
+
+  &.q-btn--flat.text-warning {
+    color: #F5A524 !important;
+  }
+
+  &.q-btn--flat.text-info {
+    color: #006FEE !important;
+  }
+
+  &.q-btn--dense {
+    border-radius: 4px !important;
+    padding: 4px !important;
+    min-height: 28px !important;
+    min-width: 28px !important;
+
+    .q-icon {
+      font-size: 16px !important;
+    }
+  }
+
+  &.q-btn--loading {
+    opacity: 0.7 !important;
+  }
+}
+
+// ─── q-card ────────────────────────────────────────────────────────────────
+.q-card {
+  box-shadow: none !important;
+  border-radius: 8px !important;
+  background-color: var(--vr-bg-surface) !important;
+  color: var(--vr-text) !important;
+
+  &.q-card--bordered {
+    border: 1px solid var(--vr-border) !important;
+  }
+
+  .q-card__section {
+    padding: 16px 20px !important;
+
+    & + .q-card__section {
+      border-top: 1px solid var(--vr-border) !important;
+    }
+  }
+
+  .q-card__actions {
+    padding: 12px 20px !important;
+    border-top: 1px solid var(--vr-border) !important;
+    background-color: var(--vr-card-actions-bg) !important;
+    border-radius: 0 0 8px 8px !important;
+  }
+}
+
+// ─── q-table ───────────────────────────────────────────────────────────────
+.q-table {
+  border-radius: 8px !important;
+
+  &__container {
+    box-shadow: none !important;
+    border: 1px solid var(--vr-border) !important;
+    border-radius: 8px !important;
+    background-color: var(--vr-bg-surface) !important;
+  }
+
+  thead tr th {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.04em !important;
+    text-transform: uppercase !important;
+    color: var(--vr-text-secondary) !important;
+    background-color: var(--vr-card-actions-bg) !important;
+    border-bottom: 1px solid var(--vr-border) !important;
+    padding: 10px 16px !important;
+    white-space: nowrap !important;
+  }
+
+  tbody tr td {
+    font-size: 13px !important;
+    color: var(--vr-text) !important;
+    padding: 10px 16px !important;
+    border-bottom: 1px solid var(--vr-row-border) !important;
+    vertical-align: middle !important;
+  }
+
+  tbody tr:hover td {
+    background-color: var(--vr-table-hover) !important;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none !important;
+  }
+
+  &__bottom {
+    font-size: 13px !important;
+    color: var(--vr-text-secondary) !important;
+    border-top: 1px solid var(--vr-border) !important;
+    min-height: 44px !important;
+    background-color: var(--vr-bg-surface) !important;
+  }
+
+  .q-checkbox__inner {
+    color: var(--vr-primary) !important;
+  }
+}
+
+// ─── q-input / q-select ────────────────────────────────────────────────────
+.q-field--outlined {
+  .q-field__control {
+    border-radius: 6px !important;
+    background-color: var(--vr-bg-surface) !important;
+
+    &:before {
+      border: 1px solid var(--vr-border) !important;
+      border-radius: 6px !important;
+      transition: border-color 0.15s ease !important;
+    }
+
+    &:hover:before {
+      border-color: var(--vr-border-hover) !important;
+    }
+  }
+
+  &.q-field--focused .q-field__control:before {
+    border-color: var(--vr-primary) !important;
+    border-width: 1px !important;
+  }
+
+  &.q-field--focused .q-field__control:after {
+    border-color: var(--vr-primary) !important;
+    border-width: 2px !important;
+    border-radius: 6px !important;
+  }
+
+  .q-field__label {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13px !important;
+    color: var(--vr-text-secondary) !important;
+    font-weight: 400 !important;
+  }
+
+  &.q-field--float .q-field__label {
+    font-size: 11px !important;
+    color: var(--vr-text-secondary) !important;
+  }
+
+  .q-field__native {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 14px !important;
+    color: var(--vr-text) !important;
+  }
+
+  &.q-field--dense .q-field__control {
+    height: 36px !important;
+  }
+}
+
+// q-select dropdown menu
+.q-menu {
+  border-radius: 8px !important;
+  border: 1px solid var(--vr-border) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+  background-color: var(--vr-bg-surface) !important;
+
+  .q-item {
+    font-size: 13px !important;
+    min-height: 36px !important;
+    padding: 8px 12px !important;
+    color: var(--vr-text) !important;
+
+    &:hover {
+      background-color: var(--vr-hover-bg) !important;
+    }
+
+    &.q-item--active {
+      background-color: var(--vr-active-item-bg) !important;
+      color: var(--vr-primary) !important;
+    }
+  }
+}
+
+// ─── q-dialog ──────────────────────────────────────────────────────────────
+.q-dialog__inner > .q-card {
+  border-radius: 10px !important;
+  border: 1px solid var(--vr-border) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+
+  .q-card__section:first-child {
+    padding: 20px 24px 16px !important;
+    border-bottom: none !important;
+  }
+
+  .q-card__section {
+    padding: 0 24px 16px !important;
+  }
+
+  .q-card__actions {
+    padding: 12px 24px 16px !important;
+    background-color: var(--vr-card-actions-bg) !important;
+    border-top: 1px solid var(--vr-border) !important;
+    gap: 8px !important;
+  }
+}
+
+.q-dialog__backdrop {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(2px) !important;
+}
+
+// ─── q-badge ───────────────────────────────────────────────────────────────
+.q-badge {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 8px !important;
+  border-radius: 9999px !important;
+  letter-spacing: 0 !important;
+
+  &.bg-positive {
+    background-color: var(--vr-badge-positive-bg) !important;
+    color: var(--vr-badge-positive-text) !important;
+  }
+
+  &.bg-negative {
+    background-color: var(--vr-badge-negative-bg) !important;
+    color: var(--vr-badge-negative-text) !important;
+  }
+
+  &.bg-grey {
+    background-color: var(--vr-badge-grey-bg) !important;
+    color: var(--vr-badge-grey-text) !important;
+  }
+
+  &.bg-warning {
+    background-color: var(--vr-badge-warning-bg) !important;
+    color: var(--vr-badge-warning-text) !important;
+  }
+
+  &.q-badge--outline {
+    background-color: transparent !important;
+    border: 1px solid var(--vr-border) !important;
+    color: var(--vr-text-secondary) !important;
+  }
+}
+
+// ─── q-toggle ──────────────────────────────────────────────────────────────
+.q-toggle {
+  .q-toggle__track {
+    background-color: var(--vr-border-hover) !important;
+    border-radius: 9999px !important;
+    opacity: 1 !important;
+  }
+
+  &.q-toggle--checked .q-toggle__track {
+    background-color: var(--vr-primary) !important;
+  }
+
+  .q-toggle__thumb {
+    background-color: #FFFFFF !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+  }
+
+  .q-toggle__label {
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: var(--vr-text) !important;
+  }
+}
+
+// ─── q-list / q-item ───────────────────────────────────────────────────────
+.q-list--bordered {
+  border: 1px solid var(--vr-border) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+.q-list--separator > .q-item + .q-item,
+.q-list--separator > .q-virtual-scroll__content > .q-item + .q-item {
+  border-top: 1px solid var(--vr-row-border) !important;
+}
+
+.q-page .q-item {
+  padding: 12px 16px !important;
+  min-height: 48px !important;
+  color: var(--vr-text) !important;
+
+  .q-item__label {
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: var(--vr-text) !important;
+  }
+
+  .q-item__label--caption {
+    font-size: 12px !important;
+    color: var(--vr-text-secondary) !important;
+    margin-top: 2px !important;
+  }
+}
+
+// ─── q-banner ──────────────────────────────────────────────────────────────
+.q-banner {
+  border-radius: 8px !important;
+  border: 1px solid var(--vr-border) !important;
+  font-size: 13px !important;
+  color: var(--vr-text) !important;
+  box-shadow: none !important;
+  padding: 12px 16px !important;
+
+  &.bg-negative {
+    background-color: var(--vr-badge-negative-bg) !important;
+    color: var(--vr-badge-negative-text) !important;
+    border-color: var(--vr-badge-negative-text) !important;
+  }
+}
+
+// ─── q-notify (toast) ──────────────────────────────────────────────────────
+.q-notification {
+  border-radius: 8px !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12) !important;
+  padding: 10px 16px !important;
+  min-height: 44px !important;
+
+  // Vercel-style dark toasts for all types
+  &.bg-positive,
+  &.bg-info {
+    background-color: #0A0A0A !important;
+    color: #FFFFFF !important;
+  }
+
+  &.bg-negative {
+    background-color: #F31260 !important;
+    color: #FFFFFF !important;
+  }
+
+  &.bg-warning {
+    background-color: #0A0A0A !important;
+    color: #F5A524 !important;
+  }
+}
+
+// ─── q-page-container ──────────────────────────────────────────────────────
+.q-page-container {
+  background-color: var(--vr-bg-page) !important;
+}
+
+.q-page[padding] {
+  padding: 24px !important;
+}
+
+// ─── q-spinner ─────────────────────────────────────────────────────────────
+.q-spinner {
+  color: var(--vr-primary) !important;
+}
+
+// ─── Links ─────────────────────────────────────────────────────────────────
+a.text-primary {
+  color: var(--vr-primary) !important;
+  text-decoration: none !important;
+
+  &:hover {
+    text-decoration: underline !important;
+  }
+}
+
+// ─── Scrollbar (subtle) ────────────────────────────────────────────────────
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--vr-border-hover);
+  border-radius: 3px;
+}
+
+// ─── Reduced Motion ────────────────────────────────────────────────────────
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

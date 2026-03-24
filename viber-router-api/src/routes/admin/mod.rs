@@ -1,6 +1,7 @@
 pub mod servers;
 pub mod groups;
 pub mod group_servers;
+pub mod logs;
 
 use axum::{
     Json, Router,
@@ -35,6 +36,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     let protected = Router::new()
         .nest("/servers", servers::router())
         .nest("/groups", groups::router())
+        .nest("/logs", logs::router())
         .layer(axum::middleware::from_fn_with_state(
             state,
             crate::middleware::admin_auth::admin_auth,
