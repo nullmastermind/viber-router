@@ -16,5 +16,5 @@ check:
 docker-build:
     cd {{justfile_directory()}} && docker build -t nullmastermind/viber-router:latest .
 
-docker-push:
+docker-push: docker-build
     cd {{justfile_directory()}} && docker push nullmastermind/viber-router:latest
