@@ -23,6 +23,7 @@ export interface GroupServerDetail {
   api_key: string | null;
   priority: number;
   model_mappings: Record<string, string>;
+  is_enabled: boolean;
 }
 
 export interface GroupWithServers extends Group {
@@ -124,7 +125,7 @@ export const useGroupsStore = defineStore('groups', () => {
     await api.post(`/api/admin/groups/${groupId}/servers`, input);
   }
 
-  async function updateAssignment(groupId: string, serverId: string, input: { priority?: number; model_mappings?: Record<string, string> }) {
+  async function updateAssignment(groupId: string, serverId: string, input: { priority?: number; model_mappings?: Record<string, string>; is_enabled?: boolean }) {
     await api.put(`/api/admin/groups/${groupId}/servers/${serverId}`, input);
   }
 

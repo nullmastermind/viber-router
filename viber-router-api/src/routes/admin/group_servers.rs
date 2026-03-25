@@ -34,8 +34,8 @@ async fn assign_server(
     let mappings = input.model_mappings.unwrap_or(serde_json::json!({}));
 
     let gs = sqlx::query_as::<_, GroupServer>(
-        "INSERT INTO group_servers (group_id, server_id, priority, model_mappings) \
-         VALUES ($1, $2, $3, $4) RETURNING *",
+        "INSERT INTO group_servers (group_id, server_id, priority, model_mappings, is_enabled) \
+         VALUES ($1, $2, $3, $4, true) RETURNING *",
     )
     .bind(group_id)
     .bind(input.server_id)
@@ -63,11 +63,13 @@ async fn update_assignment(
     let gs = sqlx::query_as::<_, GroupServer>(
         "UPDATE group_servers SET \
          priority = COALESCE($1, priority), \
-         model_mappings = COALESCE($2, model_mappings) \
-         WHERE group_id = $3 AND server_id = $4 RETURNING *",
+         model_mappings = COALESCE($2, model_mappings), \
+         is_enabled = COALESCE($3, is_enabled) \
+         WHERE group_id = $4 AND server_id = $5 RETURNING *",
     )
     .bind(input.priority)
     .bind(&input.model_mappings)
+    .bind(input.is_enabled)
     .bind(group_id)
     .bind(server_id)
     .fetch_optional(&state.db)

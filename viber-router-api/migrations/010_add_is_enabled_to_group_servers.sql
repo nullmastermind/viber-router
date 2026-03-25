@@ -1,0 +1,1 @@
+ALTER TABLE group_servers ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT true;

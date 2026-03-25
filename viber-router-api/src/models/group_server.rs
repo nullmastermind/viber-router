@@ -8,6 +8,7 @@ pub struct GroupServer {
     pub server_id: Uuid,
     pub priority: i32,
     pub model_mappings: serde_json::Value,
+    pub is_enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -20,6 +21,7 @@ pub struct GroupServerDetail {
     pub api_key: Option<String>,
     pub priority: i32,
     pub model_mappings: serde_json::Value,
+    pub is_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +35,7 @@ pub struct AssignServer {
 pub struct UpdateAssignment {
     pub priority: Option<i32>,
     pub model_mappings: Option<serde_json::Value>,
+    pub is_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

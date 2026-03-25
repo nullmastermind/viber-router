@@ -157,7 +157,7 @@ async fn get_group(
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Group not found"))?;
 
     let servers = sqlx::query_as::<_, GroupServerDetail>(
-        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings \
+        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 ORDER BY gs.priority",
     )
@@ -341,9 +341,9 @@ async fn bulk_assign_server(
 
     for group_id in &input.group_ids {
         sqlx::query(
-            "INSERT INTO group_servers (group_id, server_id, priority, model_mappings) \
-             VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (group_id, server_id) DO UPDATE SET priority = $3, model_mappings = $4",
+            "INSERT INTO group_servers (group_id, server_id, priority, model_mappings, is_enabled) \
+             VALUES ($1, $2, $3, $4, true) \
+             ON CONFLICT (group_id, server_id) DO UPDATE SET priority = $3, model_mappings = $4, is_enabled = true",
         )
         .bind(group_id)
         .bind(input.server_id)

@@ -48,9 +48,9 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     .ok()??;
 
     let servers = sqlx::query_as::<_, GroupServerDetail>(
-        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings \
+        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
-         WHERE gs.group_id = $1 ORDER BY gs.priority",
+         WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
     .bind(group.id)
     .fetch_all(&state.db)

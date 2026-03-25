@@ -87,7 +87,7 @@
             <q-btn flat dense icon="add" label="Add Server" @click="showAddServer = true" />
           </div>
           <q-list bordered separator>
-            <q-item v-for="(s, idx) in servers" :key="s.server_id">
+            <q-item v-for="(s, idx) in servers" :key="s.server_id" :class="{ 'disabled-server': !s.is_enabled }">
               <q-item-section avatar>
                 <div class="column items-center">
                   <q-btn flat dense icon="arrow_upward" :disable="idx === 0" @click="moveServer(idx, -1)" />
@@ -96,7 +96,7 @@
                 </div>
               </q-item-section>
               <q-item-section>
-                <q-item-label>
+                <q-item-label :class="{ 'text-strike': !s.is_enabled }">
                   {{ s.server_name }}
                   <q-badge outline class="q-ml-sm">
                     #{{ s.short_id }}
@@ -106,7 +106,8 @@
                 <q-item-label caption>{{ s.base_url }}</q-item-label>
               </q-item-section>
               <q-item-section side>
-                <div class="row q-gutter-xs">
+                <div class="row q-gutter-xs items-center">
+                  <q-toggle v-model="s.is_enabled" dense :aria-label="`${s.server_name} enabled`" @update:model-value="toggleServerEnabled(s)" />
                   <q-btn flat dense icon="edit" @click="openEditServer(s)" />
                   <q-btn flat dense icon="tune" @click="editMappings(s)" />
                   <q-btn flat dense icon="delete" color="negative" @click="onRemoveServer(s)" />
@@ -506,6 +507,17 @@ async function moveServer(idx: number, direction: number) {
   loadGroup();
 }
 
+async function toggleServerEnabled(s: GroupServerDetail) {
+  if (!group.value) return;
+  try {
+    await groupsStore.updateAssignment(group.value.id, s.server_id, { is_enabled: s.is_enabled });
+    await loadGroup();
+  } catch {
+    s.is_enabled = !s.is_enabled;
+    $q.notify({ type: 'negative', message: 'Failed to update server status' });
+  }
+}
+
 function editMappings(s: GroupServerDetail) {
   editingMapping.value = s;
   const m = s.model_mappings || {};
@@ -663,3 +675,9 @@ const ttftChartOptions = computed(() => ({
   },
 }));
 </script>
+
+<style scoped>
+.disabled-server {
+  opacity: 0.5;
+}
+</style>
