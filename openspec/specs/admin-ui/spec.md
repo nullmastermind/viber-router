@@ -74,7 +74,7 @@ The admin UI SHALL display a paginated table of groups with search, filter, and 
 - **THEN** the selected server is added to all selected groups with the specified priority
 
 ### Requirement: Group detail page
-The admin UI SHALL display a group's full configuration including its servers with priorities and model mappings. The page SHALL support editing group properties, managing server assignments, and reordering priorities.
+The admin UI SHALL display a group's full configuration including its servers with priorities and model mappings. The page SHALL support editing group properties, managing server assignments, reordering priorities, and toggling server enabled status.
 
 #### Scenario: View group detail
 - **WHEN** the user clicks on a group row in the groups table
@@ -107,6 +107,18 @@ The admin UI SHALL display a group's full configuration including its servers wi
 #### Scenario: Remove server from group
 - **WHEN** the user clicks Remove on a server in the group's server list and confirms
 - **THEN** the server is removed from the group
+
+#### Scenario: Toggle server enabled status
+- **WHEN** the user clicks the toggle switch on a server row in the group detail page
+- **THEN** the server's `is_enabled` status SHALL be toggled immediately via PUT API call without a confirmation dialog, and the server list SHALL reload
+
+#### Scenario: Disabled server visual state
+- **WHEN** a server in the group has `is_enabled: false`
+- **THEN** the server row SHALL appear dimmed (reduced opacity) with the server name displayed in strikethrough, and the toggle switch SHALL be in the OFF position
+
+#### Scenario: Enabled server visual state
+- **WHEN** a server in the group has `is_enabled: true`
+- **THEN** the server row SHALL appear at full opacity with normal text, and the toggle switch SHALL be in the ON position
 
 ### Requirement: Navigation
 The admin UI SHALL have a left sidebar navigation with links to Servers and Groups pages. The current page SHALL be highlighted.
