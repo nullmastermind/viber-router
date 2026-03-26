@@ -1,6 +1,8 @@
 use axum::Router;
 use sqlx::PgPool;
-use tokio::sync::mpsc;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tower_http::services::{ServeDir, ServeFile};
 
 mod admin;
@@ -12,6 +14,16 @@ use crate::log_buffer::ProxyLogEntry;
 use crate::ttft_buffer::TtftLogEntry;
 use crate::usage_buffer::TokenUsageEntry;
 
+#[derive(Debug, Clone)]
+pub struct ModelPricing {
+    pub input_1m_usd: f64,
+    pub output_1m_usd: f64,
+    pub cache_write_1m_usd: f64,
+    pub cache_read_1m_usd: f64,
+}
+
+pub type PricingCache = Arc<RwLock<HashMap<String, ModelPricing>>>;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -21,6 +33,34 @@ pub struct AppState {
     pub log_tx: mpsc::Sender<ProxyLogEntry>,
     pub ttft_tx: mpsc::Sender<TtftLogEntry>,
     pub usage_tx: mpsc::Sender<TokenUsageEntry>,
+    pub pricing_cache: PricingCache,
+}
+
+pub async fn refresh_pricing_cache(db: &PgPool, cache: &PricingCache) {
+    let rows = sqlx::query_as::<_, (String, Option<f64>, Option<f64>, Option<f64>, Option<f64>)>(
+        "SELECT name, input_1m_usd, output_1m_usd, cache_write_1m_usd, cache_read_1m_usd FROM models",
+    )
+    .fetch_all(db)
+    .await;
+
+    match rows {
+        Ok(models) => {
+            let mut map = HashMap::new();
+            for (name, input, output, cache_write, cache_read) in models {
+                if let (Some(i), Some(o)) = (input, output) {
+                    map.insert(name, ModelPricing {
+                        input_1m_usd: i,
+                        output_1m_usd: o,
+                        cache_write_1m_usd: cache_write.unwrap_or(0.0),
+                        cache_read_1m_usd: cache_read.unwrap_or(0.0),
+                    });
+                }
+            }
+            *cache.write().await = map;
+            tracing::debug!("Refreshed pricing cache");
+        }
+        Err(e) => tracing::warn!("Failed to refresh pricing cache: {e}"),
+    }
 }
 
 pub fn router(state: AppState) -> Router {

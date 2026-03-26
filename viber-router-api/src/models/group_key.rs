@@ -9,8 +9,6 @@ pub struct GroupKey {
     pub api_key: String,
     pub name: String,
     pub is_active: bool,
-    pub monthly_token_limit: Option<i64>,
-    pub monthly_request_limit: Option<i64>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

@@ -9,6 +9,7 @@ mod partition;
 mod redis;
 mod routes;
 mod sse_usage_parser;
+mod subscription;
 mod telegram_notifier;
 mod ttft_buffer;
 mod usage_buffer;
@@ -17,6 +18,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,6 +62,11 @@ async fn main() -> Result<()> {
     // Create token usage log buffer
     let (usage_tx, usage_rx) = tokio::sync::mpsc::channel(10_000);
 
+    // Create and populate pricing cache
+    let pricing_cache: routes::PricingCache = Arc::new(RwLock::new(HashMap::new()));
+    routes::refresh_pricing_cache(&db_pool, &pricing_cache).await;
+    tracing::info!("Pricing cache loaded");
+
     let state = routes::AppState {
         db: db_pool.clone(),
         redis: redis_pool,
@@ -75,6 +85,7 @@ async fn main() -> Result<()> {
         log_tx,
         ttft_tx,
         usage_tx,
+        pricing_cache: pricing_cache.clone(),
     };
 
     // Spawn log buffer flush task
@@ -101,6 +112,17 @@ async fn main() -> Result<()> {
             partition::drop_expired_partitions(&partition_pool, "ttft_logs", retention_days).await;
             partition::drop_expired_partitions(&partition_pool, "token_usage_logs", retention_days).await;
             tracing::info!("Daily partition maintenance complete");
+        }
+    });
+
+    // Spawn pricing cache refresh task (every 60 seconds)
+    let pricing_pool = db_pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.tick().await; // skip immediate tick
+        loop {
+            interval.tick().await;
+            routes::refresh_pricing_cache(&pricing_pool, &pricing_cache).await;
         }
     });
 

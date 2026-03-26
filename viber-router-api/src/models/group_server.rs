@@ -32,6 +32,10 @@ pub struct GroupServerDetail {
     pub cb_max_failures: Option<i32>,
     pub cb_window_seconds: Option<i32>,
     pub cb_cooldown_seconds: Option<i32>,
+    pub rate_input: Option<f64>,
+    pub rate_output: Option<f64>,
+    pub rate_cache_write: Option<f64>,
+    pub rate_cache_read: Option<f64>,
 }
 
 /// Admin-facing server detail with rate fields (not used in proxy cache)

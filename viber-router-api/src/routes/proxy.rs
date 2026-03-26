@@ -116,7 +116,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
 
     let servers = sqlx::query_as::<_, GroupServerDetail>(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
-         gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds \
+         gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
+         gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -389,6 +390,32 @@ async fn proxy_handler(
                 "permission_error",
                 "Your API key does not have permission to use the specified model.",
             );
+        }
+    }
+
+    // Subscription budget check (only for sub-keys on /v1/messages)
+    let mut selected_subscription_id: Option<uuid::Uuid> = None;
+    if request_path == "/v1/messages"
+        && let Some(group_key_id) = config.group_key_id
+    {
+        match crate::subscription::check_subscriptions(
+            &state,
+            group_key_id,
+            request_model.as_deref(),
+        )
+        .await
+        {
+            crate::subscription::SubCheckResult::Unlimited => {}
+            crate::subscription::SubCheckResult::Allowed { subscription_id } => {
+                selected_subscription_id = Some(subscription_id);
+            }
+            crate::subscription::SubCheckResult::Blocked => {
+                return anthropic_error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_error",
+                    "Subscription limit exceeded",
+                );
+            }
         }
     }
 
@@ -860,17 +887,71 @@ async fn proxy_handler(
                             };
                             if raw.is_empty() { None } else { Some(hash_key(&raw)) }
                         };
+                        let cache_creation = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+
+                        // Calculate cost and update subscription counters
+                        let (cost_usd, charged_sub_id) = if let Some(ref model_name) = request_model {
+                            let pricing_cache = state.pricing_cache.read().await;
+                            if let Some(pricing) = pricing_cache.get(model_name) {
+                                let ri = server.rate_input.unwrap_or(1.0);
+                                let ro = server.rate_output.unwrap_or(1.0);
+                                let rcw = server.rate_cache_write.unwrap_or(1.0);
+                                let rcr = server.rate_cache_read.unwrap_or(1.0);
+                                let cost = crate::subscription::calculate_cost(
+                                    pricing, ri, ro, rcw, rcr,
+                                    inp, out, cache_creation, cache_read,
+                                );
+                                drop(pricing_cache);
+
+                                if let Some(sub_id) = selected_subscription_id {
+                                    // Lazy activation
+                                    crate::subscription::ensure_activated(&state, sub_id, {
+                                        // Look up duration_days from DB (quick query)
+                                        sqlx::query_scalar::<_, i32>(
+                                            "SELECT duration_days FROM key_subscriptions WHERE id = $1",
+                                        )
+                                        .bind(sub_id)
+                                        .fetch_one(&state.db)
+                                        .await
+                                        .unwrap_or(30)
+                                    }).await;
+
+                                    // Get subscription details for counter update
+                                    if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
+                                        "SELECT * FROM key_subscriptions WHERE id = $1",
+                                    )
+                                    .bind(sub_id)
+                                    .fetch_one(&state.db)
+                                    .await
+                                    {
+                                        crate::subscription::update_cost_counters(
+                                            &state, sub_id, model_name, cost,
+                                            &sub.sub_type, sub.activated_at, sub.reset_hours,
+                                        ).await;
+                                    }
+                                }
+                                (Some(cost), selected_subscription_id)
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        };
+
                         let entry = TokenUsageEntry {
                             group_id: config.group_id,
                             server_id: server.server_id,
                             model: request_model.clone(),
                             input_tokens: inp,
                             output_tokens: out,
-                            cache_creation_tokens: usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32),
-                            cache_read_tokens: usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32),
+                            cache_creation_tokens: cache_creation,
+                            cache_read_tokens: cache_read,
                             is_dynamic_key: is_dk,
                             key_hash: kh,
                             group_key_id: config.group_key_id,
+                            cost_usd,
+                            subscription_id: charged_sub_id,
                             created_at: Utc::now(),
                         };
                         if state.usage_tx.try_send(entry).is_err() {
@@ -970,6 +1051,11 @@ async fn proxy_handler(
                         Body::from_stream(wrap_stream_with_usage_tracking(
                             combined, state.clone(), config.group_id, server.server_id,
                             request_model.clone(), is_dk, kh, config.group_key_id,
+                            selected_subscription_id,
+                            server.rate_input.unwrap_or(1.0),
+                            server.rate_output.unwrap_or(1.0),
+                            server.rate_cache_write.unwrap_or(1.0),
+                            server.rate_cache_read.unwrap_or(1.0),
                         ))
                     } else {
                         Body::from_stream(combined)
@@ -1050,6 +1136,11 @@ async fn proxy_handler(
                         Body::from_stream(wrap_stream_with_usage_tracking(
                             combined, state.clone(), config.group_id, server.server_id,
                             request_model.clone(), is_dk, kh, config.group_key_id,
+                            selected_subscription_id,
+                            server.rate_input.unwrap_or(1.0),
+                            server.rate_output.unwrap_or(1.0),
+                            server.rate_cache_write.unwrap_or(1.0),
+                            server.rate_cache_read.unwrap_or(1.0),
                         ))
                     } else {
                         Body::from_stream(combined)
@@ -1149,6 +1240,11 @@ struct UsageTrackingStream<S> {
     is_dynamic_key: bool,
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
+    subscription_id: Option<uuid::Uuid>,
+    rate_input: f64,
+    rate_output: f64,
+    rate_cache_write: f64,
+    rate_cache_read: f64,
     done: bool,
 }
 
@@ -1180,22 +1276,88 @@ where
                 if let Some(parser) = this.parser.take()
                     && let Some(usage) = parser.finish()
                 {
-                    let entry = TokenUsageEntry {
-                        group_id: this.group_id,
-                        server_id: this.server_id,
-                        model: this.model.clone(),
-                        input_tokens: usage.input_tokens,
-                        output_tokens: usage.output_tokens,
-                        cache_creation_tokens: usage.cache_creation_tokens,
-                        cache_read_tokens: usage.cache_read_tokens,
-                        is_dynamic_key: this.is_dynamic_key,
-                        key_hash: this.key_hash.clone(),
-                        group_key_id: this.group_key_id,
-                        created_at: Utc::now(),
-                    };
-                    if this.state.usage_tx.try_send(entry).is_err() {
-                        tracing::warn!("Usage buffer full, dropping token usage entry");
-                    }
+                    let state = this.state.clone();
+                    let group_id = this.group_id;
+                    let server_id = this.server_id;
+                    let model = this.model.clone();
+                    let is_dynamic_key = this.is_dynamic_key;
+                    let key_hash = this.key_hash.clone();
+                    let group_key_id = this.group_key_id;
+                    let subscription_id = this.subscription_id;
+                    let rate_input = this.rate_input;
+                    let rate_output = this.rate_output;
+                    let rate_cache_write = this.rate_cache_write;
+                    let rate_cache_read = this.rate_cache_read;
+                    let input_tokens = usage.input_tokens;
+                    let output_tokens = usage.output_tokens;
+                    let cache_creation_tokens = usage.cache_creation_tokens;
+                    let cache_read_tokens = usage.cache_read_tokens;
+
+                    // Spawn async task for cost calculation and usage tracking
+                    tokio::spawn(async move {
+                        let (cost_usd, charged_sub_id) = if let Some(ref model_name) = model {
+                            let pricing_cache = state.pricing_cache.read().await;
+                            if let Some(pricing) = pricing_cache.get(model_name) {
+                                let cost = crate::subscription::calculate_cost(
+                                    pricing,
+                                    rate_input, rate_output,
+                                    rate_cache_write, rate_cache_read,
+                                    input_tokens, output_tokens,
+                                    cache_creation_tokens, cache_read_tokens,
+                                );
+                                drop(pricing_cache);
+
+                                if let Some(sub_id) = subscription_id {
+                                    crate::subscription::ensure_activated(&state, sub_id, {
+                                        sqlx::query_scalar::<_, i32>(
+                                            "SELECT duration_days FROM key_subscriptions WHERE id = $1",
+                                        )
+                                        .bind(sub_id)
+                                        .fetch_one(&state.db)
+                                        .await
+                                        .unwrap_or(30)
+                                    }).await;
+
+                                    if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
+                                        "SELECT * FROM key_subscriptions WHERE id = $1",
+                                    )
+                                    .bind(sub_id)
+                                    .fetch_one(&state.db)
+                                    .await
+                                    {
+                                        crate::subscription::update_cost_counters(
+                                            &state, sub_id, model_name, cost,
+                                            &sub.sub_type, sub.activated_at, sub.reset_hours,
+                                        ).await;
+                                    }
+                                }
+                                (Some(cost), subscription_id)
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        };
+
+                        let entry = TokenUsageEntry {
+                            group_id,
+                            server_id,
+                            model,
+                            input_tokens,
+                            output_tokens,
+                            cache_creation_tokens,
+                            cache_read_tokens,
+                            is_dynamic_key,
+                            key_hash,
+                            group_key_id,
+                            cost_usd,
+                            subscription_id: charged_sub_id,
+                            created_at: Utc::now(),
+                        };
+                        if state.usage_tx.try_send(entry).is_err() {
+                            tracing::warn!("Usage buffer full, dropping token usage entry");
+                        }
+                    });
                 }
                 Poll::Ready(None)
             }
@@ -1214,6 +1376,11 @@ fn wrap_stream_with_usage_tracking<S>(
     is_dynamic_key: bool,
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
+    subscription_id: Option<uuid::Uuid>,
+    rate_input: f64,
+    rate_output: f64,
+    rate_cache_write: f64,
+    rate_cache_read: f64,
 ) -> UsageTrackingStream<S>
 where
     S: futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Unpin,
@@ -1228,6 +1395,11 @@ where
         is_dynamic_key,
         key_hash,
         group_key_id,
+        subscription_id,
+        rate_input,
+        rate_output,
+        rate_cache_write,
+        rate_cache_read,
         done: false,
     }
 }

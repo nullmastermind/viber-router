@@ -9,6 +9,8 @@ pub mod settings;
 pub mod models;
 pub mod group_allowed_models;
 pub mod group_key_allowed_models;
+pub mod subscription_plans;
+pub mod key_subscriptions;
 
 use axum::{
     Json, Router,
@@ -44,6 +46,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .nest("/servers", servers::router())
         .nest("/groups", groups::router())
         .nest("/models", models::router())
+        .nest("/subscription-plans", subscription_plans::router())
         .nest("/logs", logs::router())
         .nest("/ttft-stats", ttft::router())
         .nest("/token-usage", token_usage::router())

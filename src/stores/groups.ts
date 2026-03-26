@@ -104,8 +104,6 @@ export interface GroupKey {
   api_key: string;
   name: string;
   is_active: boolean;
-  monthly_token_limit: number | null;
-  monthly_request_limit: number | null;
   created_at: string;
   updated_at: string;
 }

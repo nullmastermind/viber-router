@@ -217,6 +217,53 @@
                           @update:model-value="(v: string) => onAddKeyModel(props.row.id, v)"
                         />
                       </div>
+                      <div class="q-mb-md">
+                        <div class="row items-center q-mb-xs">
+                          <div class="text-subtitle2">Subscriptions</div>
+                          <q-space />
+                          <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
+                            <q-menu>
+                              <q-list dense style="min-width: 200px">
+                                <q-item v-for="plan in activePlans" :key="plan.id" clickable v-close-popup @click="onAssignSubscription(props.row.id, plan.id)">
+                                  <q-item-section>
+                                    <q-item-label>{{ plan.name }}</q-item-label>
+                                    <q-item-label caption>{{ plan.sub_type }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
+                                  </q-item-section>
+                                </q-item>
+                              </q-list>
+                            </q-menu>
+                          </q-btn>
+                          <span v-else class="text-caption text-grey q-ml-sm">No active plans available</span>
+                        </div>
+                        <div v-if="!keySubscriptions[props.row.id] || (keySubscriptions[props.row.id] ?? []).length === 0" class="text-caption text-grey q-mb-sm">
+                          No subscriptions &mdash; unlimited usage
+                        </div>
+                        <q-table
+                          v-else
+                          flat bordered dense
+                          :rows="keySubscriptions[props.row.id] ?? []"
+                          :columns="subColumns"
+                          row-key="id"
+                          :pagination="{ rowsPerPage: 10 }"
+                          hide-pagination
+                        >
+                          <template #body-cell-status="sProps">
+                            <q-td :props="sProps">
+                              <q-badge :color="subStatusColor(sProps.row.status)" :label="sProps.row.status" />
+                            </q-td>
+                          </template>
+                          <template #body-cell-cost_used="sProps">
+                            <q-td :props="sProps">
+                              ${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}
+                            </q-td>
+                          </template>
+                          <template #body-cell-actions="sProps">
+                            <q-td :props="sProps">
+                              <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.id, sProps.row.id)" />
+                            </q-td>
+                          </template>
+                        </q-table>
+                      </div>
                       <SubKeyUsage :group-id="group?.id ?? ''" :group-key-id="props.row.id" />
                       <div class="q-mt-sm">
                         <TtftChart :group-id="group?.id ?? ''" :group-key-id="props.row.id" />
@@ -511,6 +558,7 @@ import { useQuasar, copyToClipboard } from 'quasar';
 import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type CircuitStatus, type TokenUsageStats, type GroupKey, type Model } from 'stores/groups';
 import { useServersStore } from 'stores/servers';
 import { useModelsStore } from 'stores/models';
+import { api } from 'boot/axios';
 import SubKeyUsage from 'components/SubKeyUsage.vue';
 import TtftChart from 'components/TtftChart.vue';
 
@@ -579,6 +627,51 @@ const subKeyPagination = ref({ page: 1, rowsPerPage: 50, rowsNumber: 0, sortBy: 
 const showCreateKey = ref(false);
 const newKeyName = ref('');
 const creatingKey = ref(false);
+
+// Subscription state
+interface KeySubscription {
+  id: string;
+  group_key_id: string;
+  plan_id: string | null;
+  sub_type: string;
+  cost_limit_usd: number;
+  model_limits: Record<string, number>;
+  reset_hours: number | null;
+  duration_days: number;
+  status: string;
+  activated_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+  cost_used: number;
+}
+interface SubscriptionPlan {
+  id: string;
+  name: string;
+  sub_type: string;
+  cost_limit_usd: number;
+  is_active: boolean;
+}
+const keySubscriptions = ref<Record<string, KeySubscription[]>>({});
+const activePlans = ref<SubscriptionPlan[]>([]);
+
+const subColumns = [
+  { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const },
+  { name: 'cost_limit_usd', label: 'Budget', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
+  { name: 'cost_used', label: 'Used', field: 'cost_used', align: 'right' as const },
+  { name: 'status', label: 'Status', field: 'status', align: 'center' as const },
+  { name: 'duration_days', label: 'Duration', field: 'duration_days', align: 'right' as const, format: (v: number) => `${v}d` },
+  { name: 'actions', label: '', field: 'id', align: 'right' as const },
+];
+
+function subStatusColor(status: string): string {
+  switch (status) {
+    case 'active': return 'green';
+    case 'exhausted': return 'red';
+    case 'expired': return 'orange';
+    case 'cancelled': return 'grey';
+    default: return 'grey';
+  }
+}
 
 // Rate modal state
 const showRateModal = ref(false);
@@ -1145,8 +1238,52 @@ async function onRemoveAllowedModel(m: Model) {
 // Key allowed models methods
 function onExpandSubKey(props: { expand: boolean; row: GroupKey }) {
   props.expand = !props.expand;
-  if (props.expand && allowedModels.value.length > 0) {
-    loadKeyAllowedModels(props.row.id);
+  if (props.expand) {
+    if (allowedModels.value.length > 0) {
+      loadKeyAllowedModels(props.row.id);
+    }
+    loadKeySubscriptions(props.row.id);
+    loadActivePlans();
+  }
+}
+
+async function loadKeySubscriptions(keyId: string) {
+  if (!group.value) return;
+  try {
+    const { data } = await api.get<KeySubscription[]>(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions`);
+    keySubscriptions.value[keyId] = data;
+  } catch { /* ignore */ }
+}
+
+async function loadActivePlans() {
+  if (activePlans.value.length > 0) return;
+  try {
+    const { data } = await api.get<SubscriptionPlan[]>('/api/admin/subscription-plans');
+    activePlans.value = data.filter((p) => p.is_active);
+  } catch { /* ignore */ }
+}
+
+async function onAssignSubscription(keyId: string, planId: string) {
+  if (!group.value || !planId) return;
+  try {
+    await api.post(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions`, { plan_id: planId });
+    loadKeySubscriptions(keyId);
+    $q.notify({ type: 'positive', message: 'Subscription assigned' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to assign';
+    $q.notify({ type: 'negative', message: msg });
+  }
+}
+
+async function onCancelSubscription(keyId: string, subId: string) {
+  if (!group.value) return;
+  try {
+    await api.patch(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions/${subId}`, { status: 'cancelled' });
+    loadKeySubscriptions(keyId);
+    $q.notify({ type: 'positive', message: 'Subscription cancelled' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to cancel';
+    $q.notify({ type: 'negative', message: msg });
   }
 }
 

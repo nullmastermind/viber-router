@@ -29,6 +29,10 @@
           <q-item-section avatar><q-icon name="smart_toy" /></q-item-section>
           <q-item-section>Models</q-item-section>
         </q-item>
+        <q-item clickable :to="'/plans'" :active="$route.path === '/plans'">
+          <q-item-section avatar><q-icon name="card_membership" /></q-item-section>
+          <q-item-section>Plans</q-item-section>
+        </q-item>
         <q-item clickable :to="'/logs'" :active="$route.path === '/logs'">
           <q-item-section avatar><q-icon name="list_alt" /></q-item-section>
           <q-item-section>Logs</q-item-section>
