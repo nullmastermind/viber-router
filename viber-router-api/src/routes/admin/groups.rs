@@ -8,7 +8,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::models::{
-    CreateGroup, Group, GroupListItem, GroupServerDetail, GroupWithServers, PaginatedResponse, UpdateGroup,
+    CreateGroup, Group, GroupListItem, GroupServerDetail, GroupWithServers, Model, PaginatedResponse, UpdateGroup,
     generate_api_key,
 };
 use crate::routes::AppState;
@@ -58,6 +58,7 @@ pub fn router() -> Router<AppState> {
         .route("/bulk/assign-server", post(bulk_assign_server))
         .nest("/{group_id}/servers", super::group_servers::router())
         .nest("/{group_id}/keys", super::group_keys::router())
+        .nest("/{group_id}/allowed-models", super::group_allowed_models::router())
 }
 
 async fn create_group(
@@ -169,7 +170,17 @@ async fn get_group(
     .await
     .map_err(internal)?;
 
-    Ok(Json(GroupWithServers { group, servers }))
+    let allowed_models = sqlx::query_as::<_, Model>(
+        "SELECT m.* FROM models m \
+         JOIN group_allowed_models gam ON m.id = gam.model_id \
+         WHERE gam.group_id = $1 ORDER BY m.name",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(internal)?;
+
+    Ok(Json(GroupWithServers { group, servers, allowed_models }))
 }
 
 #[derive(Debug, serde::Serialize)]

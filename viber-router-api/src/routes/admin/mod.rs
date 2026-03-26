@@ -6,6 +6,9 @@ pub mod logs;
 pub mod ttft;
 pub mod token_usage;
 pub mod settings;
+pub mod models;
+pub mod group_allowed_models;
+pub mod group_key_allowed_models;
 
 use axum::{
     Json, Router,
@@ -40,6 +43,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     let protected = Router::new()
         .nest("/servers", servers::router())
         .nest("/groups", groups::router())
+        .nest("/models", models::router())
         .nest("/logs", logs::router())
         .nest("/ttft-stats", ttft::router())
         .nest("/token-usage", token_usage::router())

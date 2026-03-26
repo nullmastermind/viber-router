@@ -12,6 +12,7 @@
         <q-tab name="properties" label="Properties" />
         <q-tab name="servers" label="Servers" />
         <q-tab name="keys" label="Keys" />
+        <q-tab name="allowed-models" label="Allowed Models" />
         <q-tab name="ttft" label="TTFT" />
         <q-tab name="token-usage" label="Token Usage" />
       </q-tabs>
@@ -158,7 +159,7 @@
                 @request="onSubKeyRequest"
               >
                 <template #body="props">
-                  <q-tr :props="props" @click="props.expand = !props.expand" @keydown.enter="props.expand = !props.expand" tabindex="0" role="button" :aria-expanded="props.expand" class="cursor-pointer">
+                  <q-tr :props="props" @click="onExpandSubKey(props)" @keydown.enter="onExpandSubKey(props)" tabindex="0" role="button" :aria-expanded="props.expand" class="cursor-pointer">
                     <q-td key="name" :props="props">{{ props.row.name }}</q-td>
                     <q-td key="api_key" :props="props">
                       <code>{{ maskKey(props.row.api_key) }}</code>
@@ -173,6 +174,36 @@
                   </q-tr>
                   <q-tr v-if="props.expand" :props="props">
                     <q-td colspan="4" class="q-pa-sm">
+                      <div v-if="allowedModels.length > 0" class="q-mb-md">
+                        <div class="text-subtitle2 q-mb-xs">Allowed Models</div>
+                        <div class="row q-gutter-xs q-mb-sm items-center">
+                          <q-chip
+                            v-for="km in getKeyAllowedModels(props.row.id)"
+                            :key="km.id"
+                            removable
+                            dense
+                            color="primary"
+                            text-color="white"
+                            :disable="!!keyModelsLoading[props.row.id]"
+                            @remove="onRemoveKeyModel(props.row.id, km.id)"
+                          >
+                            {{ km.name }}
+                          </q-chip>
+                          <q-spinner v-if="keyModelsLoading[props.row.id]" size="xs" class="q-ml-xs" />
+                          <span v-else-if="getKeyAllowedModels(props.row.id).length === 0" class="text-caption text-grey">Inherits all group models</span>
+                        </div>
+                        <q-select
+                          :model-value="null"
+                          :options="keyModelOptions(props.row.id)"
+                          label="Add model restriction"
+                          outlined dense
+                          emit-value map-options
+                          :loading="!!keyModelsLoading[props.row.id]"
+                          :disable="!!keyModelsLoading[props.row.id]"
+                          style="max-width: 300px"
+                          @update:model-value="(v: string) => onAddKeyModel(props.row.id, v)"
+                        />
+                      </div>
                       <SubKeyUsage :group-id="group?.id ?? ''" :group-key-id="props.row.id" />
                       <div class="q-mt-sm">
                         <TtftChart :group-id="group?.id ?? ''" :group-key-id="props.row.id" />
@@ -184,6 +215,58 @@
                   <div class="text-grey text-center q-pa-md">No sub-keys created. Click "Create Key" to add one.</div>
                 </template>
               </q-table>
+            </q-card-section>
+          </q-card>
+        </q-tab-panel>
+
+        <!-- Allowed Models Tab -->
+        <q-tab-panel name="allowed-models" class="q-pa-none">
+          <q-card flat bordered>
+            <q-card-section>
+              <div class="row items-center q-mb-sm">
+                <div class="text-subtitle1">Allowed Models</div>
+                <q-space />
+                <div class="text-caption text-grey q-mr-md">{{ allowedModels.length === 0 ? 'No restrictions — all models allowed' : `${allowedModels.length} model(s) allowed` }}</div>
+              </div>
+              <div class="row q-gutter-sm q-mb-md">
+                <q-select
+                  v-model="modelToAdd"
+                  :options="filteredModelOptions"
+                  label="Add model"
+                  outlined dense
+                  use-input
+                  input-debounce="200"
+                  emit-value map-options
+                  clearable
+                  :loading="allowedModelsLoading"
+                  style="min-width: 300px"
+                  new-value-mode="add-unique"
+                  @filter="onModelFilter"
+                  @new-value="onNewModelValue"
+                  @update:model-value="onAddAllowedModel"
+                >
+                  <template #no-option>
+                    <q-item>
+                      <q-item-section class="text-grey">
+                        {{ modelSearchText ? `Press Enter to create "${modelSearchText}"` : 'Type to search or create' }}
+                      </q-item-section>
+                    </q-item>
+                  </template>
+                </q-select>
+              </div>
+              <q-list v-if="allowedModels.length > 0" bordered separator>
+                <q-item v-for="m in allowedModels" :key="m.id">
+                  <q-item-section>
+                    <q-item-label>{{ m.name }}</q-item-label>
+                  </q-item-section>
+                  <q-item-section side>
+                    <q-btn flat dense icon="close" color="negative" :loading="allowedModelsLoading" :aria-label="`Remove ${m.name}`" @click="onRemoveAllowedModel(m)" />
+                  </q-item-section>
+                </q-item>
+              </q-list>
+              <div v-else class="text-grey q-pa-md text-center">
+                No model restrictions configured. Add models to restrict which models this group can use.
+              </div>
             </q-card-section>
           </q-card>
         </q-tab-panel>
@@ -383,8 +466,9 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, copyToClipboard } from 'quasar';
-import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type CircuitStatus, type TokenUsageStats, type GroupKey } from 'stores/groups';
+import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type CircuitStatus, type TokenUsageStats, type GroupKey, type Model } from 'stores/groups';
 import { useServersStore } from 'stores/servers';
+import { useModelsStore } from 'stores/models';
 import SubKeyUsage from 'components/SubKeyUsage.vue';
 import TtftChart from 'components/TtftChart.vue';
 
@@ -393,11 +477,12 @@ const route = useRoute();
 const router = useRouter();
 const groupsStore = useGroupsStore();
 const serversStore = useServersStore();
+const modelsStore = useModelsStore();
 
 const group = ref<GroupWithServers | null>(null);
 const servers = ref<GroupServerDetail[]>([]);
 const failoverCodesStr = ref('');
-const validTabs = ['properties', 'servers', 'keys', 'ttft', 'token-usage'];
+const validTabs = ['properties', 'servers', 'keys', 'allowed-models', 'ttft', 'token-usage'];
 const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'properties';
 const activeTab = ref(initialTab);
 
@@ -452,6 +537,18 @@ const subKeyPagination = ref({ page: 1, rowsPerPage: 50, rowsNumber: 0, sortBy: 
 const showCreateKey = ref(false);
 const newKeyName = ref('');
 const creatingKey = ref(false);
+
+// Allowed models state
+const allowedModels = ref<Model[]>([]);
+const modelToAdd = ref<string | null>(null);
+const modelSearchText = ref('');
+const allModelsOptions = ref<{ label: string; value: string }[]>([]);
+const filteredModelOptions = ref<{ label: string; value: string }[]>([]);
+const allowedModelsLoading = ref(false);
+
+// Key allowed models state
+const keyAllowedModelsMap = ref<Record<string, Model[]>>({});
+const keyModelsLoading = ref<Record<string, boolean>>({});
 
 const ttftKeyOptions = computed(() => [
   { label: 'All keys', value: null },
@@ -528,6 +625,7 @@ async function loadGroup() {
   const data = await groupsStore.getGroup(id);
   group.value = data;
   servers.value = data.servers;
+  allowedModels.value = data.allowed_models || [];
   failoverCodesStr.value = (data.failover_status_codes || []).join(', ');
   ttftTimeoutStr.value = data.ttft_timeout_ms != null ? String(data.ttft_timeout_ms) : '';
   const ctm = data.count_tokens_model_mappings || {};
@@ -677,6 +775,7 @@ async function onRegenerateSubKey(row: GroupKey) {
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } });
   if (tab === 'keys' && subKeys.value.length === 0) loadSubKeys();
+  if (tab === 'allowed-models') loadAllowedModels();
   if (tab === 'token-usage') loadTokenUsage();
 });
 
@@ -890,6 +989,151 @@ async function onSaveEditServer() {
     $q.notify({ type: 'negative', message: msg });
   } finally {
     savingServer.value = false;
+  }
+}
+
+// Allowed models methods
+async function loadAllowedModels() {
+  if (!group.value) return;
+  allowedModels.value = group.value.allowed_models || [];
+  // Load master models list for the picker
+  try {
+    const result = await modelsStore.fetchModels({ limit: 100 });
+    allModelsOptions.value = result.data
+      .filter((m) => !allowedModels.value.some((am) => am.id === m.id))
+      .map((m) => ({ label: m.name, value: m.id }));
+    filteredModelOptions.value = allModelsOptions.value;
+  } catch {
+    // silently fail
+  }
+}
+
+function onModelFilter(val: string, update: (fn: () => void) => void) {
+  modelSearchText.value = val;
+  update(() => {
+    const needle = val.toLowerCase();
+    filteredModelOptions.value = allModelsOptions.value.filter((o) => o.label.toLowerCase().includes(needle));
+  });
+}
+
+function onNewModelValue(val: string, done: (item?: { label: string; value: string }, mode?: 'add' | 'add-unique' | 'toggle') => void) {
+  // When user types a new value and presses Enter, create the model inline
+  if (val.trim()) {
+    onCreateAndAddModel(val.trim());
+  }
+  done();
+}
+
+async function onAddAllowedModel(modelId: string | null) {
+  if (!group.value || !modelId) return;
+  allowedModelsLoading.value = true;
+  try {
+    await groupsStore.addGroupAllowedModel(group.value.id, { model_id: modelId });
+    modelToAdd.value = null;
+    await loadGroup();
+    loadAllowedModels();
+    $q.notify({ type: 'positive', message: 'Model added' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to add model';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    allowedModelsLoading.value = false;
+  }
+}
+
+async function onCreateAndAddModel(name?: string) {
+  const modelName = (name || modelSearchText.value).trim();
+  if (!group.value || !modelName) return;
+  allowedModelsLoading.value = true;
+  try {
+    await groupsStore.addGroupAllowedModel(group.value.id, { name: modelName });
+    modelToAdd.value = null;
+    modelSearchText.value = '';
+    await loadGroup();
+    loadAllowedModels();
+    $q.notify({ type: 'positive', message: `Model "${modelName}" created and added` });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to create model';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    allowedModelsLoading.value = false;
+  }
+}
+
+async function onRemoveAllowedModel(m: Model) {
+  if (!group.value) return;
+  allowedModelsLoading.value = true;
+  try {
+    await groupsStore.removeGroupAllowedModel(group.value.id, m.id);
+    await loadGroup();
+    loadAllowedModels();
+    $q.notify({ type: 'positive', message: `"${m.name}" removed` });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to remove model';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    allowedModelsLoading.value = false;
+  }
+}
+
+// Key allowed models methods
+function onExpandSubKey(props: { expand: boolean; row: GroupKey }) {
+  props.expand = !props.expand;
+  if (props.expand && allowedModels.value.length > 0) {
+    loadKeyAllowedModels(props.row.id);
+  }
+}
+
+function getKeyAllowedModels(keyId: string): Model[] {
+  return keyAllowedModelsMap.value[keyId] || [];
+}
+
+function keyModelOptions(keyId: string) {
+  const keyModels = getKeyAllowedModels(keyId);
+  return allowedModels.value
+    .filter((m) => !keyModels.some((km) => km.id === m.id))
+    .map((m) => ({ label: m.name, value: m.id }));
+}
+
+async function loadKeyAllowedModels(keyId: string) {
+  if (!group.value) return;
+  try {
+    const models = await groupsStore.fetchKeyAllowedModels(group.value.id, keyId);
+    keyAllowedModelsMap.value[keyId] = models;
+  } catch {
+    // silently fail
+  }
+}
+
+async function onAddKeyModel(keyId: string, modelId: string) {
+  if (!group.value || !modelId) return;
+  keyModelsLoading.value[keyId] = true;
+  try {
+    await groupsStore.addKeyAllowedModel(group.value.id, keyId, modelId);
+    await loadKeyAllowedModels(keyId);
+    const modelName = allowedModels.value.find((m) => m.id === modelId)?.name || modelId;
+    $q.notify({ type: 'positive', message: `"${modelName}" added to key` });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to add model to key';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    keyModelsLoading.value[keyId] = false;
+  }
+}
+
+async function onRemoveKeyModel(keyId: string, modelId: string) {
+  if (!group.value) return;
+  keyModelsLoading.value[keyId] = true;
+  try {
+    const modelName = getKeyAllowedModels(keyId).find((m) => m.id === modelId)?.name || modelId;
+    await groupsStore.removeKeyAllowedModel(group.value.id, keyId, modelId);
+    await loadKeyAllowedModels(keyId);
+    $q.notify({ type: 'positive', message: `"${modelName}" removed from key` });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to remove model from key';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    keyModelsLoading.value[keyId] = false;
   }
 }
 

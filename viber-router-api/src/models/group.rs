@@ -52,6 +52,7 @@ pub struct GroupWithServers {
     #[serde(flatten)]
     pub group: Group,
     pub servers: Vec<super::GroupServerDetail>,
+    pub allowed_models: Vec<super::Model>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

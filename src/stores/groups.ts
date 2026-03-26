@@ -15,6 +15,12 @@ export interface Group {
   updated_at: string;
 }
 
+export interface Model {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
 export interface GroupServerDetail {
   server_id: string;
   short_id: number;
@@ -31,6 +37,7 @@ export interface GroupServerDetail {
 
 export interface GroupWithServers extends Group {
   servers: GroupServerDetail[];
+  allowed_models: Model[];
 }
 
 interface PaginatedResponse {
@@ -259,6 +266,36 @@ export const useGroupsStore = defineStore('groups', () => {
     return fetchTokenUsageStats(groupId, { ...params, group_key_id: groupKeyId });
   }
 
+  // Group allowed models
+  async function fetchGroupAllowedModels(groupId: string) {
+    const { data } = await api.get<Model[]>(`/api/admin/groups/${groupId}/allowed-models`);
+    return data;
+  }
+
+  async function addGroupAllowedModel(groupId: string, input: { model_id?: string; name?: string }) {
+    const { data } = await api.post<Model>(`/api/admin/groups/${groupId}/allowed-models`, input);
+    return data;
+  }
+
+  async function removeGroupAllowedModel(groupId: string, modelId: string) {
+    await api.delete(`/api/admin/groups/${groupId}/allowed-models/${modelId}`);
+  }
+
+  // Key allowed models
+  async function fetchKeyAllowedModels(groupId: string, keyId: string) {
+    const { data } = await api.get<Model[]>(`/api/admin/groups/${groupId}/keys/${keyId}/allowed-models`);
+    return data;
+  }
+
+  async function addKeyAllowedModel(groupId: string, keyId: string, modelId: string) {
+    const { data } = await api.post<Model>(`/api/admin/groups/${groupId}/keys/${keyId}/allowed-models`, { model_id: modelId });
+    return data;
+  }
+
+  async function removeKeyAllowedModel(groupId: string, keyId: string, modelId: string) {
+    await api.delete(`/api/admin/groups/${groupId}/keys/${keyId}/allowed-models/${modelId}`);
+  }
+
   return {
     groups, total, totalPages, loading,
     fetchGroups, getGroup, createGroup, updateGroup, deleteGroup, regenerateKey,
@@ -266,5 +303,7 @@ export const useGroupsStore = defineStore('groups', () => {
     assignServer, updateAssignment, removeServer, reorderServers,
     fetchTtftStats, fetchCircuitStatus, fetchTokenUsageStats,
     fetchGroupKeys, createGroupKey, updateGroupKey, regenerateGroupKey, fetchKeyUsage,
+    fetchGroupAllowedModels, addGroupAllowedModel, removeGroupAllowedModel,
+    fetchKeyAllowedModels, addKeyAllowedModel, removeKeyAllowedModel,
   };
 });

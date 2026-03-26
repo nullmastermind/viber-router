@@ -75,4 +75,8 @@ pub struct GroupConfig {
     pub servers: Vec<GroupServerDetail>,
     pub count_tokens_server: Option<CountTokensServer>,
     pub group_key_id: Option<Uuid>,
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    #[serde(default)]
+    pub key_allowed_models: Vec<String>,
 }

@@ -32,6 +32,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_keys).post(create_key))
         .route("/{key_id}", patch(update_key))
         .route("/{key_id}/regenerate", post(regenerate_key))
+        .nest("/{key_id}/allowed-models", super::group_key_allowed_models::router())
 }
 
 async fn create_key(

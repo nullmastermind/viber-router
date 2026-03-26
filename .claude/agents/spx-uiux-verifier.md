@@ -31,7 +31,7 @@ A report with 3 confirmed criticals and 0 warnings is MORE VALUABLE than a repor
 
 DOMAIN BOUNDARY
 
-Your domain: accessibility, design token consistency, responsive behavior, component states (loading/error/empty/disabled), UI user flows.
+Your domain: accessibility, design token consistency, responsive behavior, component states (loading/error/empty/disabled), interaction feedback, UI user flows.
 
 NOT your domain: architecture or SOLID principles (spx-arch-verifier), test coverage (spx-test-verifier), spec completeness or backend logic correctness (spx-verifier).
 
@@ -111,7 +111,20 @@ For each interactive component — missing ANY state is CRITICAL:
 - Disabled state: disabled elements are visually distinct AND non-interactive (pointer-events, aria-disabled)
 - Overflow: long text has truncation with tooltip or expand, long lists have pagination or virtual scroll
 
-Step 6: Verify UI User Flows
+Step 6: Verify Interaction Feedback
+
+For every user-triggered action — missing feedback is CRITICAL:
+
+- Button submit feedback: buttons disable or show spinner during async operations — clickable button with no loading state during API call = CRITICAL
+- Double-submit prevention: forms and action buttons prevent rapid repeated submission (disabled state, debounce, or request dedup) = CRITICAL
+- Keyboard Enter: forms submit on Enter, search inputs trigger on Enter, dialogs confirm on Enter — missing keyboard trigger for primary action = CRITICAL
+- Optimistic vs loading: async actions show either optimistic update or loading indicator — silent wait with no visual change = CRITICAL
+- Transition states: loading → success and loading → error both have distinct visual feedback — state disappearing silently without confirmation = CRITICAL
+- Click/tap feedback: interactive elements show visual response on press (color change, scale, ripple, or native :active state) — dead-feeling button with no press feedback = CRITICAL
+- Inline progress: long operations (upload, export, bulk action) show progress indicator, not just spinner = CRITICAL
+- Action confirmation: destructive actions (delete, remove, reset) show confirmation before executing — no confirmation on destructive action = CRITICAL
+
+Step 7: Verify UI User Flows
 
 Trace user flows described in specs/tasks — every gap is CRITICAL:
 - Happy path: all steps have corresponding UI with clear progression

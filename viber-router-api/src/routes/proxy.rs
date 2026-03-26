@@ -96,6 +96,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                 servers: vec![],
                 count_tokens_server: None,
                 group_key_id: Some(sub_key_id),
+                allowed_models: vec![],
+                key_allowed_models: vec![],
             };
             cache::set_group_config(&state.redis, api_key, &config).await;
             return Some(config);
@@ -148,6 +150,34 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         None
     };
 
+    // Query group allowed models
+    let allowed_models: Vec<(String,)> = sqlx::query_as(
+        "SELECT m.name FROM models m \
+         JOIN group_allowed_models gam ON m.id = gam.model_id \
+         WHERE gam.group_id = $1 ORDER BY m.name",
+    )
+    .bind(group.id)
+    .fetch_all(&state.db)
+    .await
+    .ok()?;
+    let allowed_models: Vec<String> = allowed_models.into_iter().map(|(n,)| n).collect();
+
+    // Query key allowed models if using a sub-key
+    let key_allowed_models = if let Some(key_id) = group_key_id {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT m.name FROM models m \
+             JOIN group_key_allowed_models gkam ON m.id = gkam.model_id \
+             WHERE gkam.group_key_id = $1 ORDER BY m.name",
+        )
+        .bind(key_id)
+        .fetch_all(&state.db)
+        .await
+        .ok()?;
+        rows.into_iter().map(|(n,)| n).collect()
+    } else {
+        vec![]
+    };
+
     let config = GroupConfig {
         group_id: group.id,
         group_name: group.name.clone(),
@@ -158,6 +188,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         servers,
         count_tokens_server,
         group_key_id,
+        allowed_models,
+        key_allowed_models,
     };
 
     // Cache it for next time
@@ -326,6 +358,39 @@ async fn proxy_handler(
     let request_path = original_uri.path().to_string();
     let request_method = method.to_string();
     let loop_start = std::time::Instant::now();
+
+    // Model allowlist validation
+    if !config.allowed_models.is_empty() {
+        match &request_model {
+            None => {
+                return anthropic_error(
+                    StatusCode::FORBIDDEN,
+                    "permission_error",
+                    "Your API key does not have permission to use the specified model.",
+                );
+            }
+            Some(model) if !config.allowed_models.iter().any(|m| m == model) => {
+                return anthropic_error(
+                    StatusCode::FORBIDDEN,
+                    "permission_error",
+                    "Your API key does not have permission to use the specified model.",
+                );
+            }
+            _ => {}
+        }
+
+        // Key-level restriction (only when group has allowed models)
+        if !config.key_allowed_models.is_empty()
+            && let Some(model) = &request_model
+            && !config.key_allowed_models.iter().any(|m| m == model)
+        {
+            return anthropic_error(
+                StatusCode::FORBIDDEN,
+                "permission_error",
+                "Your API key does not have permission to use the specified model.",
+            );
+        }
+    }
 
     // Build headers map (excluding host, content-length, x-api-key) for logging
     let log_headers: serde_json::Map<String, Value> = headers
