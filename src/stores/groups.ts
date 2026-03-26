@@ -18,6 +18,10 @@ export interface Group {
 export interface Model {
   id: string;
   name: string;
+  input_1m_usd: number | null;
+  output_1m_usd: number | null;
+  cache_write_1m_usd: number | null;
+  cache_read_1m_usd: number | null;
   created_at: string;
 }
 
@@ -33,6 +37,10 @@ export interface GroupServerDetail {
   cb_max_failures: number | null;
   cb_window_seconds: number | null;
   cb_cooldown_seconds: number | null;
+  rate_input: number | null;
+  rate_output: number | null;
+  rate_cache_write: number | null;
+  rate_cache_read: number | null;
 }
 
 export interface GroupWithServers extends Group {
@@ -83,6 +91,7 @@ export interface ServerTokenUsage {
   total_cache_creation_tokens: number;
   total_cache_read_tokens: number;
   request_count: number;
+  cost_usd: number | null;
 }
 
 export interface TokenUsageStats {
@@ -185,6 +194,10 @@ export const useGroupsStore = defineStore('groups', () => {
       cb_max_failures?: number | null;
       cb_window_seconds?: number | null;
       cb_cooldown_seconds?: number | null;
+      rate_input?: number | null;
+      rate_output?: number | null;
+      rate_cache_write?: number | null;
+      rate_cache_read?: number | null;
     },
   ) {
     await api.put(`/api/admin/groups/${groupId}/servers/${serverId}`, input);

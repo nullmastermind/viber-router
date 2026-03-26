@@ -12,6 +12,10 @@ pub struct GroupServer {
     pub cb_max_failures: Option<i32>,
     pub cb_window_seconds: Option<i32>,
     pub cb_cooldown_seconds: Option<i32>,
+    pub rate_input: Option<f64>,
+    pub rate_output: Option<f64>,
+    pub rate_cache_write: Option<f64>,
+    pub rate_cache_read: Option<f64>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -30,6 +34,26 @@ pub struct GroupServerDetail {
     pub cb_cooldown_seconds: Option<i32>,
 }
 
+/// Admin-facing server detail with rate fields (not used in proxy cache)
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AdminGroupServerDetail {
+    pub server_id: Uuid,
+    pub short_id: i32,
+    pub server_name: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub priority: i32,
+    pub model_mappings: serde_json::Value,
+    pub is_enabled: bool,
+    pub cb_max_failures: Option<i32>,
+    pub cb_window_seconds: Option<i32>,
+    pub cb_cooldown_seconds: Option<i32>,
+    pub rate_input: Option<f64>,
+    pub rate_output: Option<f64>,
+    pub rate_cache_write: Option<f64>,
+    pub rate_cache_read: Option<f64>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AssignServer {
     pub server_id: Uuid,
@@ -45,6 +69,10 @@ pub struct UpdateAssignment {
     pub cb_max_failures: Option<Option<i32>>,
     pub cb_window_seconds: Option<Option<i32>>,
     pub cb_cooldown_seconds: Option<Option<i32>>,
+    pub rate_input: Option<Option<f64>>,
+    pub rate_output: Option<Option<f64>>,
+    pub rate_cache_write: Option<Option<f64>>,
+    pub rate_cache_read: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize)]

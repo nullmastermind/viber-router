@@ -46,6 +46,7 @@ struct ServerTokenUsage {
     total_cache_creation_tokens: i64,
     total_cache_read_tokens: i64,
     request_count: i64,
+    cost_usd: Option<f64>,
 }
 
 fn resolve_interval(period: &str) -> &'static str {
@@ -99,8 +100,17 @@ async fn get_token_usage(
              COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
              COALESCE(SUM(t.cache_creation_tokens)::bigint, 0) as total_cache_creation_tokens, \
              COALESCE(SUM(t.cache_read_tokens)::bigint, 0) as total_cache_read_tokens, \
-             COUNT(*)::bigint as request_count \
-             FROM token_usage_logs t JOIN servers s ON s.id = t.server_id \
+             COUNT(*)::bigint as request_count, \
+             CASE WHEN m.id IS NOT NULL AND (m.input_1m_usd IS NOT NULL OR m.output_1m_usd IS NOT NULL OR m.cache_write_1m_usd IS NOT NULL OR m.cache_read_1m_usd IS NOT NULL) THEN \
+               (COALESCE(SUM(t.input_tokens::float8 * COALESCE(m.input_1m_usd, 0) * COALESCE(gs.rate_input, 1.0)), 0) + \
+                COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
+             ELSE NULL END as cost_usd \
+             FROM token_usage_logs t \
+             JOIN servers s ON s.id = t.server_id \
+             LEFT JOIN models m ON m.name = t.model \
+             LEFT JOIN group_servers gs ON gs.group_id = t.group_id AND gs.server_id = t.server_id \
              WHERE t.group_id = $1 AND t.created_at >= $2 AND t.created_at < $3",
         );
         let mut param_idx = 3;
@@ -123,7 +133,9 @@ async fn get_token_usage(
             None => {}
         }
         qb.push_str(
-            " GROUP BY t.server_id, s.name, t.model ORDER BY s.name, t.model",
+            " GROUP BY t.server_id, s.name, t.model, m.id, m.input_1m_usd, m.output_1m_usd, m.cache_write_1m_usd, m.cache_read_1m_usd, \
+             gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read \
+             ORDER BY s.name, t.model",
         );
 
         let mut query = sqlx::query_as::<_, ServerTokenUsage>(&qb)
@@ -149,8 +161,17 @@ async fn get_token_usage(
              COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
              COALESCE(SUM(t.cache_creation_tokens)::bigint, 0) as total_cache_creation_tokens, \
              COALESCE(SUM(t.cache_read_tokens)::bigint, 0) as total_cache_read_tokens, \
-             COUNT(*)::bigint as request_count \
-             FROM token_usage_logs t JOIN servers s ON s.id = t.server_id \
+             COUNT(*)::bigint as request_count, \
+             CASE WHEN m.id IS NOT NULL AND (m.input_1m_usd IS NOT NULL OR m.output_1m_usd IS NOT NULL OR m.cache_write_1m_usd IS NOT NULL OR m.cache_read_1m_usd IS NOT NULL) THEN \
+               (COALESCE(SUM(t.input_tokens::float8 * COALESCE(m.input_1m_usd, 0) * COALESCE(gs.rate_input, 1.0)), 0) + \
+                COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
+             ELSE NULL END as cost_usd \
+             FROM token_usage_logs t \
+             JOIN servers s ON s.id = t.server_id \
+             LEFT JOIN models m ON m.name = t.model \
+             LEFT JOIN group_servers gs ON gs.group_id = t.group_id AND gs.server_id = t.server_id \
              WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}'"
         );
         let mut param_idx = 1;
@@ -173,7 +194,9 @@ async fn get_token_usage(
             None => {}
         }
         qb.push_str(
-            " GROUP BY t.server_id, s.name, t.model ORDER BY s.name, t.model",
+            " GROUP BY t.server_id, s.name, t.model, m.id, m.input_1m_usd, m.output_1m_usd, m.cache_write_1m_usd, m.cache_read_1m_usd, \
+             gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read \
+             ORDER BY s.name, t.model",
         );
 
         let mut query =

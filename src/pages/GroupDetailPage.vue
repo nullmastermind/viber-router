@@ -116,10 +116,23 @@
                   </q-item-section>
                   <q-item-section side>
                     <div class="row q-gutter-xs items-center">
+                      <q-badge
+                        outline
+                        :color="hasNonDefaultRate(s) ? 'orange' : 'grey'"
+                        class="cursor-pointer q-pa-xs"
+                        tabindex="0"
+                        role="button"
+                        :aria-label="`Edit cost rates for ${s.server_name}`"
+                        @click.stop="openRateModal(s)"
+                        @keydown.enter.stop="openRateModal(s)"
+                        @keydown.space.stop="openRateModal(s)"
+                      >
+                        x{{ displayRate(s) }}
+                      </q-badge>
                       <q-toggle v-model="s.is_enabled" dense :aria-label="`${s.server_name} enabled`" @update:model-value="toggleServerEnabled(s)" />
-                      <q-btn flat dense icon="edit" @click="openEditServer(s)" />
-                      <q-btn flat dense icon="tune" @click="editMappings(s)" />
-                      <q-btn flat dense icon="delete" color="negative" @click="onRemoveServer(s)" />
+                      <q-btn flat dense icon="edit" :aria-label="`Edit server ${s.server_name}`" @click="openEditServer(s)" />
+                      <q-btn flat dense icon="tune" :aria-label="`Edit model mappings for ${s.server_name}`" @click="editMappings(s)" />
+                      <q-btn flat dense icon="delete" color="negative" :aria-label="`Remove server ${s.server_name}`" @click="onRemoveServer(s)" />
                     </div>
                   </q-item-section>
                 </q-item>
@@ -340,7 +353,20 @@
             row-key="__key"
             :pagination="{ rowsPerPage: 0 }"
             hide-pagination
-          />
+          >
+            <template #bottom-row>
+              <q-tr class="text-weight-bold">
+                <q-td>Total</q-td>
+                <q-td />
+                <q-td class="text-right">{{ totalTokenUsage.input.toLocaleString() }}</q-td>
+                <q-td class="text-right">{{ totalTokenUsage.output.toLocaleString() }}</q-td>
+                <q-td class="text-right">{{ totalTokenUsage.cacheCreation.toLocaleString() }}</q-td>
+                <q-td class="text-right">{{ totalTokenUsage.cacheRead.toLocaleString() }}</q-td>
+                <q-td class="text-right">{{ totalTokenUsage.requests.toLocaleString() }}</q-td>
+                <q-td class="text-right">{{ totalTokenUsage.cost != null ? `$${totalTokenUsage.cost.toFixed(4)}` : '\u2014' }}</q-td>
+              </q-tr>
+            </template>
+          </q-table>
             </q-card-section>
           </q-card>
         </q-tab-panel>
@@ -400,7 +426,7 @@
             <q-input v-model="editServerForm.api_key" label="API Key (optional)" outlined class="q-mb-sm" />
             <div class="text-subtitle2 q-mt-md q-mb-xs">Circuit Breaker</div>
             <div class="text-caption text-grey q-mb-sm">
-              Tự động tắt server sau khi lỗi vượt ngưỡng, tự bật lại sau thời gian chờ. Để trống tất cả để tắt.
+              Auto-shutdown the server when errors exceed a threshold, then auto-restart after a cooldown period. Leave all fields empty to disable.
             </div>
             <q-input
               v-model.number="editServerCbForm.cb_max_failures"
@@ -452,6 +478,22 @@
           <q-card-actions align="right">
             <q-btn flat label="Cancel" v-close-popup />
             <q-btn color="primary" label="Create" :loading="creatingKey" @click="onCreateKey" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
+      <q-dialog v-model="showRateModal">
+        <q-card style="width: 400px">
+          <q-card-section><div class="text-h6">Cost Rates — {{ rateEditServer?.server_name }}</div></q-card-section>
+          <q-card-section class="q-gutter-sm">
+            <q-input v-model.number="rateForm.rate_input" label="Input Rate" outlined dense type="number" :min="0" placeholder="1.0" clearable @clear="rateForm.rate_input = null" />
+            <q-input v-model.number="rateForm.rate_output" label="Output Rate" outlined dense type="number" :min="0" placeholder="1.0" clearable @clear="rateForm.rate_output = null" />
+            <q-input v-model.number="rateForm.rate_cache_write" label="Cache Write Rate" outlined dense type="number" :min="0" placeholder="1.0" clearable @clear="rateForm.rate_cache_write = null" />
+            <q-input v-model.number="rateForm.rate_cache_read" label="Cache Read Rate" outlined dense type="number" :min="0" placeholder="1.0" clearable @clear="rateForm.rate_cache_read = null" />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" label="Save" :loading="savingRate" @click="onSaveRates" />
           </q-card-actions>
         </q-card>
       </q-dialog>
@@ -538,6 +580,17 @@ const showCreateKey = ref(false);
 const newKeyName = ref('');
 const creatingKey = ref(false);
 
+// Rate modal state
+const showRateModal = ref(false);
+const rateEditServer = ref<GroupServerDetail | null>(null);
+const savingRate = ref(false);
+const rateForm = ref({
+  rate_input: null as number | null,
+  rate_output: null as number | null,
+  rate_cache_write: null as number | null,
+  rate_cache_read: null as number | null,
+});
+
 // Allowed models state
 const allowedModels = ref<Model[]>([]);
 const modelToAdd = ref<string | null>(null);
@@ -568,12 +621,13 @@ const tokenUsageServerOptions = computed(() =>
 
 const tokenUsageColumns = [
   { name: 'server', label: 'Server', field: 'server_name', align: 'left' as const },
-  { name: 'model', label: 'Model', field: 'model', align: 'left' as const, format: (v: string | null) => v || '—' },
+  { name: 'model', label: 'Model', field: 'model', align: 'left' as const, format: (v: string | null) => v || '\u2014' },
   { name: 'input', label: 'Input Tokens', field: 'total_input_tokens', align: 'right' as const, format: (v: number) => v.toLocaleString() },
   { name: 'output', label: 'Output Tokens', field: 'total_output_tokens', align: 'right' as const, format: (v: number) => v.toLocaleString() },
   { name: 'cache_creation', label: 'Cache Creation', field: 'total_cache_creation_tokens', align: 'right' as const, format: (v: number) => v.toLocaleString() },
   { name: 'cache_read', label: 'Cache Read', field: 'total_cache_read_tokens', align: 'right' as const, format: (v: number) => v.toLocaleString() },
   { name: 'requests', label: 'Requests', field: 'request_count', align: 'right' as const, format: (v: number) => v.toLocaleString() },
+  { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
 ];
 
 const filteredTokenUsageRows = computed(() => {
@@ -583,6 +637,18 @@ const filteredTokenUsageRows = computed(() => {
     rows = rows.filter((r) => r.server_id === tokenUsageServerFilter.value);
   }
   return rows.map((r, i) => ({ ...r, __key: `${r.server_id}-${r.model}-${i}` }));
+});
+
+const totalTokenUsage = computed(() => {
+  const rows = filteredTokenUsageRows.value;
+  const input = rows.reduce((s, r) => s + r.total_input_tokens, 0);
+  const output = rows.reduce((s, r) => s + r.total_output_tokens, 0);
+  const cacheCreation = rows.reduce((s, r) => s + r.total_cache_creation_tokens, 0);
+  const cacheRead = rows.reduce((s, r) => s + r.total_cache_read_tokens, 0);
+  const requests = rows.reduce((s, r) => s + r.request_count, 0);
+  const costRows = rows.filter((r) => r.cost_usd != null);
+  const cost = costRows.length > 0 ? costRows.reduce((s, r) => s + (r.cost_usd ?? 0), 0) : null;
+  return { input, output, cacheCreation, cacheRead, requests, cost };
 });
 const visibleKeyBuilderEntries = computed(() =>
   showAllKeyBuilderServers.value
@@ -1134,6 +1200,60 @@ async function onRemoveKeyModel(keyId: string, modelId: string) {
     $q.notify({ type: 'negative', message: msg });
   } finally {
     keyModelsLoading.value[keyId] = false;
+  }
+}
+
+// Rate badge helpers
+function hasNonDefaultRate(s: GroupServerDetail): boolean {
+  return [s.rate_input, s.rate_output, s.rate_cache_write, s.rate_cache_read].some(
+    (r) => r !== null && r !== undefined && r !== 1.0,
+  );
+}
+
+function displayRate(s: GroupServerDetail): string {
+  const rates = [s.rate_input, s.rate_output, s.rate_cache_write, s.rate_cache_read];
+  const nonDefault = rates.filter((r) => r !== null && r !== undefined && r !== 1.0);
+  if (nonDefault.length === 0) return '1.0';
+  const allSame = nonDefault.length === rates.length && nonDefault.every((r) => r === nonDefault[0]);
+  if (allSame) return String(nonDefault[0]);
+  return 'custom';
+}
+
+function openRateModal(s: GroupServerDetail) {
+  rateEditServer.value = s;
+  rateForm.value = {
+    rate_input: s.rate_input,
+    rate_output: s.rate_output,
+    rate_cache_write: s.rate_cache_write,
+    rate_cache_read: s.rate_cache_read,
+  };
+  showRateModal.value = true;
+}
+
+async function onSaveRates() {
+  if (!group.value || !rateEditServer.value) return;
+  for (const field of ['rate_input', 'rate_output', 'rate_cache_write', 'rate_cache_read'] as const) {
+    if (rateForm.value[field] !== null && rateForm.value[field] !== undefined && (rateForm.value[field] as number) < 0) {
+      $q.notify({ type: 'negative', message: `${field} must be non-negative` });
+      return;
+    }
+  }
+  savingRate.value = true;
+  try {
+    await groupsStore.updateAssignment(group.value.id, rateEditServer.value.server_id, {
+      rate_input: rateForm.value.rate_input,
+      rate_output: rateForm.value.rate_output,
+      rate_cache_write: rateForm.value.rate_cache_write,
+      rate_cache_read: rateForm.value.rate_cache_read,
+    });
+    showRateModal.value = false;
+    await loadGroup();
+    $q.notify({ type: 'positive', message: 'Rates saved' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to save rates';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    savingRate.value = false;
   }
 }
 

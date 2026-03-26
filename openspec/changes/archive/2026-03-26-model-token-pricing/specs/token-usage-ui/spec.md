@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Token usage section in Group Detail page
 The Group Detail page SHALL display a "Token Usage" section showing aggregated token usage statistics per server within the group, with filtering controls and cost information.

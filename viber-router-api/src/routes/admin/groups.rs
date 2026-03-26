@@ -8,7 +8,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::models::{
-    CreateGroup, Group, GroupListItem, GroupServerDetail, GroupWithServers, Model, PaginatedResponse, UpdateGroup,
+    AdminGroupServerDetail, CreateGroup, Group, GroupListItem, GroupWithServers, Model, PaginatedResponse, UpdateGroup,
     generate_api_key,
 };
 use crate::routes::AppState;
@@ -159,9 +159,10 @@ async fn get_group(
         .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Group not found"))?;
 
-    let servers = sqlx::query_as::<_, GroupServerDetail>(
+    let servers = sqlx::query_as::<_, AdminGroupServerDetail>(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
-         gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds \
+         gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
+         gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 ORDER BY gs.priority",
     )

@@ -51,7 +51,7 @@ pub struct UpdateGroup {
 pub struct GroupWithServers {
     #[serde(flatten)]
     pub group: Group,
-    pub servers: Vec<super::GroupServerDetail>,
+    pub servers: Vec<super::AdminGroupServerDetail>,
     pub allowed_models: Vec<super::Model>,
 }
 

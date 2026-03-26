@@ -15,8 +15,28 @@ export const useModelsStore = defineStore('models', () => {
     return data;
   }
 
-  async function createModel(name: string) {
-    const { data } = await api.post<Model>('/api/admin/models', { name });
+  async function createModel(input: {
+    name: string;
+    input_1m_usd?: number | null;
+    output_1m_usd?: number | null;
+    cache_write_1m_usd?: number | null;
+    cache_read_1m_usd?: number | null;
+  }) {
+    const { data } = await api.post<Model>('/api/admin/models', input);
+    return data;
+  }
+
+  async function updateModel(
+    id: string,
+    input: {
+      name?: string;
+      input_1m_usd?: number | null;
+      output_1m_usd?: number | null;
+      cache_write_1m_usd?: number | null;
+      cache_read_1m_usd?: number | null;
+    },
+  ) {
+    const { data } = await api.put<Model>(`/api/admin/models/${id}`, input);
     return data;
   }
 
@@ -24,5 +44,5 @@ export const useModelsStore = defineStore('models', () => {
     await api.delete(`/api/admin/models/${id}`);
   }
 
-  return { fetchModels, createModel, deleteModel };
+  return { fetchModels, createModel, updateModel, deleteModel };
 });

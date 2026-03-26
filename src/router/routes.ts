@@ -13,6 +13,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'servers', component: () => import('pages/ServersPage.vue') },
       { path: 'groups', component: () => import('pages/GroupsPage.vue') },
       { path: 'groups/:id', component: () => import('pages/GroupDetailPage.vue') },
+      { path: 'models', component: () => import('pages/ModelsPage.vue') },
       { path: 'logs', component: () => import('pages/LogsPage.vue') },
       { path: 'settings', component: () => import('pages/SettingsPage.vue') },
     ],

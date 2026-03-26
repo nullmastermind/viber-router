@@ -102,6 +102,20 @@ async fn update_assignment(
     // Validate circuit breaker fields
     validate_cb_fields(input.cb_max_failures, input.cb_window_seconds, input.cb_cooldown_seconds)?;
 
+    // Validate non-negative rate fields
+    for (field, val) in [
+        ("rate_input", &input.rate_input),
+        ("rate_output", &input.rate_output),
+        ("rate_cache_write", &input.rate_cache_write),
+        ("rate_cache_read", &input.rate_cache_read),
+    ] {
+        if let Some(Some(v)) = val
+            && *v < 0.0
+        {
+            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+        }
+    }
+
     // Determine whether to update CB fields
     let (update_cb_max, cb_max_val) = match input.cb_max_failures {
         Some(v) => (true, v),
@@ -116,6 +130,24 @@ async fn update_assignment(
         None => (false, None),
     };
 
+    // Determine whether to update rate fields
+    let (update_rate_input, rate_input_val) = match input.rate_input {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_rate_output, rate_output_val) = match input.rate_output {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_rate_cw, rate_cw_val) = match input.rate_cache_write {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_rate_cr, rate_cr_val) = match input.rate_cache_read {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
     let gs = sqlx::query_as::<_, GroupServer>(
         "UPDATE group_servers SET \
          priority = COALESCE($1, priority), \
@@ -123,7 +155,11 @@ async fn update_assignment(
          is_enabled = COALESCE($3, is_enabled), \
          cb_max_failures = CASE WHEN $6 THEN $7 ELSE cb_max_failures END, \
          cb_window_seconds = CASE WHEN $8 THEN $9 ELSE cb_window_seconds END, \
-         cb_cooldown_seconds = CASE WHEN $10 THEN $11 ELSE cb_cooldown_seconds END \
+         cb_cooldown_seconds = CASE WHEN $10 THEN $11 ELSE cb_cooldown_seconds END, \
+         rate_input = CASE WHEN $12 THEN $13 ELSE rate_input END, \
+         rate_output = CASE WHEN $14 THEN $15 ELSE rate_output END, \
+         rate_cache_write = CASE WHEN $16 THEN $17 ELSE rate_cache_write END, \
+         rate_cache_read = CASE WHEN $18 THEN $19 ELSE rate_cache_read END \
          WHERE group_id = $4 AND server_id = $5 RETURNING *",
     )
     .bind(input.priority)
@@ -137,6 +173,14 @@ async fn update_assignment(
     .bind(cb_window_val)
     .bind(update_cb_cooldown)
     .bind(cb_cooldown_val)
+    .bind(update_rate_input)
+    .bind(rate_input_val)
+    .bind(update_rate_output)
+    .bind(rate_output_val)
+    .bind(update_rate_cw)
+    .bind(rate_cw_val)
+    .bind(update_rate_cr)
+    .bind(rate_cr_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

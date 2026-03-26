@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::models::{CreateModel, Model, PaginatedResponse};
+use crate::models::{CreateModel, Model, PaginatedResponse, UpdateModel};
 use crate::routes::AppState;
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
@@ -30,7 +30,7 @@ pub struct ListParams {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_models).post(create_model))
-        .route("/{id}", axum::routing::delete(delete_model))
+        .route("/{id}", axum::routing::put(update_model).delete(delete_model))
 }
 
 async fn list_models(
@@ -52,7 +52,8 @@ async fn list_models(
         .map_err(internal)?;
 
         let rows = sqlx::query_as::<_, Model>(
-            "SELECT * FROM models WHERE name ILIKE $1 ORDER BY name LIMIT $2 OFFSET $3",
+            "SELECT id, name, input_1m_usd, output_1m_usd, cache_write_1m_usd, cache_read_1m_usd, created_at \
+             FROM models WHERE name ILIKE $1 ORDER BY name LIMIT $2 OFFSET $3",
         )
         .bind(pattern)
         .bind(limit)
@@ -69,7 +70,8 @@ async fn list_models(
             .map_err(internal)?;
 
         let rows = sqlx::query_as::<_, Model>(
-            "SELECT * FROM models ORDER BY name LIMIT $1 OFFSET $2",
+            "SELECT id, name, input_1m_usd, output_1m_usd, cache_write_1m_usd, cache_read_1m_usd, created_at \
+             FROM models ORDER BY name LIMIT $1 OFFSET $2",
         )
         .bind(limit)
         .bind(offset)
@@ -93,10 +95,29 @@ async fn create_model(
         return Err(err(StatusCode::BAD_REQUEST, "Model name is required"));
     }
 
+    // Validate non-negative pricing
+    for (field, val) in [
+        ("input_1m_usd", input.input_1m_usd),
+        ("output_1m_usd", input.output_1m_usd),
+        ("cache_write_1m_usd", input.cache_write_1m_usd),
+        ("cache_read_1m_usd", input.cache_read_1m_usd),
+    ] {
+        if let Some(v) = val
+            && v < 0.0
+        {
+            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+        }
+    }
+
     let model = sqlx::query_as::<_, Model>(
-        "INSERT INTO models (name) VALUES ($1) RETURNING *",
+        "INSERT INTO models (name, input_1m_usd, output_1m_usd, cache_write_1m_usd, cache_read_1m_usd) \
+         VALUES ($1, $2, $3, $4, $5) RETURNING *",
     )
     .bind(&name)
+    .bind(input.input_1m_usd)
+    .bind(input.output_1m_usd)
+    .bind(input.cache_write_1m_usd)
+    .bind(input.cache_read_1m_usd)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -108,6 +129,75 @@ async fn create_model(
     })?;
 
     Ok((StatusCode::CREATED, Json(model)))
+}
+
+async fn update_model(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateModel>,
+) -> Result<Json<Model>, ApiError> {
+    // Validate non-negative pricing
+    for (field, val) in [
+        ("input_1m_usd", &input.input_1m_usd),
+        ("output_1m_usd", &input.output_1m_usd),
+        ("cache_write_1m_usd", &input.cache_write_1m_usd),
+        ("cache_read_1m_usd", &input.cache_read_1m_usd),
+    ] {
+        if let Some(Some(v)) = val
+            && *v < 0.0
+        {
+            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+        }
+    }
+
+    let (update_input, input_val) = match input.input_1m_usd {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_output, output_val) = match input.output_1m_usd {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_cw, cw_val) = match input.cache_write_1m_usd {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_cr, cr_val) = match input.cache_read_1m_usd {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
+    let model = sqlx::query_as::<_, Model>(
+        "UPDATE models SET \
+         name = COALESCE($1, name), \
+         input_1m_usd = CASE WHEN $3 THEN $4 ELSE input_1m_usd END, \
+         output_1m_usd = CASE WHEN $5 THEN $6 ELSE output_1m_usd END, \
+         cache_write_1m_usd = CASE WHEN $7 THEN $8 ELSE cache_write_1m_usd END, \
+         cache_read_1m_usd = CASE WHEN $9 THEN $10 ELSE cache_read_1m_usd END \
+         WHERE id = $2 RETURNING *",
+    )
+    .bind(&input.name)
+    .bind(id)
+    .bind(update_input)
+    .bind(input_val)
+    .bind(update_output)
+    .bind(output_val)
+    .bind(update_cw)
+    .bind(cw_val)
+    .bind(update_cr)
+    .bind(cr_val)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
+            err(StatusCode::CONFLICT, "Model name already exists")
+        } else {
+            internal(e)
+        }
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Model not found"))?;
+
+    Ok(Json(model))
 }
 
 async fn delete_model(
