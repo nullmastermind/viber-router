@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::routes::AppState;
+use crate::usage_buffer::hash_key;
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
 
@@ -69,6 +70,12 @@ async fn get_token_usage(
         .group_id
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "group_id is required"))?;
 
+    // If the caller passed a raw API key (longer than the 16-char hash we store),
+    // hash it so the query matches what's in the database.
+    let key_hash = params.key_hash.map(|kh| {
+        if kh.len() > 16 { hash_key(&kh) } else { kh }
+    });
+
     let servers = if let (Some(start), Some(end)) = (params.start, params.end) {
         let mut qb = String::from(
             "SELECT t.server_id, s.name as server_name, t.model, \
@@ -85,7 +92,7 @@ async fn get_token_usage(
             param_idx += 1;
             qb.push_str(&format!(" AND t.is_dynamic_key = ${param_idx}"));
         }
-        if params.key_hash.is_some() {
+        if key_hash.is_some() {
             param_idx += 1;
             qb.push_str(&format!(" AND t.key_hash = ${param_idx}"));
         }
@@ -100,7 +107,7 @@ async fn get_token_usage(
         if let Some(is_dk) = params.is_dynamic_key {
             query = query.bind(is_dk);
         }
-        if let Some(ref kh) = params.key_hash {
+        if let Some(ref kh) = key_hash {
             query = query.bind(kh);
         }
         query.fetch_all(&state.db).await.map_err(internal)?
@@ -122,7 +129,7 @@ async fn get_token_usage(
             param_idx += 1;
             qb.push_str(&format!(" AND t.is_dynamic_key = ${param_idx}"));
         }
-        if params.key_hash.is_some() {
+        if key_hash.is_some() {
             param_idx += 1;
             qb.push_str(&format!(" AND t.key_hash = ${param_idx}"));
         }
@@ -135,7 +142,7 @@ async fn get_token_usage(
         if let Some(is_dk) = params.is_dynamic_key {
             query = query.bind(is_dk);
         }
-        if let Some(ref kh) = params.key_hash {
+        if let Some(ref kh) = key_hash {
             query = query.bind(kh);
         }
         query.fetch_all(&state.db).await.map_err(internal)?

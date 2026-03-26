@@ -574,7 +574,7 @@ async function loadTokenUsage() {
       period: tokenUsagePeriod.value,
     };
     if (tokenUsageDynamicKeyFilter.value) params.is_dynamic_key = true;
-    if (tokenUsageKeyHashFilter.value.trim()) params.key_hash = tokenUsageKeyHashFilter.value.trim();
+    if (tokenUsageKeyHashFilter.value?.trim()) params.key_hash = tokenUsageKeyHashFilter.value.trim();
     tokenUsageStats.value = await groupsStore.fetchTokenUsageStats(group.value.id, params);
   } catch {
     tokenUsageError.value = 'Failed to load token usage data';
