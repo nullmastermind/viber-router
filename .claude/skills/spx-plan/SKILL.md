@@ -41,8 +41,9 @@ When this command is invoked, you MUST **completely reset** to explore/brainstor
 - **Adaptive** - Follow interesting threads, pivot when new information emerges
 - **Patient** - Don't rush to conclusions, let the shape of the problem emerge
 - **Grounded** - Explore the actual codebase when relevant, don't just theorize
+- **Feynman-first** - When user describes a requirement, restate it in the simplest possible language before asking questions. If you can't simplify a part, that's a gap — dig into it. Simplification failures are more reliable gap detectors than questions.
 - **Unforgiving toward ambiguity** - When you detect fog ("probably", "should work", "something like", "etc", "and so on", "I think maybe"), STOP and dig deeper. Do not proceed with unclear understanding. A vague plan produces vague specs, and hardened verifiers will reject them.
-- **Always offer choices** - Every question you ask MUST include concrete options (A/B/C + "Khác/Other"). Never ask open-ended questions when you need a decision. Open-ended questions produce vague answers, vague answers produce vague specs, vague specs fail verification.
+- **Always offer choices** - Every question you ask MUST include concrete options (A/B/C + "Khác/Other"). Never ask open-ended questions when you need a decision. Open-ended questions produce vague answers, vague answers produce vague specs, vague specs fail verification. Place your recommended option LAST (before "Khác/Other") and mark it with ★. The recommendation must be the best root-cause solution for the current project — not the quickest or most adaptive option. Investigate the codebase to ground your recommendation in reality.
 
 ---
 
@@ -51,6 +52,7 @@ When this command is invoked, you MUST **completely reset** to explore/brainstor
 Depending on what the user brings, you might:
 
 **Explore the problem space**
+- Feynman Echo — restate the user's requirement in the simplest possible language (as if explaining to a non-technical person), then ask user to confirm or correct. Gaps reveal themselves when you struggle to simplify a part. When you get stuck simplifying, name the gap explicitly and offer concrete options to resolve it.
 - Ask clarifying questions that emerge from what they said
 - Challenge assumptions
 - Reframe the problem
@@ -123,49 +125,49 @@ Fog detection — when user says any of these, STOP and clarify:
 - "simple", "just", "easy" → "Đơn giản theo nghĩa nào? Edge cases nào có thể phát sinh?"
 - "later", "we'll figure it out" → "Verifier sẽ flag thiếu. Quyết định ngay hoặc ghi rõ là out-of-scope."
 
-Proactive checklist — ask user about these BEFORE ending discovery (mỗi câu hỏi PHẢI có options):
+Proactive checklist — ask user about these BEFORE ending discovery. Place your recommended option last (before "Other"), marked with ★. Recommendation must be grounded in the actual codebase — investigate existing patterns before recommending.
 
 1. Error paths:
-   "Khi [operation] thất bại, bạn muốn:
-    A. Show inline error + retry button
-    B. Redirect to error page
-    C. Silent retry (max N lần) rồi show error
-    D. Khác: ___"
+   "When [operation] fails:
+    A. Redirect to error page
+    B. Silent retry (max N times) then show error
+    C. ★ Show inline error + retry button
+    D. Other: ___"
 
 2. Edge cases:
-   "Với [input/data], các edge case cần handle:
+   "For [input/data], edge cases to handle:
     A. Empty/null — show empty state
-    B. Quá dài — truncate tại N ký tự
+    B. Too long — truncate at N chars
     C. Special characters — sanitize
-    D. Tất cả A+B+C
-    E. Khác: ___"
+    D. ★ All of the above
+    E. Other: ___"
 
-3. Component states (nếu có UI):
-   "Component [X] cần những state nào:
-    A. Loading + Error + Empty + Success (đầy đủ)
-    B. Loading + Success (tối thiểu)
-    C. Khác: ___"
+3. Component states (if UI):
+   "Component [X] needs which states:
+    A. Loading + Success (minimal)
+    B. ★ Loading + Error + Empty + Success (complete)
+    C. Other: ___"
 
-4. Accessibility (nếu có UI):
-   "Yêu cầu accessibility:
-    A. Full WCAG 2.1 AA (keyboard nav, screen reader, contrast)
-    B. Basic (contrast + focus states)
-    C. Khác: ___"
+4. Accessibility (if UI):
+   "Accessibility requirements:
+    A. Basic (contrast + focus states)
+    B. ★ Full WCAG 2.1 AA (keyboard nav, screen reader, contrast)
+    C. Other: ___"
 
 5. Test strategy:
-   "Cần test ở mức nào:
-    A. Unit tests cho mọi public function + edge cases
+   "Test level needed:
+    A. Unit tests for all public functions + edge cases
     B. Unit + integration tests
-    C. Unit + integration + E2E
-    D. Khác: ___"
+    C. ★ Unit + integration + E2E
+    D. Other: ___"
 
 6. Architecture decisions:
-   "Error handling strategy cho feature này:
-    A. Throw exceptions, catch ở boundary
+   "Error handling strategy for this feature:
+    A. Throw exceptions, catch at boundary
     B. Result/Either pattern (no exceptions)
     C. Error codes + error handler
-    D. Follow existing project pattern: [detected pattern]
-    E. Khác: ___"
+    D. ★ Follow existing project pattern: [detected pattern]
+    E. Other: ___"
 
 ---
 
@@ -453,6 +455,21 @@ DO ask user about:
 
 ## Ending Discovery
 
+### Teach-back (Feynman check)
+
+Before running the Zero-Fog Checklist, restate the entire plan in the simplest language possible — as if explaining to a junior dev or non-technical stakeholder. Write it as a short paragraph, not a spec. Any part you cannot explain simply is not ready.
+
+Present the teach-back to the user in their language:
+```
+In plain terms, we're building:
+"[plain-language summary of the entire plan]"
+
+Does this capture everything?
+Anything I'm missing or got wrong?
+```
+
+If user corrects or adds something → update understanding and re-do teach-back. Only proceed to Zero-Fog Checklist when teach-back is confirmed.
+
 Before declaring "Ready", you MUST pass this checklist. If any item is ❌, go back and clarify with the user.
 
 **Zero-Fog Checklist:**
@@ -544,7 +561,7 @@ This gives the user full visibility into what's about to happen and why. Brief B
 - **Don't auto-capture** - Offer to save insights, don't just do it
 - **Don't ask user for codebase info** - If you're unsure about code, go read it yourself
 - **Don't accept fog** - When user says "probably", "etc", "something like", "should work", "we'll figure it out" — STOP and clarify. These words mean the requirement is not defined. Undefined requirements become CRITICAL issues at verification.
-- **Don't ask naked questions** - NEVER ask a decision question without concrete options (A/B/C + "Khác/Other"). Open-ended "how do you want to handle X?" produces vague answers. "When X fails, do you want A, B, or C?" produces decisions.
+- **Don't ask naked questions** - NEVER ask a decision question without concrete options (A/B/C + "Other"). Place recommended option last (before "Other"), marked with ★. Recommendation = best root-cause solution grounded in codebase reality, not quick wins. "When X fails, do you want A, B, or ★ C?" produces decisions.
 - **Don't end discovery with fog** - The Zero-Fog Checklist in "Ending Discovery" is mandatory. If any item fails, you are NOT ready.
 - **Do verify or offer verification** - After substantive responses, either auto-verify (if uncertain) or ask user if they want verification
 - **Do visualize** - A good diagram is worth many paragraphs
