@@ -909,7 +909,7 @@ async fn proxy_handler(
                         let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
 
                         // Calculate cost and update subscription counters
-                        let (cost_usd, charged_sub_id) = if let Some(ref model_name) = request_model {
+                        let cost_usd = if let Some(ref model_name) = request_model {
                             let pricing_cache = state.pricing_cache.read().await;
                             if let Some(pricing) = pricing_cache.get(model_name) {
                                 let ri = server.rate_input.unwrap_or(1.0);
@@ -949,12 +949,12 @@ async fn proxy_handler(
                                         ).await;
                                     }
                                 }
-                                (Some(cost), selected_subscription_id)
+                                Some(cost)
                             } else {
-                                (None, None)
+                                None
                             }
                         } else {
-                            (None, None)
+                            None
                         };
 
                         let entry = TokenUsageEntry {
@@ -969,7 +969,7 @@ async fn proxy_handler(
                             key_hash: kh,
                             group_key_id: config.group_key_id,
                             cost_usd,
-                            subscription_id: charged_sub_id,
+                            subscription_id: selected_subscription_id,
                             created_at: Utc::now(),
                         };
                         if state.usage_tx.try_send(entry).is_err() {
@@ -1322,7 +1322,7 @@ where
 
                     // Spawn async task for cost calculation and usage tracking
                     tokio::spawn(async move {
-                        let (cost_usd, charged_sub_id) = if let Some(ref model_name) = model {
+                        let cost_usd = if let Some(ref model_name) = model {
                             let pricing_cache = state.pricing_cache.read().await;
                             if let Some(pricing) = pricing_cache.get(model_name) {
                                 let cost = crate::subscription::calculate_cost(
@@ -1358,12 +1358,12 @@ where
                                         ).await;
                                     }
                                 }
-                                (Some(cost), subscription_id)
+                                Some(cost)
                             } else {
-                                (None, None)
+                                None
                             }
                         } else {
-                            (None, None)
+                            None
                         };
 
                         let entry = TokenUsageEntry {
@@ -1378,7 +1378,7 @@ where
                             key_hash,
                             group_key_id,
                             cost_usd,
-                            subscription_id: charged_sub_id,
+                            subscription_id,
                             created_at: Utc::now(),
                         };
                         if state.usage_tx.try_send(entry).is_err() {

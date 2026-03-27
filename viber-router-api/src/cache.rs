@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::models::GroupConfig;
 
 const KEY_PREFIX: &str = "group:config:";
+const CONFIG_TTL_SECS: i64 = 60;
 
 pub async fn get_group_config(redis: &Pool, api_key: &str) -> Option<GroupConfig> {
     let mut conn = redis.get().await.ok()?;
@@ -17,7 +18,7 @@ pub async fn set_group_config(redis: &Pool, api_key: &str, config: &GroupConfig)
     if let Ok(mut conn) = redis.get().await
         && let Ok(data) = serde_json::to_string(config)
     {
-        let _: Result<(), _> = conn.set(format!("{KEY_PREFIX}{api_key}"), data).await;
+        let _: Result<(), _> = conn.set_ex(format!("{KEY_PREFIX}{api_key}"), data, CONFIG_TTL_SECS as u64).await;
     }
 }
 
