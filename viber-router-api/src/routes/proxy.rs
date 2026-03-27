@@ -342,13 +342,13 @@ async fn proxy_handler(
     // Capture request parts
     let method = req.method().clone();
     let headers = req.headers().clone();
-    let body_bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
+    let body_bytes = match axum::body::to_bytes(req.into_body(), 100 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => {
             return anthropic_error(
-                StatusCode::BAD_REQUEST,
+                StatusCode::PAYLOAD_TOO_LARGE,
                 "invalid_request_error",
-                "Failed to read request body",
+                "Request body too large. Maximum allowed size is 100 MB",
             );
         }
     };
