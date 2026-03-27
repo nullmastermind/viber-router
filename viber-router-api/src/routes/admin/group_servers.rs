@@ -58,6 +58,44 @@ fn validate_cb_fields(
     Ok(())
 }
 
+/// Validate rate limit fields: all-or-nothing, each >= 1.
+fn validate_rate_limit_fields(
+    max_requests: Option<Option<i32>>,
+    rate_window_seconds: Option<Option<i32>>,
+) -> Result<(), ApiError> {
+    let provided: Vec<&Option<i32>> = [&max_requests, &rate_window_seconds]
+        .into_iter()
+        .filter_map(|f| f.as_ref())
+        .collect();
+
+    if provided.is_empty() {
+        return Ok(());
+    }
+
+    if provided.len() != 2 {
+        return Err(err(StatusCode::BAD_REQUEST, "Rate limit fields must be all set or all null"));
+    }
+
+    let all_null = provided.iter().all(|v| v.is_none());
+    let all_some = provided.iter().all(|v| v.is_some());
+
+    if !all_null && !all_some {
+        return Err(err(StatusCode::BAD_REQUEST, "Rate limit fields must be all set or all null"));
+    }
+
+    if all_some {
+        for v in &provided {
+            if let Some(val) = v
+                && *val < 1
+            {
+                return Err(err(StatusCode::BAD_REQUEST, "Rate limit values must be >= 1"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(assign_server))
@@ -101,6 +139,9 @@ async fn update_assignment(
 ) -> Result<Json<GroupServer>, ApiError> {
     // Validate circuit breaker fields
     validate_cb_fields(input.cb_max_failures, input.cb_window_seconds, input.cb_cooldown_seconds)?;
+
+    // Validate rate limit fields
+    validate_rate_limit_fields(input.max_requests, input.rate_window_seconds)?;
 
     // Validate non-negative rate fields
     for (field, val) in [
@@ -148,6 +189,16 @@ async fn update_assignment(
         None => (false, None),
     };
 
+    // Determine whether to update rate limit fields
+    let (update_max_requests, max_requests_val) = match input.max_requests {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_rate_window, rate_window_val) = match input.rate_window_seconds {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
     let gs = sqlx::query_as::<_, GroupServer>(
         "UPDATE group_servers SET \
          priority = COALESCE($1, priority), \
@@ -159,7 +210,9 @@ async fn update_assignment(
          rate_input = CASE WHEN $12 THEN $13 ELSE rate_input END, \
          rate_output = CASE WHEN $14 THEN $15 ELSE rate_output END, \
          rate_cache_write = CASE WHEN $16 THEN $17 ELSE rate_cache_write END, \
-         rate_cache_read = CASE WHEN $18 THEN $19 ELSE rate_cache_read END \
+         rate_cache_read = CASE WHEN $18 THEN $19 ELSE rate_cache_read END, \
+         max_requests = CASE WHEN $20 THEN $21 ELSE max_requests END, \
+         rate_window_seconds = CASE WHEN $22 THEN $23 ELSE rate_window_seconds END \
          WHERE group_id = $4 AND server_id = $5 RETURNING *",
     )
     .bind(input.priority)
@@ -181,6 +234,10 @@ async fn update_assignment(
     .bind(rate_cw_val)
     .bind(update_rate_cr)
     .bind(rate_cr_val)
+    .bind(update_max_requests)
+    .bind(max_requests_val)
+    .bind(update_rate_window)
+    .bind(rate_window_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

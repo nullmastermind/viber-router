@@ -41,6 +41,8 @@ export interface GroupServerDetail {
   rate_output: number | null;
   rate_cache_write: number | null;
   rate_cache_read: number | null;
+  max_requests: number | null;
+  rate_window_seconds: number | null;
 }
 
 export interface GroupWithServers extends Group {
@@ -196,6 +198,8 @@ export const useGroupsStore = defineStore('groups', () => {
       rate_output?: number | null;
       rate_cache_write?: number | null;
       rate_cache_read?: number | null;
+      max_requests?: number | null;
+      rate_window_seconds?: number | null;
     },
   ) {
     await api.put(`/api/admin/groups/${groupId}/servers/${serverId}`, input);

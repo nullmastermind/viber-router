@@ -111,6 +111,9 @@
                       <q-badge v-if="getCircuitStatus(s.server_id)?.is_open" color="negative" class="q-ml-sm">
                         Circuit Open ({{ formatCircuitRemaining(getCircuitStatus(s.server_id)?.remaining_seconds ?? 0) }})
                       </q-badge>
+                      <q-badge v-if="s.max_requests != null && s.rate_window_seconds != null" outline color="purple" class="q-ml-sm" :aria-label="`Rate limit: ${s.max_requests} requests per ${s.rate_window_seconds} seconds`">
+                        {{ s.max_requests }}/{{ s.rate_window_seconds }}s
+                      </q-badge>
                     </q-item-label>
                     <q-item-label caption>{{ s.base_url }}</q-item-label>
                   </q-item-section>
@@ -508,6 +511,32 @@
               class="q-mb-sm"
               @clear="onCbFieldClear('cb_cooldown_seconds')"
             />
+            <div class="text-subtitle2 q-mt-md q-mb-xs">Rate Limit</div>
+            <div class="text-caption text-grey q-mb-sm">
+              Limit how many requests this server receives within a time window. Leave both fields empty to disable.
+            </div>
+            <q-input
+              v-model.number="editServerRlForm.max_requests"
+              label="Max Requests"
+              type="number"
+              :min="1"
+              outlined
+              dense
+              clearable
+              class="q-mb-sm"
+              @clear="onRlFieldClear()"
+            />
+            <q-input
+              v-model.number="editServerRlForm.rate_window_seconds"
+              label="Window (seconds)"
+              type="number"
+              :min="1"
+              outlined
+              dense
+              clearable
+              class="q-mb-sm"
+              @clear="onRlFieldClear()"
+            />
           </q-card-section>
           <q-card-actions align="right">
             <q-btn flat label="Cancel" v-close-popup />
@@ -597,6 +626,10 @@ const editServerCbForm = ref({
   cb_max_failures: null as number | null,
   cb_window_seconds: null as number | null,
   cb_cooldown_seconds: null as number | null,
+});
+const editServerRlForm = ref({
+  max_requests: null as number | null,
+  rate_window_seconds: null as number | null,
 });
 const savingServer = ref(false);
 
@@ -946,6 +979,11 @@ function onCbFieldClear(field: 'cb_max_failures' | 'cb_window_seconds' | 'cb_coo
   }
 }
 
+function onRlFieldClear() {
+  editServerRlForm.value.max_requests = null;
+  editServerRlForm.value.rate_window_seconds = null;
+}
+
 async function saveGroup() {
   if (!group.value) return;
   const codes = failoverCodesStr.value
@@ -1103,6 +1141,10 @@ function openEditServer(s: GroupServerDetail) {
     cb_window_seconds: s.cb_window_seconds,
     cb_cooldown_seconds: s.cb_cooldown_seconds,
   };
+  editServerRlForm.value = {
+    max_requests: s.max_requests,
+    rate_window_seconds: s.rate_window_seconds,
+  };
   showEditServer.value = true;
 }
 
@@ -1120,6 +1162,19 @@ async function onSaveEditServer() {
     return;
   }
 
+  // Validate rate limit fields: all-or-nothing
+  const { max_requests, rate_window_seconds } = editServerRlForm.value;
+  const rlValues = [max_requests, rate_window_seconds];
+  const rlNonNull = rlValues.filter((v) => v !== null && v !== undefined);
+  if (rlNonNull.length === 1) {
+    $q.notify({ type: 'negative', message: 'Rate limit requires both fields or none.' });
+    return;
+  }
+  if (rlNonNull.length === 2 && rlNonNull.some((v) => (v as number) < 1)) {
+    $q.notify({ type: 'negative', message: 'Rate limit values must be >= 1.' });
+    return;
+  }
+
   savingServer.value = true;
   try {
     await serversStore.updateServer(editServerId.value, {
@@ -1133,6 +1188,8 @@ async function onSaveEditServer() {
         cb_max_failures: editServerCbForm.value.cb_max_failures,
         cb_window_seconds: editServerCbForm.value.cb_window_seconds,
         cb_cooldown_seconds: editServerCbForm.value.cb_cooldown_seconds,
+        max_requests: editServerRlForm.value.max_requests,
+        rate_window_seconds: editServerRlForm.value.rate_window_seconds,
       });
     }
     showEditServer.value = false;

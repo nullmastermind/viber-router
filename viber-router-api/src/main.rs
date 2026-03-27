@@ -6,6 +6,7 @@ mod log_buffer;
 mod middleware;
 mod models;
 mod partition;
+mod rate_limiter;
 mod redis;
 mod routes;
 mod sse_usage_parser;

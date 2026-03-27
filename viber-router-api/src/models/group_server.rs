@@ -16,6 +16,8 @@ pub struct GroupServer {
     pub rate_output: Option<f64>,
     pub rate_cache_write: Option<f64>,
     pub rate_cache_read: Option<f64>,
+    pub max_requests: Option<i32>,
+    pub rate_window_seconds: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -36,6 +38,8 @@ pub struct GroupServerDetail {
     pub rate_output: Option<f64>,
     pub rate_cache_write: Option<f64>,
     pub rate_cache_read: Option<f64>,
+    pub max_requests: Option<i32>,
+    pub rate_window_seconds: Option<i32>,
 }
 
 /// Admin-facing server detail with rate fields (not used in proxy cache)
@@ -56,6 +60,8 @@ pub struct AdminGroupServerDetail {
     pub rate_output: Option<f64>,
     pub rate_cache_write: Option<f64>,
     pub rate_cache_read: Option<f64>,
+    pub max_requests: Option<i32>,
+    pub rate_window_seconds: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +83,8 @@ pub struct UpdateAssignment {
     pub rate_output: Option<Option<f64>>,
     pub rate_cache_write: Option<Option<f64>>,
     pub rate_cache_read: Option<Option<f64>>,
+    pub max_requests: Option<Option<i32>>,
+    pub rate_window_seconds: Option<Option<i32>>,
 }
 
 #[derive(Debug, Deserialize)]

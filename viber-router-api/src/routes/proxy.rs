@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::cache;
 use crate::circuit_breaker;
+use crate::rate_limiter;
 use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
 use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail};
 use crate::routes::AppState;
@@ -117,7 +118,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     let servers = sqlx::query_as::<_, GroupServerDetail>(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
-         gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read \
+         gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
+         gs.max_requests, gs.rate_window_seconds \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -353,6 +355,7 @@ async fn proxy_handler(
 
     let client = &state.http_client;
     let mut any_server_attempted = false;
+    let mut any_rate_limited = false;
 
     // Extract request model before any transformation
     let request_model = extract_request_model(&body_bytes);
@@ -590,7 +593,22 @@ async fn proxy_handler(
             }
         }
 
+        // Rate limiter: check if server has reached its request limit
+        if let Some(max_req) = server.max_requests
+            && server.rate_window_seconds.is_some()
+            && rate_limiter::is_rate_limited(&state.redis, config.group_id, server.server_id, max_req).await
+        {
+            any_rate_limited = true;
+            continue; // Skip rate-limited server
+        }
+
         any_server_attempted = true;
+
+        // Increment rate limit counter before sending request (optimistic)
+        if let (Some(_), Some(window_sec)) = (server.max_requests, server.rate_window_seconds) {
+            rate_limiter::increment_rate_limit(&state.redis, config.group_id, server.server_id, window_sec).await;
+        }
+
         let transformed_body = transform_model(&body_bytes, &server.model_mappings);
 
         // Build upstream URL: server.base_url + original path + query
@@ -1165,6 +1183,15 @@ async fn proxy_handler(
                 }
             }
         }
+    }
+
+    // All servers rate-limited — return 429 with rate_limit_error
+    if !any_server_attempted && any_rate_limited {
+        return anthropic_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_error",
+            "Rate limit exceeded",
+        );
     }
 
     // All servers skipped — no key available for any server
