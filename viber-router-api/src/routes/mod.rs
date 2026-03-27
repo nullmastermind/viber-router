@@ -9,6 +9,7 @@ mod admin;
 mod health;
 pub mod key_parser;
 mod proxy;
+mod public;
 
 use crate::log_buffer::ProxyLogEntry;
 use crate::ttft_buffer::TtftLogEntry;
@@ -71,6 +72,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", axum::routing::get(health::health_check))
         .nest("/api/admin", admin::router(state.clone()))
+        .nest("/api/public", public::router())
         .nest("/v1", proxy::router())
         .with_state(state)
         .fallback_service(serve_spa)
