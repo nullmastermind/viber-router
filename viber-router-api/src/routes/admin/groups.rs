@@ -160,11 +160,13 @@ async fn get_group(
         .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Group not found"))?;
 
-    let servers = sqlx::query_as::<_, AdminGroupServerDetail>(
+    let unlocked = state.unlocked_servers.read().await;
+
+    let raw_servers: Vec<AdminGroupServerDetail> = sqlx::query_as::<_, AdminGroupServerDetail>(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-         gs.max_requests, gs.rate_window_seconds \
+         gs.max_requests, gs.rate_window_seconds, s.password_hash \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 ORDER BY gs.priority",
     )
@@ -172,6 +174,19 @@ async fn get_group(
     .fetch_all(&state.db)
     .await
     .map_err(internal)?;
+
+    // Mask credentials for locked servers
+    let servers: Vec<AdminGroupServerDetail> = raw_servers
+        .into_iter()
+        .map(|mut s| {
+            let is_locked = s.password_hash.is_some() && !unlocked.contains(&s.server_id);
+            if is_locked {
+                s.base_url = None;
+                s.api_key = None;
+            }
+            s
+        })
+        .collect();
 
     let allowed_models = sqlx::query_as::<_, Model>(
         "SELECT m.* FROM models m \

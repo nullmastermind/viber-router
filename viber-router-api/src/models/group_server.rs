@@ -48,7 +48,7 @@ pub struct AdminGroupServerDetail {
     pub server_id: Uuid,
     pub short_id: i32,
     pub server_name: String,
-    pub base_url: String,
+    pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub priority: i32,
     pub model_mappings: serde_json::Value,
@@ -62,6 +62,7 @@ pub struct AdminGroupServerDetail {
     pub rate_cache_read: Option<f64>,
     pub max_requests: Option<i32>,
     pub rate_window_seconds: Option<i32>,
+    pub password_hash: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

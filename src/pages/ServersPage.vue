@@ -21,9 +21,20 @@
           <q-btn flat dense size="sm" icon="content_copy" @click.stop="copyShortId(props.row.short_id)" />
         </q-td>
       </template>
+      <template #body-cell-base_url="props">
+        <q-td :props="props">
+          <template v-if="store.isProtected(props.row.id) && !store.isUnlocked(props.row.id)">
+            <span>🔒 {{ props.row.name }}</span>
+          </template>
+          <code v-else>{{ props.row.base_url }}</code>
+        </q-td>
+      </template>
       <template #body-cell-api_key="props">
         <q-td :props="props">
-          <template v-if="props.row.api_key">
+          <template v-if="store.isProtected(props.row.id) && !store.isUnlocked(props.row.id)">
+            <span>🔒 {{ props.row.name }}</span>
+          </template>
+          <template v-else-if="props.row.api_key">
             <code>{{ props.row.api_key.substring(0, 20) }}...</code>
           </template>
           <span v-else class="text-grey">None</span>
@@ -31,6 +42,13 @@
       </template>
       <template #body-cell-actions="props">
         <q-td :props="props">
+          <q-btn
+            v-if="store.isProtected(props.row.id) && !store.isUnlocked(props.row.id)"
+            flat
+            dense
+            icon="lock_open"
+            @click.stop="unlockDialog(props.row.id)"
+          />
           <q-btn flat dense icon="edit" @click="openDialog(props.row)" />
           <q-btn flat dense icon="delete" color="negative" @click="confirmDelete(props.row)" />
         </q-td>
@@ -45,7 +63,8 @@
         <q-card-section>
           <q-input v-model="form.name" label="Name" outlined class="q-mb-sm" />
           <q-input v-model="form.base_url" label="Base URL" outlined class="q-mb-sm" />
-          <q-input v-model="form.api_key" label="API Key (optional)" outlined />
+          <q-input v-model="form.api_key" label="API Key (optional)" outlined class="q-mb-sm" />
+          <q-input v-model="form.password" label="Protect Password (optional)" type="password" outlined />
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
@@ -66,7 +85,7 @@ const store = useServersStore();
 const search = ref('');
 const showDialog = ref(false);
 const editingServer = ref<Server | null>(null);
-const form = ref({ name: '', base_url: '', api_key: '' });
+const form = ref({ name: '', base_url: '', api_key: '', password: '' });
 
 const columns = [
   { name: 'short_id', label: 'Short ID', field: 'short_id', align: 'left' as const, sortable: true },
@@ -82,11 +101,66 @@ function onSearch() {
   store.fetchServers(search.value ? { search: search.value } : {});
 }
 
-function openDialog(server?: Server) {
+async function unlockDialog(serverId: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    $q.dialog({
+      title: 'Unlock Server',
+      message: 'Enter the server password:',
+      prompt: { model: '', type: 'password' as const },
+      cancel: true,
+    }).onOk(async (pw: string) => {
+      try {
+        await store.unlockServer(serverId, pw);
+        // Re-fetch so API returns real credentials (backend session is now unlocked)
+        await store.fetchServers(search.value ? { search: search.value } : {});
+        $q.notify({ type: 'positive', message: 'Server unlocked' });
+        resolve();
+      } catch (e: unknown) {
+        const msg = (e as Error).message || 'Failed to unlock';
+        $q.notify({ type: 'negative', message: msg });
+        resolve();
+      }
+    }).onCancel(() => resolve());
+  });
+}
+
+async function openDialog(server?: Server) {
+  if (server && store.isProtected(server.id) && !store.isUnlocked(server.id)) {
+    let cancelled = true;
+    await new Promise<void>((resolve) => {
+      $q.dialog({
+        title: 'Unlock Server',
+        message: 'Enter the server password to edit:',
+        prompt: { model: '', type: 'password' as const },
+        cancel: true,
+      }).onOk(async (pw: string) => {
+        try {
+          await store.unlockServer(server.id, pw);
+          // Re-fetch so API returns real credentials
+          await store.fetchServers(search.value ? { search: search.value } : {});
+          cancelled = false;
+          resolve();
+        } catch (e: unknown) {
+          const msg = (e as Error).message || 'Failed to unlock';
+          $q.notify({ type: 'negative', message: msg });
+          resolve();
+        }
+      }).onCancel(() => resolve());
+    });
+    if (cancelled) return;
+    // Get fresh server data with real credentials from store
+    const fresh = store.servers.find((s) => s.id === server.id);
+    if (!fresh) return;
+    editingServer.value = fresh;
+    form.value = { name: fresh.name, base_url: fresh.base_url || '', api_key: fresh.api_key || '', password: '' };
+    showDialog.value = true;
+    return;
+  }
+
   editingServer.value = server || null;
   form.value = server
-    ? { name: server.name, base_url: server.base_url, api_key: server.api_key || '' }
-    : { name: '', base_url: '', api_key: '' };
+    ? { name: server.name, base_url: server.base_url || '', api_key: server.api_key || '', password: '' }
+    : { name: '', base_url: '', api_key: '', password: '' };
   showDialog.value = true;
 }
 
@@ -94,17 +168,22 @@ async function saveServer() {
   try {
     const apiKey = form.value.api_key || null;
     if (editingServer.value) {
-      await store.updateServer(editingServer.value.id, {
+      const input: { name: string; base_url: string; api_key: string | null; password?: string | null } = {
         name: form.value.name,
         base_url: form.value.base_url,
         api_key: apiKey,
-      });
+      };
+      if (form.value.password) {
+        input.password = form.value.password;
+      }
+      await store.updateServer(editingServer.value.id, input);
     } else {
-      const input: { name: string; base_url: string; api_key?: string } = {
+      const input: { name: string; base_url: string; api_key?: string; password?: string } = {
         name: form.value.name,
         base_url: form.value.base_url,
       };
       if (form.value.api_key) input.api_key = form.value.api_key;
+      if (form.value.password) input.password = form.value.password;
       await store.createServer(input);
     }
     showDialog.value = false;

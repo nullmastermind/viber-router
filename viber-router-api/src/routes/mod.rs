@@ -1,9 +1,10 @@
 use axum::Router;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tower_http::services::{ServeDir, ServeFile};
+use uuid::Uuid;
 
 mod admin;
 mod health;
@@ -25,6 +26,7 @@ pub struct ModelPricing {
 }
 
 pub type PricingCache = Arc<RwLock<HashMap<String, ModelPricing>>>;
+pub type UnlockedServers = Arc<RwLock<HashSet<Uuid>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -37,6 +39,7 @@ pub struct AppState {
     pub usage_tx: mpsc::Sender<TokenUsageEntry>,
     pub uptime_tx: mpsc::Sender<UptimeCheckEntry>,
     pub pricing_cache: PricingCache,
+    pub unlocked_servers: UnlockedServers,
 }
 
 pub async fn refresh_pricing_cache(db: &PgPool, cache: &PricingCache) {

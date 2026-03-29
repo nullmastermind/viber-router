@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -73,6 +73,9 @@ async fn main() -> Result<()> {
     routes::refresh_pricing_cache(&db_pool, &pricing_cache).await;
     tracing::info!("Pricing cache loaded");
 
+    // Server unlock session state — in-memory, per-process
+    let unlocked_servers: routes::UnlockedServers = Arc::new(RwLock::new(HashSet::new()));
+
     let state = routes::AppState {
         db: db_pool.clone(),
         redis: redis_pool,
@@ -93,6 +96,7 @@ async fn main() -> Result<()> {
         usage_tx,
         uptime_tx,
         pricing_cache: pricing_cache.clone(),
+        unlocked_servers: unlocked_servers.clone(),
     };
 
     // Spawn log buffer flush task

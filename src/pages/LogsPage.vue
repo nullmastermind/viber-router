@@ -156,11 +156,21 @@
             <template v-else-if="col.name === 'server_name'">
               <span v-if="props.row.failover_chain.length > 1" class="server-chain">
                 <template v-for="(attempt, i) in props.row.failover_chain" :key="i">
-                  <span :class="attempt.status >= 200 && attempt.status < 400 ? 'text-positive' : 'text-negative'">{{ attempt.server_name }}</span>
+                  <span :class="attempt.status >= 200 && attempt.status < 400 ? 'text-positive' : 'text-negative'">
+                    <template v-if="serversStore.isProtected(attempt.server_id) && !serversStore.isUnlocked(attempt.server_id)">
+                      🔒 {{ attempt.server_name }}
+                    </template>
+                    <template v-else>{{ attempt.server_name }}</template>
+                  </span>
                   <q-icon v-if="Number(i) < props.row.failover_chain.length - 1" name="arrow_forward" size="xs" class="q-mx-xs text-grey" />
                 </template>
               </span>
-              <span v-else>{{ props.row.server_name }}</span>
+              <span v-else>
+                <template v-if="serversStore.isProtected(props.row.server_id) && !serversStore.isUnlocked(props.row.server_id)">
+                  🔒 {{ props.row.server_name }}
+                </template>
+                <template v-else>{{ props.row.server_name }}</template>
+              </span>
             </template>
             <template v-else-if="col.name === 'latency_ms'">
               {{ props.row.latency_ms }}ms
@@ -202,7 +212,10 @@
                       <div class="failover-line" v-if="Number(i) < props.row.failover_chain.length - 1" />
                       <div class="failover-info">
                         <div class="text-weight-medium">
-                          {{ attempt.server_name }}
+                          <template v-if="serversStore.isProtected(attempt.server_id) && !serversStore.isUnlocked(attempt.server_id)">
+                            🔒 {{ attempt.server_name }}
+                          </template>
+                          <template v-else>{{ attempt.server_name }}</template>
                           <q-badge
                             :color="attempt.status === 0 ? 'grey' : attempt.status >= 200 && attempt.status < 400 ? 'positive' : 'negative'"
                             :label="attempt.status === 0 ? 'TTFT skip' : String(attempt.status)"
@@ -243,7 +256,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue';
 import type { QPopupProxy } from 'quasar';
+import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
+import { useServersStore } from 'stores/servers';
+
+const $q = useQuasar();
+const serversStore = useServersStore();
 
 interface FailoverAttempt {
   server_id: string;
@@ -512,6 +530,14 @@ function generateCurl(attempt: FailoverAttempt, method: string): string {
 }
 
 function downloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
+  if (serversStore.isProtected(attempt.server_id) && !serversStore.isUnlocked(attempt.server_id)) {
+    unlockDialog(attempt.server_id, () => doDownloadCurl(attempt, log));
+    return;
+  }
+  doDownloadCurl(attempt, log);
+}
+
+function doDownloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
   const curl = generateCurl(attempt, log.request_method);
   const blob = new Blob([`${curl}\n`], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -520,6 +546,23 @@ function downloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
   a.download = `curl-${attempt.server_name}-${log.id.slice(0, 8)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function unlockDialog(serverId: string, onSuccess: () => void): void {
+  $q.dialog({
+    title: 'Unlock Server',
+    message: 'Enter the server password to download cURL:',
+    prompt: { model: '', type: 'password' as const },
+    cancel: true,
+  }).onOk(async (pw: string) => {
+    try {
+      await serversStore.unlockServer(serverId, pw);
+      onSuccess();
+    } catch (e: unknown) {
+      const msg = (e as Error).message || 'Failed to unlock';
+      $q.notify({ type: 'negative', message: msg });
+    }
+  });
 }
 
 async function loadFilterOptions() {

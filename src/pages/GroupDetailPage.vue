@@ -115,7 +115,12 @@
                         {{ s.max_requests }}/{{ s.rate_window_seconds }}s
                       </q-badge>
                     </q-item-label>
-                    <q-item-label caption>{{ s.base_url }}</q-item-label>
+                    <q-item-label caption>
+                      <template v-if="serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)">
+                        🔒 {{ s.server_name }}
+                      </template>
+                      <template v-else>{{ s.base_url }}</template>
+                    </q-item-label>
                     <div v-if="uptimeData[s.server_id]?.length" class="q-mt-xs">
                       <UptimeBars :buckets="uptimeData[s.server_id] ?? []" />
                     </div>
@@ -143,6 +148,14 @@
                         x{{ displayRate(s) }}
                       </q-badge>
                       <q-toggle v-model="s.is_enabled" dense :aria-label="`${s.server_name} enabled`" @update:model-value="toggleServerEnabled(s)" />
+                      <q-btn
+                        v-if="serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)"
+                        flat
+                        dense
+                        icon="lock_open"
+                        :aria-label="`Unlock server ${s.server_name}`"
+                        @click.stop="unlockDialog(s.server_id)"
+                      />
                       <q-btn flat dense icon="edit" :aria-label="`Edit server ${s.server_name}`" @click="openEditServer(s)" />
                       <q-btn flat dense icon="tune" :aria-label="`Edit model mappings for ${s.server_name}`" @click="editMappings(s)" />
                       <q-btn flat dense icon="delete" color="negative" :aria-label="`Remove server ${s.server_name}`" @click="onRemoveServer(s)" />
@@ -858,7 +871,9 @@ async function loadGroup() {
     server_name: s.server_name,
     short_id: s.short_id,
     key: '',
-    defaultKey: s.api_key || '',
+    defaultKey: serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)
+      ? '🔒 Protected'
+      : (s.api_key || ''),
   }));
 }
 
@@ -1186,9 +1201,66 @@ async function saveMappings() {
   loadGroup();
 }
 
-function openEditServer(s: GroupServerDetail) {
+async function unlockDialog(serverId: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    $q.dialog({
+      title: 'Unlock Server',
+      message: 'Enter the server password:',
+      prompt: { model: '', type: 'password' as const },
+      cancel: true,
+    }).onOk(async (pw: string) => {
+      try {
+        await serversStore.unlockServer(serverId, pw);
+        // Re-fetch so API returns real credentials (backend session is now unlocked)
+        await loadGroup();
+        $q.notify({ type: 'positive', message: 'Server unlocked' });
+        resolve();
+      } catch (e: unknown) {
+        const msg = (e as Error).message || 'Failed to unlock';
+        $q.notify({ type: 'negative', message: msg });
+        resolve();
+      }
+    }).onCancel(() => resolve());
+  });
+}
+
+async function openEditServer(s: GroupServerDetail) {
+  if (serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)) {
+    let cancelled = true;
+    await new Promise<void>((resolve) => {
+      $q.dialog({
+        title: 'Unlock Server',
+        message: 'Enter the server password to edit:',
+        prompt: { model: '', type: 'password' as const },
+        cancel: true,
+      }).onOk(async (pw: string) => {
+        try {
+          await serversStore.unlockServer(s.server_id, pw);
+          // Re-fetch so API returns real credentials
+          await loadGroup();
+          cancelled = false;
+          resolve();
+        } catch (e: unknown) {
+          const msg = (e as Error).message || 'Failed to unlock';
+          $q.notify({ type: 'negative', message: msg });
+          resolve();
+        }
+      }).onCancel(() => resolve());
+    });
+    if (cancelled) return;
+    // Get fresh server data with real credentials
+    const fresh = servers.value.find((x) => x.server_id === s.server_id);
+    if (!fresh) return;
+    doOpenEditServer(fresh);
+    return;
+  }
+
+  doOpenEditServer(s);
+}
+
+function doOpenEditServer(s: GroupServerDetail) {
   editServerId.value = s.server_id;
-  editServerForm.value = { name: s.server_name, base_url: s.base_url, api_key: s.api_key || '' };
+  editServerForm.value = { name: s.server_name, base_url: s.base_url || '', api_key: s.api_key || '' };
   editServerCbForm.value = {
     cb_max_failures: s.cb_max_failures,
     cb_window_seconds: s.cb_window_seconds,

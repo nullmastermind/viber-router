@@ -29,7 +29,7 @@ export interface GroupServerDetail {
   server_id: string;
   short_id: number;
   server_name: string;
-  base_url: string;
+  base_url: string | null;
   api_key: string | null;
   priority: number;
   model_mappings: Record<string, string>;
@@ -43,6 +43,7 @@ export interface GroupServerDetail {
   rate_cache_read: number | null;
   max_requests: number | null;
   rate_window_seconds: number | null;
+  password_hash: string | null;
 }
 
 export interface GroupWithServers extends Group {
