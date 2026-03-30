@@ -47,7 +47,16 @@
         <q-card-section><div class="text-h6">{{ editingId ? 'Edit Plan' : 'Create Plan' }}</div></q-card-section>
         <q-card-section class="q-gutter-sm">
           <q-input v-model="form.name" label="Name" outlined dense />
-          <q-select v-model="form.sub_type" :options="['fixed', 'hourly_reset']" label="Type" outlined dense emit-value map-options />
+          <q-select v-model="form.sub_type" :options="getSubTypeOptions()" label="Type" outlined dense emit-value map-options>
+            <template #option="scope">
+              <q-item v-bind="scope.itemProps">
+                <q-item-section>
+                  <q-item-label>{{ scope.opt.label }}</q-item-label>
+                  <q-item-label caption>{{ scope.opt.tooltip }}</q-item-label>
+                </q-item-section>
+              </q-item>
+            </template>
+          </q-select>
           <q-input v-model.number="form.cost_limit_usd" label="Cost Limit ($)" outlined dense type="number" :min="0" />
           <q-input v-model.number="form.duration_days" label="Duration (days)" outlined dense type="number" :min="1" />
           <q-input v-if="form.sub_type === 'hourly_reset'" v-model.number="form.reset_hours" label="Reset Hours" outlined dense type="number" :min="1" />
@@ -74,6 +83,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
 import { useModelsStore } from 'stores/models';
+import { getSubTypeLabel, getSubTypeOptions } from 'src/composables/useSubscriptionType';
 
 interface Plan {
   id: string;
@@ -111,7 +121,7 @@ const form = reactive({
 
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left' as const },
-  { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const },
+  { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Cost Limit', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'model_limits', label: 'Model Limits', field: 'model_limits', align: 'left' as const },

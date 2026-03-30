@@ -258,7 +258,7 @@
                                 <q-item v-for="plan in activePlans" :key="plan.id" clickable v-close-popup @click="onAssignSubscription(props.row.id, plan.id)">
                                   <q-item-section>
                                     <q-item-label>{{ plan.name }}</q-item-label>
-                                    <q-item-label caption>{{ plan.sub_type }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
+                                    <q-item-label caption>{{ getSubTypeLabel(plan.sub_type) }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
                                   </q-item-section>
                                 </q-item>
                               </q-list>
@@ -620,6 +620,7 @@ import SubKeyUsage from 'components/SubKeyUsage.vue';
 import TtftChart from 'components/TtftChart.vue';
 import UptimeBars from 'components/UptimeBars.vue';
 import type { Bucket } from 'components/UptimeBars.vue';
+import { getSubTypeLabel } from 'src/composables/useSubscriptionType';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -720,7 +721,7 @@ const subPagination = ref<Record<string, { page: number; rowsPerPage: number; ro
 const activePlans = ref<SubscriptionPlan[]>([]);
 
 const subColumns = [
-  { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const },
+  { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Budget', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
   { name: 'cost_used', label: 'Used', field: 'cost_used', align: 'right' as const },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },

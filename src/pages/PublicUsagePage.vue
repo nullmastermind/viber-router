@@ -112,7 +112,7 @@
           >
             <q-card-section>
               <div class="row items-center q-mb-xs">
-                <span class="text-weight-medium q-mr-sm">{{ sub.sub_type }}</span>
+                <span class="text-weight-medium q-mr-sm">{{ getSubTypeLabel(sub.sub_type) }}</span>
                 <q-badge :color="subStatusColor(sub.status)" :label="sub.status" />
                 <q-space />
                 <span v-if="sub.expires_at" class="text-caption" style="color: var(--vr-text-secondary)">
@@ -272,6 +272,7 @@ import QRCode from 'qrcode';
 import UptimeBars from 'components/UptimeBars.vue';
 import type { Bucket } from 'components/UptimeBars.vue';
 import { Scatter } from 'vue-chartjs';
+import { getSubTypeLabel } from 'src/composables/useSubscriptionType';
 import {
   Chart as ChartJS,
   CategoryScale,
