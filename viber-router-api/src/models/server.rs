@@ -10,6 +10,7 @@ pub struct Server {
     pub base_url: String,
     pub api_key: Option<String>,
     pub password_hash: Option<String>,
+    pub system_prompt: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -20,6 +21,7 @@ pub struct CreateServer {
     pub base_url: String,
     pub api_key: Option<String>,
     pub password: Option<String>,
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,4 +30,5 @@ pub struct UpdateServer {
     pub base_url: Option<String>,
     pub api_key: Option<Option<String>>,
     pub password: Option<Option<String>>,
+    pub system_prompt: Option<Option<String>>,
 }

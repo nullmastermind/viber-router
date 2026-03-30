@@ -32,6 +32,7 @@ pub struct ServerResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     pub password_hash: Option<String>,
+    pub system_prompt: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -48,6 +49,7 @@ impl ServerResponse {
             base_url: if is_locked { None } else { Some(server.base_url) },
             api_key: if is_locked { None } else { server.api_key },
             password_hash: server.password_hash,
+            system_prompt: server.system_prompt,
             created_at: server.created_at,
             updated_at: server.updated_at,
         }
@@ -72,12 +74,13 @@ async fn create_server(
     });
 
     let server = sqlx::query_as::<_, Server>(
-        "INSERT INTO servers (name, base_url, api_key, password_hash) VALUES ($1, $2, $3, $4) RETURNING *",
+        "INSERT INTO servers (name, base_url, api_key, password_hash, system_prompt) VALUES ($1, $2, $3, $4, $5) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.base_url)
     .bind(&input.api_key)
     .bind(&password_hash)
+    .bind(&input.system_prompt)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -175,11 +178,13 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
+                 system_prompt = COALESCE($3, system_prompt), \
                  updated_at = now() \
-                 WHERE id = $3 RETURNING *",
+                 WHERE id = $4 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(id)
             .fetch_optional(&state.db)
             .await
@@ -190,12 +195,14 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
+                 system_prompt = COALESCE($3, system_prompt), \
                  password_hash = NULL, \
                  updated_at = now() \
-                 WHERE id = $3 RETURNING *",
+                 WHERE id = $4 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(id)
             .fetch_optional(&state.db)
             .await
@@ -206,12 +213,14 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
-                 password_hash = $3, \
+                 system_prompt = COALESCE($3, system_prompt), \
+                 password_hash = $4, \
                  updated_at = now() \
-                 WHERE id = $4 RETURNING *",
+                 WHERE id = $5 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(&password_hash)
             .bind(id)
             .fetch_optional(&state.db)
@@ -223,12 +232,14 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
+                 system_prompt = COALESCE($3, system_prompt), \
                  api_key = NULL, \
                  updated_at = now() \
-                 WHERE id = $3 RETURNING *",
+                 WHERE id = $4 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(id)
             .fetch_optional(&state.db)
             .await
@@ -238,13 +249,15 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
+                 system_prompt = COALESCE($3, system_prompt), \
                  api_key = NULL, \
                  password_hash = NULL, \
                  updated_at = now() \
-                 WHERE id = $3 RETURNING *",
+                 WHERE id = $4 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(id)
             .fetch_optional(&state.db)
             .await
@@ -254,13 +267,15 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
+                 system_prompt = COALESCE($3, system_prompt), \
                  api_key = NULL, \
-                 password_hash = $3, \
+                 password_hash = $4, \
                  updated_at = now() \
-                 WHERE id = $4 RETURNING *",
+                 WHERE id = $5 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(&password_hash)
             .bind(id)
             .fetch_optional(&state.db)
@@ -272,12 +287,14 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
-                 api_key = $3, \
+                 system_prompt = COALESCE($3, system_prompt), \
+                 api_key = $4, \
                  updated_at = now() \
-                 WHERE id = $4 RETURNING *",
+                 WHERE id = $5 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(&input.api_key)
             .bind(id)
             .fetch_optional(&state.db)
@@ -288,13 +305,15 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
-                 api_key = $3, \
+                 system_prompt = COALESCE($3, system_prompt), \
+                 api_key = $4, \
                  password_hash = NULL, \
                  updated_at = now() \
-                 WHERE id = $4 RETURNING *",
+                 WHERE id = $5 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(v)
             .bind(id)
             .fetch_optional(&state.db)
@@ -305,13 +324,15 @@ async fn update_server(
                 "UPDATE servers SET \
                  name = COALESCE($1, name), \
                  base_url = COALESCE($2, base_url), \
-                 api_key = $3, \
-                 password_hash = $4, \
+                 system_prompt = COALESCE($3, system_prompt), \
+                 api_key = $4, \
+                 password_hash = $5, \
                  updated_at = now() \
-                 WHERE id = $5 RETURNING *",
+                 WHERE id = $6 RETURNING *",
             )
             .bind(&input.name)
             .bind(&input.base_url)
+            .bind(&input.system_prompt)
             .bind(v)
             .bind(&password_hash)
             .bind(id)

@@ -28,6 +28,7 @@ pub struct GroupServerDetail {
     pub server_name: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    pub system_prompt: Option<String>,
     pub priority: i32,
     pub model_mappings: serde_json::Value,
     pub is_enabled: bool,
@@ -101,6 +102,7 @@ pub struct CountTokensServer {
     pub server_name: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    pub system_prompt: Option<String>,
     pub model_mappings: serde_json::Value,
 }
 

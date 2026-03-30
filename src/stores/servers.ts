@@ -9,6 +9,7 @@ export interface Server {
   base_url: string | null;
   api_key: string | null;
   password_hash: string | null;
+  system_prompt: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,14 +49,14 @@ export const useServersStore = defineStore('servers', () => {
     }
   }
 
-  async function createServer(input: { name: string; base_url: string; api_key?: string; password?: string }) {
+  async function createServer(input: { name: string; base_url: string; api_key?: string; password?: string; system_prompt?: string }) {
     const { data } = await api.post<Server>('/api/admin/servers', input);
     return data;
   }
 
   async function updateServer(
     id: string,
-    input: { name?: string; base_url?: string; api_key?: string | null; password?: string | null },
+    input: { name?: string; base_url?: string; api_key?: string | null; password?: string | null; system_prompt?: string | null },
   ) {
     const { data } = await api.put<Server>(`/api/admin/servers/${id}`, input);
     return data;

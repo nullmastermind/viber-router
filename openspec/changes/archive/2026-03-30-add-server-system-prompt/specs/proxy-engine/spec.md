@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Streaming (SSE) passthrough
 The system SHALL support streaming responses. When the upstream server returns a streaming SSE response, the system SHALL stream it directly to the client. When TTFT auto-switch is enabled and the current server is not the last in the waterfall, the system SHALL detect SSE responses in the proxy handler (before delegating to build_response) to enable TTFT timeout logic. When a count-tokens default server is configured and the request path is `/v1/messages/count_tokens`, the proxy handler SHALL attempt the default server before entering the failover waterfall, and SHALL skip the default server's `server_id` in the waterfall if the default attempt failed. **Before attempting each server, the proxy SHALL check if the server's circuit breaker is open (Redis key `cb:open:{group_id}:{server_id}` exists) and skip it if so. After each error (failover status code, connection error, or TTFT timeout), if the server has circuit breaker configured, the proxy SHALL increment the error counter and trip the breaker if threshold is reached.** When the request path is `/v1/messages` and the response is HTTP 200, the system SHALL wrap the forwarded stream to extract token usage from `message_start` and `message_delta` SSE events without modifying the stream content. **After reading the request body and extracting the model, if the group has a non-empty `allowed_models` list, the proxy SHALL validate the request model against the list. If the model is not in the list, or the request has no `model` field, the proxy SHALL return HTTP 403 with `permission_error` type and message "Your API key does not have permission to use the specified model." without contacting any upstream server. If the request was authenticated via a sub-key with a non-empty `key_allowed_models` list, the proxy SHALL additionally validate the model against the key's list. Errors from the `allowed_models` and `key_allowed_models` database queries SHALL be propagated (not silently swallowed) so that DB failures result in a request error rather than a security bypass.** **Before attempting each server in the failover waterfall, after the circuit breaker check, the proxy SHALL check if the server has rate limiting configured (`max_requests` and `rate_window_seconds` both non-null). If configured, the proxy SHALL check the Redis counter `rl:{group_id}:{server_id}`. If the count >= `max_requests`, the proxy SHALL skip this server. If the count < `max_requests`, the proxy SHALL INCR the counter (setting TTL to `rate_window_seconds` if the key is new) before sending the request. If Redis is unavailable during the rate limit check, the proxy SHALL proceed (fail open). When all servers in the chain are exhausted and at least one was skipped due to rate limiting, the proxy SHALL return HTTP 429 with `rate_limit_error` type and message "Rate limit exceeded".** **For requests to `/v1/messages` endpoint, before forwarding to the upstream server, the proxy SHALL merge the client-provided system prompt with the server's configured system_prompt (if any) using the following hybrid strategy: (1) If the client system is an array with cache_control metadata, merge the server_prompt into the last block's text field while preserving the cache_control; (2) If the client system is a string or an array without cache_control, normalize both to strings and concatenate with "\n\n" separator; (3) If only the server has a system_prompt, use it as-is; (4) If only the client has a system prompt, passthrough unchanged.**
@@ -98,29 +98,6 @@ The system SHALL support streaming responses. When the upstream server returns a
 #### Scenario: All servers rate-limited — distinct 429 error
 - **WHEN** all servers in the chain are skipped due to rate limiting (no server attempted)
 - **THEN** the system SHALL return HTTP 429 with `{"type": "error", "error": {"type": "rate_limit_error", "message": "Rate limit exceeded"}}`
-
-### Requirement: Proxy handler emits uptime check entries
-The proxy handler SHALL generate a `request_id` UUID at the start of each request. For every server attempt (including count-tokens default server attempts, connection errors, failover status codes, and TTFT timeouts), the handler SHALL emit an UptimeCheckEntry via `uptime_tx.try_send()`.
-
-#### Scenario: Uptime entry emitted on successful response
-- **WHEN** a server returns HTTP 200
-- **THEN** the proxy SHALL emit an UptimeCheckEntry with the server's status_code=200 and latency_ms before returning the response
-
-#### Scenario: Uptime entry emitted on failover
-- **WHEN** a server returns a failover status code (e.g., 429) and the proxy continues to the next server
-- **THEN** the proxy SHALL emit an UptimeCheckEntry with the server's status_code and latency_ms before trying the next server
-
-#### Scenario: Uptime entry emitted on connection error
-- **WHEN** a server connection fails
-- **THEN** the proxy SHALL emit an UptimeCheckEntry with status_code=0 and the elapsed latency_ms
-
-#### Scenario: Uptime entry emitted on TTFT timeout
-- **WHEN** a server's first chunk exceeds the TTFT timeout
-- **THEN** the proxy SHALL emit an UptimeCheckEntry with status_code=0 and the elapsed latency_ms
-
-#### Scenario: All attempts share request_id
-- **WHEN** a proxy request tries multiple servers
-- **THEN** all emitted UptimeCheckEntry records SHALL share the same request_id UUID
 
 #### Scenario: System prompt merge — client string + server string
 - **WHEN** the request path is `/v1/messages`, client sends `"system": "You are a coding assistant"`, and the server has `system_prompt: "Always respond in Vietnamese"`

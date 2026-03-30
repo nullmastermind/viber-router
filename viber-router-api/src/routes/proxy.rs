@@ -117,7 +117,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     };
 
     let servers = sqlx::query_as::<_, GroupServerDetail>(
-        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
+        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds \
@@ -134,20 +134,21 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
 
     // Resolve count-tokens default server if configured
     let count_tokens_server = if let Some(ct_server_id) = group.count_tokens_server_id {
-        sqlx::query_as::<_, (uuid::Uuid, i32, String, String, Option<String>)>(
-            "SELECT id, short_id, name, base_url, api_key FROM servers WHERE id = $1",
+        sqlx::query_as::<_, (uuid::Uuid, i32, String, String, Option<String>, Option<String>)>(
+            "SELECT id, short_id, name, base_url, api_key, system_prompt FROM servers WHERE id = $1",
         )
         .bind(ct_server_id)
         .fetch_optional(&state.db)
         .await
         .ok()
         .flatten()
-        .map(|(server_id, short_id, server_name, base_url, api_key)| CountTokensServer {
+        .map(|(server_id, short_id, server_name, base_url, api_key, system_prompt)| CountTokensServer {
             server_id,
             short_id,
             server_name,
             base_url,
             api_key,
+            system_prompt,
             model_mappings: group.count_tokens_model_mappings.clone(),
         })
     } else {
@@ -201,6 +202,9 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     Some(config)
 }
 
+/// Transform request body by applying model mapping.
+/// This function is kept for backward compatibility and testing.
+#[allow(dead_code)]
 fn transform_model(body: &[u8], mappings: &serde_json::Value) -> Vec<u8> {
     let mappings_obj = match mappings.as_object() {
         Some(m) if !m.is_empty() => m,
@@ -265,6 +269,112 @@ fn extract_request_model(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|v| v.get("model")?.as_str().map(String::from))
+}
+
+/// Check if a system array has cache_control metadata in any block.
+fn has_cache_control(system: &Value) -> bool {
+    if let Some(arr) = system.as_array() {
+        arr.iter().any(|block| block.get("cache_control").is_some())
+    } else {
+        false
+    }
+}
+
+/// Extract text from all blocks in a system array and concatenate with "\n\n".
+fn extract_system_text(system: &Value) -> Option<String> {
+    if let Some(arr) = system.as_array() {
+        let texts: Vec<String> = arr
+            .iter()
+            .filter_map(|block| block.get("text")?.as_str().map(String::from))
+            .collect();
+        if texts.is_empty() {
+            None
+        } else {
+            Some(texts.join("\n\n"))
+        }
+    } else {
+        None
+    }
+}
+
+/// Merge client system prompt with server system prompt using hybrid strategy.
+/// - If client system is array with cache_control, merge server prompt into last block's text
+/// - If client system is string or array without cache_control, normalize to string and concatenate
+/// - If only server has prompt, use it as-is
+/// - If only client has prompt, passthrough unchanged
+fn merge_system_prompts(
+    client_system: Option<&Value>,
+    server_system: Option<&str>,
+) -> Option<Value> {
+    match (client_system, server_system) {
+        (None, None) => None,
+        (None, Some(server)) => Some(Value::String(server.to_string())),
+        (Some(client), None) => Some(client.clone()),
+        (Some(client), Some(server)) => {
+            // Client has system, server has system — merge
+            if client.is_array() && has_cache_control(client) {
+                // Preserve array format with cache_control
+                let mut arr = client.as_array().unwrap().clone();
+                if let Some(last) = arr.last_mut()
+                    && let Some(text) = last.get("text").and_then(|t| t.as_str())
+                {
+                    let merged_text = format!("{}\n\n{}", text, server);
+                    last["text"] = Value::String(merged_text);
+                }
+                Some(Value::Array(arr))
+            } else {
+                // Normalize to string and concatenate
+                let client_text = if let Some(s) = client.as_str() {
+                    s.to_string()
+                } else if let Some(text) = extract_system_text(client) {
+                    text
+                } else {
+                    return Some(client.clone());
+                };
+                Some(Value::String(format!("{}\n\n{}", client_text, server)))
+            }
+        }
+    }
+}
+
+/// Transform request body: apply model mapping and system prompt merge (for /v1/messages only).
+fn transform_request_body(
+    body: &[u8],
+    model_mappings: &serde_json::Value,
+    server_system_prompt: Option<&str>,
+    is_messages_endpoint: bool,
+) -> Vec<u8> {
+    let mut json: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return body.to_vec(),
+    };
+
+    // Apply model mapping
+    let mappings_obj = match model_mappings.as_object() {
+        Some(m) if !m.is_empty() => m,
+        _ => &serde_json::Map::new(),
+    };
+
+    if let Some(model) = json.get("model").and_then(|m| m.as_str())
+        && let Some(mapped) = mappings_obj.get(model).and_then(|v| v.as_str())
+    {
+        json["model"] = Value::String(mapped.to_string());
+    }
+
+    // Apply system prompt merge (only for /v1/messages)
+    if is_messages_endpoint && server_system_prompt.is_some() {
+        let client_system = json.get("system");
+        if let Some(merged) = merge_system_prompts(client_system, server_system_prompt) {
+            json["system"] = merged;
+            tracing::info!(
+                "System prompt injected: server_prompt={:?}, merged_system={:?}",
+                server_system_prompt,
+                json.get("system")
+            );
+        }
+    }
+
+    serde_json::to_vec(&json).unwrap_or_else(|_| body.to_vec())
 }
 
 async fn proxy_handler(
@@ -492,7 +602,21 @@ async fn proxy_handler(
         if let Some(resolved_key) = ct_resolved_key {
             ct_default_attempted = true;
             any_server_attempted = true;
-            let transformed_body = transform_model(&body_bytes, &ct_server.model_mappings);
+
+            if ct_server.system_prompt.is_some() {
+                tracing::info!(
+                    "Applying system prompt for count-tokens server: {} (id: {})",
+                    ct_server.server_name,
+                    ct_server.short_id
+                );
+            }
+
+            let transformed_body = transform_request_body(
+                &body_bytes,
+                &ct_server.model_mappings,
+                ct_server.system_prompt.as_deref(),
+                is_count_tokens,
+            );
 
             let path = original_uri.path();
             let upstream_url = if let Some(query) = original_uri.query() {
@@ -650,7 +774,20 @@ async fn proxy_handler(
             rate_limiter::increment_rate_limit(&state.redis, config.group_id, server.server_id, window_sec).await;
         }
 
-        let transformed_body = transform_model(&body_bytes, &server.model_mappings);
+        if request_path == "/v1/messages" && server.system_prompt.is_some() {
+            tracing::info!(
+                "Applying system prompt for server: {} (id: {})",
+                server.server_name,
+                server.short_id
+            );
+        }
+
+        let transformed_body = transform_request_body(
+            &body_bytes,
+            &server.model_mappings,
+            server.system_prompt.as_deref(),
+            request_path == "/v1/messages",
+        );
 
         // Build upstream URL: server.base_url + original path + query
         let path = original_uri.path();
@@ -1746,5 +1883,105 @@ mod tests {
         let user_content = parsed["messages"][0]["content"].as_array().unwrap();
         assert_eq!(user_content.len(), 1);
         assert_eq!(user_content[0]["type"], "text");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_client_string_server_string() {
+        let client = Some(&Value::String("You are a coding assistant".to_string()));
+        let server = Some("Always respond in Vietnamese");
+        let result = merge_system_prompts(client, server).unwrap();
+        assert_eq!(result, "You are a coding assistant\n\nAlways respond in Vietnamese");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_client_array_with_cache_control_server_string() {
+        let client = Some(&serde_json::json!([
+            {"type": "text", "text": "Block 1", "cache_control": {"type": "ephemeral"}}
+        ]));
+        let server = Some("Always respond in Vietnamese");
+        let result = merge_system_prompts(client, server).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["text"], "Block 1\n\nAlways respond in Vietnamese");
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_client_array_without_cache_control_server_string() {
+        let client = Some(&serde_json::json!([
+            {"type": "text", "text": "Block 1"}
+        ]));
+        let server = Some("Always respond in Vietnamese");
+        let result = merge_system_prompts(client, server).unwrap();
+        assert_eq!(result, "Block 1\n\nAlways respond in Vietnamese");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_only_server() {
+        let client = None;
+        let server = Some("Always respond in Vietnamese");
+        let result = merge_system_prompts(client, server).unwrap();
+        assert_eq!(result, "Always respond in Vietnamese");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_only_client() {
+        let client = Some(&Value::String("You are helpful".to_string()));
+        let server = None;
+        let result = merge_system_prompts(client, server).unwrap();
+        assert_eq!(result, "You are helpful");
+    }
+
+    #[test]
+    fn test_merge_system_prompts_neither() {
+        let client = None;
+        let server = None;
+        let result = merge_system_prompts(client, server);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_has_cache_control_true() {
+        let system = serde_json::json!([
+            {"type": "text", "text": "Block 1", "cache_control": {"type": "ephemeral"}}
+        ]);
+        assert!(has_cache_control(&system));
+    }
+
+    #[test]
+    fn test_has_cache_control_false() {
+        let system = serde_json::json!([
+            {"type": "text", "text": "Block 1"}
+        ]);
+        assert!(!has_cache_control(&system));
+    }
+
+    #[test]
+    fn test_extract_system_text() {
+        let system = serde_json::json!([
+            {"type": "text", "text": "Block 1"},
+            {"type": "text", "text": "Block 2"}
+        ]);
+        let result = extract_system_text(&system).unwrap();
+        assert_eq!(result, "Block 1\n\nBlock 2");
+    }
+
+    #[test]
+    fn test_transform_request_body_with_model_mapping_and_system_merge() {
+        let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
+        let mappings = serde_json::json!({"claude-opus-4-6": "my-opus"});
+        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), true);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["model"], "my-opus");
+        assert_eq!(parsed["system"], "You are helpful\n\nAlways respond in Vietnamese");
+    }
+
+    #[test]
+    fn test_transform_request_body_no_merge_on_non_messages_endpoint() {
+        let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
+        let mappings = serde_json::json!({});
+        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["system"], "You are helpful");
     }
 }
