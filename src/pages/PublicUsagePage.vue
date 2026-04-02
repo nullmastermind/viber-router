@@ -264,32 +264,30 @@
 
     <!-- Meter Results Dialog -->
     <q-dialog v-model="showMeterDialog">
-      <q-card style="width: 95vw; max-width: 480px">
+      <q-card style="width: 95vw; max-width: 400px">
         <q-card-section>
           <div class="text-subtitle1">Meter Results</div>
           <div class="text-caption" style="color: var(--vr-text-secondary)">Elapsed: {{ formatElapsed(meterElapsed) }}</div>
         </q-card-section>
-        <q-card-section class="q-pt-none" style="overflow-x: auto">
-          <q-markup-table flat bordered dense>
-            <thead>
-              <tr>
-                <th class="text-left">Model</th>
-                <th class="text-right">Input Tokens</th>
-                <th class="text-right">Output Tokens</th>
-                <th class="text-right">Requests</th>
-                <th class="text-right">Cost ($)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, idx) in meterDeltaRows" :key="idx" :style="row.model === null ? 'font-weight: 600' : ''">
-                <td>{{ row.model || '\u2014' }}</td>
-                <td class="text-right">{{ formatCompact(row.input) }}</td>
-                <td class="text-right">{{ formatCompact(row.output) }}</td>
-                <td class="text-right">{{ formatCompact(row.requests) }}</td>
-                <td class="text-right">${{ row.cost.toFixed(4) }}</td>
-              </tr>
-            </tbody>
-          </q-markup-table>
+        <q-card-section class="q-pt-none">
+          <div v-if="meterDeltaRows.filter((r) => r.model !== null).length === 0" class="text-caption" style="color: var(--vr-text-secondary)">
+            No usage during this period
+          </div>
+          <template v-else>
+            <div v-for="(row, idx) in meterDeltaRows" :key="idx">
+              <q-separator v-if="row.model === null" class="q-my-sm" />
+              <div :class="row.model === null ? 'text-weight-bold' : ''" class="q-mb-sm">
+                <div class="text-subtitle2 q-mb-xs">{{ row.model || 'Total' }}</div>
+                <div class="row q-col-gutter-x-md text-caption" style="color: var(--vr-text-secondary)">
+                  <div class="col-6">Input: <span :style="row.model === null ? '' : 'color: var(--vr-text-primary)'">{{ formatCompact(row.input) }}</span></div>
+                  <div class="col-6">Output: <span :style="row.model === null ? '' : 'color: var(--vr-text-primary)'">{{ formatCompact(row.output) }}</span></div>
+                  <div class="col-6">Requests: <span :style="row.model === null ? '' : 'color: var(--vr-text-primary)'">{{ formatCompact(row.requests) }}</span></div>
+                  <div class="col-6">Cost: <span :style="row.model === null ? '' : 'color: var(--vr-text-primary)'">${{ row.cost.toFixed(4) }}</span></div>
+                </div>
+              </div>
+              <q-separator v-if="row.model !== null && idx < meterDeltaRows.length - 2" class="q-my-sm" />
+            </div>
+          </template>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Close" v-close-popup />
@@ -482,7 +480,7 @@ async function stopMeter() {
   try {
     const res = await api.get<UsageData>('/api/public/usage', { params: { key: routeKey.value } });
     const fresh = res.data.usage;
-    const rows: MeterDeltaRow[] = fresh.map((row) => {
+    const allRows: MeterDeltaRow[] = fresh.map((row) => {
       const snap = snapshot.find((s) => s.model === row.model);
       return {
         model: row.model,
@@ -492,15 +490,19 @@ async function stopMeter() {
         cost: (row.cost_usd ?? 0) - (snap?.cost_usd ?? 0),
       };
     });
+    // Filter out models with no usage
+    const filtered = allRows.filter(
+      (r) => r.input !== 0 || r.output !== 0 || r.requests !== 0 || r.cost !== 0,
+    );
     // Total row
-    rows.push({
+    filtered.push({
       model: null,
-      input: rows.reduce((acc, r) => acc + r.input, 0),
-      output: rows.reduce((acc, r) => acc + r.output, 0),
-      requests: rows.reduce((acc, r) => acc + r.requests, 0),
-      cost: rows.reduce((acc, r) => acc + r.cost, 0),
+      input: filtered.reduce((acc, r) => acc + r.input, 0),
+      output: filtered.reduce((acc, r) => acc + r.output, 0),
+      requests: filtered.reduce((acc, r) => acc + r.requests, 0),
+      cost: filtered.reduce((acc, r) => acc + r.cost, 0),
     });
-    meterDeltaRows.value = rows;
+    meterDeltaRows.value = filtered;
     meterElapsed.value = elapsed;
     showMeterDialog.value = true;
   } catch {
