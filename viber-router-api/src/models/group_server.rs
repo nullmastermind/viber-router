@@ -20,6 +20,7 @@ pub struct GroupServer {
     pub rate_window_seconds: Option<i32>,
     pub normalize_cache_read: bool,
     pub max_input_tokens: Option<i32>,
+    pub supported_models: Vec<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -47,6 +48,8 @@ pub struct GroupServerDetail {
     pub normalize_cache_read: bool,
     #[serde(default)]
     pub max_input_tokens: Option<i32>,
+    #[serde(default)]
+    pub supported_models: Vec<String>,
 }
 
 /// Admin-facing server detail with rate fields (not used in proxy cache)
@@ -71,6 +74,8 @@ pub struct AdminGroupServerDetail {
     pub rate_window_seconds: Option<i32>,
     pub normalize_cache_read: bool,
     pub max_input_tokens: Option<i32>,
+    #[serde(default)]
+    pub supported_models: Vec<String>,
     pub password_hash: Option<String>,
 }
 
@@ -80,6 +85,8 @@ pub struct AssignServer {
     pub priority: i32,
     pub model_mappings: Option<serde_json::Value>,
     pub max_input_tokens: Option<i32>,
+    #[serde(default)]
+    pub supported_models: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +105,7 @@ pub struct UpdateAssignment {
     pub rate_window_seconds: Option<Option<i32>>,
     pub normalize_cache_read: Option<bool>,
     pub max_input_tokens: Option<Option<i32>>,
+    pub supported_models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

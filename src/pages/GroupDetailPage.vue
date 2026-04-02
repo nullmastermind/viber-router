@@ -585,6 +585,22 @@
               class="q-mb-sm"
               @clear="editServerTokenForm.max_input_tokens = null"
             />
+            <div class="text-subtitle2 q-mt-md q-mb-xs">Supported Models</div>
+            <div class="text-caption text-grey q-mb-sm">
+              Restrict this server to specific models. Leave empty to accept all models.
+            </div>
+            <q-select
+              v-model="editServerSupportedModels"
+              :options="editServerModelOptions"
+              label="Supported Models"
+              outlined
+              dense
+              multiple
+              use-chips
+              use-input
+              new-value-mode="add-unique"
+              class="q-mb-sm"
+            />
           </q-card-section>
           <q-card-actions align="right">
             <q-btn flat label="Cancel" v-close-popup />
@@ -751,6 +767,8 @@ const editServerRlForm = ref({
 const editServerTokenForm = ref({
   max_input_tokens: null as number | null,
 });
+const editServerSupportedModels = ref<string[]>([]);
+const editServerModelOptions = ref<string[]>([]);
 const savingServer = ref(false);
 
 const keyBuilderEntries = ref<{ server_id: string; server_name: string; short_id: number; key: string; defaultKey: string }[]>([]);
@@ -1420,6 +1438,13 @@ function doOpenEditServer(s: GroupServerDetail) {
   editServerTokenForm.value = {
     max_input_tokens: s.max_input_tokens,
   };
+  editServerSupportedModels.value = s.supported_models ? [...s.supported_models] : [];
+  // Load model names for the multi-select
+  modelsStore.fetchModels({ limit: 200 }).then((result) => {
+    editServerModelOptions.value = result.data.map((m) => m.name);
+  }).catch(() => {
+    editServerModelOptions.value = [];
+  });
   showEditServer.value = true;
 }
 
@@ -1467,6 +1492,7 @@ async function onSaveEditServer() {
         max_requests: editServerRlForm.value.max_requests,
         rate_window_seconds: editServerRlForm.value.rate_window_seconds,
         max_input_tokens: editServerTokenForm.value.max_input_tokens,
+        supported_models: editServerSupportedModels.value,
       });
     }
     showEditServer.value = false;

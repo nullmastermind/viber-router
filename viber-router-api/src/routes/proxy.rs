@@ -120,7 +120,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens \
+         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.supported_models \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -797,6 +797,22 @@ async fn proxy_handler(
             && est > limit as usize
         {
             continue; // Skip server whose token threshold is exceeded
+        }
+
+        // Supported models: skip server if it has a non-empty filter and the request model
+        // is neither in the list nor a key in model_mappings (which implies it is supported).
+        if !server.supported_models.is_empty()
+            && let Some(ref model) = request_model
+        {
+            let in_list = server.supported_models.iter().any(|m| m == model);
+            let in_mappings = server
+                .model_mappings
+                .as_object()
+                .map(|obj| obj.contains_key(model.as_str()))
+                .unwrap_or(false);
+            if !in_list && !in_mappings {
+                continue; // Skip server that does not support this model
+            }
         }
 
         any_server_attempted = true;

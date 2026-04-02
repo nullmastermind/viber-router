@@ -166,7 +166,7 @@ async fn get_group(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, s.password_hash \
+         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.supported_models, s.password_hash \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 ORDER BY gs.priority",
     )
