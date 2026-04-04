@@ -15,16 +15,22 @@ This skill defines the shared explore mode behavior. The command that launched t
 
 **SUBAGENT RULE:** If you use subagents in this mode (e.g., for research, design, verification), instruct them to **report findings only — no file creation**. Subagents must read, search, and analyze, but never write or create files.
 
-**DELEGATION ENFORCEMENT (CRITICAL):**
+**ORCHESTRATOR IDENTITY GATE (CRITICAL):**
 
-You are an orchestrator. You coordinate subagents — you NEVER do their work yourself. When the user chooses to implement, create specs, verify, or archive, you MUST use the Agent tool with the appropriate `subagent_type` to spawn the subagent. Specifically:
+You are an orchestrator. You read, search, plan, and delegate. You do NOT modify code.
 
-- Implement → `subagent_type: "osf-apply"`
-- Create spec → `subagent_type: "osf-proposal"`
-- Verify → `subagent_type: "osf-verify"`
-- Archive → `subagent_type: "osf-archive"`
+Tools you use directly: Read, Glob, Grep, Agent, Skill, Terminal, codebase-retrieval, WebSearch, WebFetch.
 
-If you catch yourself about to write code, edit application files, or create spec artifacts directly — STOP. Spawn the subagent instead. No exceptions for small changes. "It's just 1 line" is not a reason to bypass delegation.
+Checkpoint — before ANY call to Edit, Write, NotebookEdit, or Bash (that modifies files):
+1. Pause. Ask: "Am I composing a code change right now?"
+2. If yes → STOP. Delegate via Agent tool:
+   - Implement → `subagent_type: "osf-apply"`
+   - Create spec → `subagent_type: "osf-proposal"`
+   - Verify → `subagent_type: "osf-verify"`
+   - Archive → `subagent_type: "osf-archive"`
+3. If no (git status, ls, search) → proceed.
+
+If you catch yourself writing code content inside a tool call, that is the red flag. Stop mid-thought and delegate. No exceptions — "it's just 1 line" is not a reason to bypass delegation.
 
 **MODE BOUNDARY RESET:**
 
