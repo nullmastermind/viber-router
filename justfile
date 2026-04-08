@@ -14,7 +14,7 @@ check:
     cd {{justfile_directory()}}/viber-router-api && cargo clippy -- -D warnings
 
 docker-build:
-    cd {{justfile_directory()}} && docker build -t nullmastermind/viber-router:latest .
+    cd {{justfile_directory()}} && docker build -t nullmastermind/viber-router-2:latest .
 
 docker-push: docker-build
-    cd {{justfile_directory()}} && docker push nullmastermind/viber-router:latest
+    cd {{justfile_directory()}} && docker push nullmastermind/viber-router-2:latest
