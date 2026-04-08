@@ -16,7 +16,7 @@ use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
 use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail};
 use crate::routes::AppState;
 use crate::routes::key_parser::parse_api_key;
-use crate::sse_usage_parser::SseUsageParser;
+use crate::sse_usage_parser::{AnyParser, OpenAiSseUsageParser, SseUsageParser};
 use crate::ttft_buffer::TtftLogEntry;
 use crate::uptime_buffer::UptimeCheckEntry;
 use crate::telegram_notifier;
@@ -55,6 +55,34 @@ fn anthropic_error(status: StatusCode, error_type: &str, message: &str) -> Respo
         }
     });
     (status, axum::Json(body)).into_response()
+}
+
+fn openai_error(status: StatusCode, error_type: &str, message: &str) -> Response {
+    let body = serde_json::json!({
+        "error": {
+            "message": message,
+            "type": error_type,
+            "param": null,
+            "code": null
+        }
+    });
+    (status, axum::Json(body)).into_response()
+}
+
+fn api_error(path: &str, status: StatusCode, error_type: &str, message: &str) -> Response {
+    if is_openai_endpoint(path) {
+        openai_error(status, error_type, message)
+    } else {
+        anthropic_error(status, error_type, message)
+    }
+}
+
+fn is_billing_endpoint(path: &str) -> bool {
+    path == "/v1/messages" || path == "/v1/chat/completions"
+}
+
+fn is_openai_endpoint(path: &str) -> bool {
+    path.starts_with("/v1/chat/")
 }
 
 async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupConfig> {
@@ -120,7 +148,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read \
+         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.supported_models \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -271,6 +299,27 @@ fn extract_request_model(body: &[u8]) -> Option<String> {
         .and_then(|v| v.get("model")?.as_str().map(String::from))
 }
 
+/// Estimate the number of input tokens for a request body.
+/// Strips image content blocks from messages, serializes the result, and divides the byte length by 4.
+/// Returns None if the body is not valid JSON (fail open).
+fn estimate_input_tokens(body: &[u8]) -> Option<usize> {
+    let mut json: Value = serde_json::from_slice(body).ok()?;
+
+    // Strip image content blocks from each message's content array
+    if let Some(messages) = json.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        for msg in messages.iter_mut() {
+            if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                content.retain(|block| {
+                    block.get("type").and_then(|t| t.as_str()) != Some("image")
+                });
+            }
+        }
+    }
+
+    let filtered = serde_json::to_string(&json).ok()?;
+    Some(filtered.len() / 4)
+}
+
 /// Check if a system array has cache_control metadata in any block.
 fn has_cache_control(system: &Value) -> bool {
     if let Some(arr) = system.as_array() {
@@ -337,12 +386,36 @@ fn merge_system_prompts(
     }
 }
 
-/// Transform request body: apply model mapping and system prompt merge (for /v1/messages only).
+/// Merge server system prompt into OpenAI messages array.
+/// If messages[0] has role "system", append server prompt to its content.
+/// Otherwise, prepend a new system message.
+fn merge_openai_system_prompt(body: &mut Value, server_prompt: &str) {
+    let messages = match body.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        Some(m) => m,
+        None => return,
+    };
+
+    if let Some(first) = messages.first_mut()
+        && first.get("role").and_then(|r| r.as_str()) == Some("system")
+    {
+        // Append server prompt to existing system message content
+        if let Some(content) = first.get("content").and_then(|c| c.as_str()) {
+            let merged = format!("{}\n\n{}", content, server_prompt);
+            first["content"] = Value::String(merged);
+        }
+    } else {
+        // Prepend a new system message
+        let system_msg = serde_json::json!({"role": "system", "content": server_prompt});
+        messages.insert(0, system_msg);
+    }
+}
+
+/// Transform request body: apply model mapping and system prompt merge.
 fn transform_request_body(
     body: &[u8],
     model_mappings: &serde_json::Value,
     server_system_prompt: Option<&str>,
-    is_messages_endpoint: bool,
+    request_path: &str,
 ) -> Vec<u8> {
     let mut json: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -361,8 +434,8 @@ fn transform_request_body(
         json["model"] = Value::String(mapped.to_string());
     }
 
-    // Apply system prompt merge (only for /v1/messages)
-    if is_messages_endpoint && server_system_prompt.is_some() {
+    // Apply system prompt merge
+    if request_path == "/v1/messages" && server_system_prompt.is_some() {
         let client_system = json.get("system");
         if let Some(merged) = merge_system_prompts(client_system, server_system_prompt) {
             json["system"] = merged;
@@ -371,6 +444,25 @@ fn transform_request_body(
                 server_system_prompt,
                 json.get("system")
             );
+        }
+    } else if is_openai_endpoint(request_path) && server_system_prompt.is_some() {
+        merge_openai_system_prompt(&mut json, server_system_prompt.unwrap());
+        tracing::info!(
+            "OpenAI system prompt injected: server_prompt={:?}",
+            server_system_prompt,
+        );
+    }
+
+    // Inject stream_options.include_usage for OpenAI streaming requests so
+    // usage data is included in the SSE stream.
+    if is_openai_endpoint(request_path) && json.get("stream").and_then(|v| v.as_bool()) == Some(true) {
+        match json.get_mut("stream_options") {
+            Some(Value::Object(opts)) => {
+                opts.insert("include_usage".to_string(), Value::Bool(true));
+            }
+            _ => {
+                json["stream_options"] = serde_json::json!({"include_usage": true});
+            }
         }
     }
 
@@ -408,7 +500,7 @@ async fn proxy_handler(
         Err(()) => vec![], // Redis failure: fail-open
     };
     if blocked.iter().any(|p| p == request_path) {
-        return anthropic_error(StatusCode::NOT_FOUND, "not_found_error", "Not found");
+        return api_error(request_path, StatusCode::NOT_FOUND, "not_found_error", "Not found");
     }
 
     // Extract API key from x-api-key header, falling back to Authorization: Bearer <key>
@@ -426,7 +518,8 @@ async fn proxy_handler(
         }) {
         Some(key) => key,
         None => {
-            return anthropic_error(
+            return api_error(
+                original_uri.path(),
                 StatusCode::UNAUTHORIZED,
                 "authentication_error",
                 "Invalid API key",
@@ -446,7 +539,8 @@ async fn proxy_handler(
                 match resolve_group_config(&state, &raw_key).await {
                     Some(c) => c,
                     None => {
-                        return anthropic_error(
+                        return api_error(
+                            original_uri.path(),
                             StatusCode::UNAUTHORIZED,
                             "authentication_error",
                             "Invalid API key",
@@ -454,7 +548,8 @@ async fn proxy_handler(
                     }
                 }
             } else {
-                return anthropic_error(
+                return api_error(
+                    original_uri.path(),
                     StatusCode::UNAUTHORIZED,
                     "authentication_error",
                     "Invalid API key",
@@ -464,7 +559,8 @@ async fn proxy_handler(
     };
 
     if !config.is_active {
-        return anthropic_error(
+        return api_error(
+            original_uri.path(),
             StatusCode::FORBIDDEN,
             "permission_error",
             "API key is disabled",
@@ -472,7 +568,8 @@ async fn proxy_handler(
     }
 
     if config.servers.is_empty() {
-        return anthropic_error(
+        return api_error(
+            original_uri.path(),
             StatusCode::from_u16(429).unwrap(),
             "overloaded_error",
             "All upstream servers unavailable",
@@ -485,7 +582,8 @@ async fn proxy_handler(
     let body_bytes = match axum::body::to_bytes(req.into_body(), 100 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => {
-            return anthropic_error(
+            return api_error(
+                original_uri.path(),
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "invalid_request_error",
                 "Request body too large. Maximum allowed size is 100 MB",
@@ -506,18 +604,23 @@ async fn proxy_handler(
     let request_method = method.to_string();
     let loop_start = std::time::Instant::now();
 
+    // Estimate input tokens once before the failover loop (used for max_input_tokens skip)
+    let estimated_tokens: Option<usize> = estimate_input_tokens(&body_bytes);
+
     // Model allowlist validation
     if !config.allowed_models.is_empty() {
         match &request_model {
             None => {
-                return anthropic_error(
+                return api_error(
+                    &request_path,
                     StatusCode::FORBIDDEN,
                     "permission_error",
                     "Your API key does not have permission to use the specified model.",
                 );
             }
             Some(model) if !config.allowed_models.iter().any(|m| m == model) => {
-                return anthropic_error(
+                return api_error(
+                    &request_path,
                     StatusCode::FORBIDDEN,
                     "permission_error",
                     "Your API key does not have permission to use the specified model.",
@@ -531,7 +634,8 @@ async fn proxy_handler(
             && let Some(model) = &request_model
             && !config.key_allowed_models.iter().any(|m| m == model)
         {
-            return anthropic_error(
+            return api_error(
+                &request_path,
                 StatusCode::FORBIDDEN,
                 "permission_error",
                 "Your API key does not have permission to use the specified model.",
@@ -539,9 +643,9 @@ async fn proxy_handler(
         }
     }
 
-    // Subscription budget check (only for sub-keys on /v1/messages)
+    // Subscription budget check (only for sub-keys on billing endpoints)
     let mut selected_subscription_id: Option<uuid::Uuid> = None;
-    if request_path == "/v1/messages"
+    if is_billing_endpoint(&request_path)
         && let Some(group_key_id) = config.group_key_id
     {
         match crate::subscription::check_subscriptions(
@@ -551,7 +655,6 @@ async fn proxy_handler(
         )
         .await
         {
-            crate::subscription::SubCheckResult::Unlimited => {}
             crate::subscription::SubCheckResult::Allowed { subscription_id, rpm_limit } => {
                 selected_subscription_id = Some(subscription_id);
                 // Increment RPM counter (optimistic, pre-request)
@@ -560,7 +663,8 @@ async fn proxy_handler(
                 }
             }
             crate::subscription::SubCheckResult::Blocked => {
-                return anthropic_error(
+                return api_error(
+                    &request_path,
                     StatusCode::TOO_MANY_REQUESTS,
                     "rate_limit_error",
                     "Subscription limit exceeded",
@@ -615,7 +719,7 @@ async fn proxy_handler(
                 &body_bytes,
                 &ct_server.model_mappings,
                 ct_server.system_prompt.as_deref(),
-                is_count_tokens,
+                original_uri.path(),
             );
 
             let path = original_uri.path();
@@ -767,6 +871,30 @@ async fn proxy_handler(
             continue; // Skip rate-limited server
         }
 
+        // Max input tokens: skip server if estimated tokens exceed configured threshold
+        if let Some(limit) = server.max_input_tokens
+            && let Some(est) = estimated_tokens
+            && est > limit as usize
+        {
+            continue; // Skip server whose token threshold is exceeded
+        }
+
+        // Supported models: skip server if it has a non-empty filter and the request model
+        // is neither in the list nor a key in model_mappings (which implies it is supported).
+        if !server.supported_models.is_empty()
+            && let Some(ref model) = request_model
+        {
+            let in_list = server.supported_models.iter().any(|m| m == model);
+            let in_mappings = server
+                .model_mappings
+                .as_object()
+                .map(|obj| obj.contains_key(model.as_str()))
+                .unwrap_or(false);
+            if !in_list && !in_mappings {
+                continue; // Skip server that does not support this model
+            }
+        }
+
         any_server_attempted = true;
 
         // Increment rate limit counter before sending request (optimistic)
@@ -774,7 +902,7 @@ async fn proxy_handler(
             rate_limiter::increment_rate_limit(&state.redis, config.group_id, server.server_id, window_sec).await;
         }
 
-        if request_path == "/v1/messages" && server.system_prompt.is_some() {
+        if is_billing_endpoint(&request_path) && server.system_prompt.is_some() {
             tracing::info!(
                 "Applying system prompt for server: {} (id: {})",
                 server.server_name,
@@ -786,7 +914,7 @@ async fn proxy_handler(
             &body_bytes,
             &server.model_mappings,
             server.system_prompt.as_deref(),
-            request_path == "/v1/messages",
+            &request_path,
         );
 
         // Build upstream URL: server.base_url + original path + query
@@ -880,7 +1008,7 @@ async fn proxy_handler(
         last_server_name = server.server_name.clone();
 
         // Before failover: intercept 400 thinking signature errors on /v1/messages
-        if status == 400 && request_path == "/v1/messages" {
+        if status == 400 && is_billing_endpoint(&request_path) {
             let err_body = upstream_resp.bytes().await.unwrap_or_default();
             let err_str = String::from_utf8_lossy(&err_body);
             let is_sig_err = is_thinking_signature_error(&err_body);
@@ -1023,7 +1151,7 @@ async fn proxy_handler(
                 &failover_chain, &request_model,
                 None, None, None,
             );
-            if request_path == "/v1/messages" {
+            if is_billing_endpoint(&request_path) {
                 let db = state.db.clone();
                 let redis = state.redis.clone();
                 let http_client = state.http_client.clone();
@@ -1060,8 +1188,8 @@ async fn proxy_handler(
                     None, None, None,
                 );
             }
-            // Extract token usage from non-streaming /v1/messages 200 responses
-            if request_path == "/v1/messages" {
+            // Extract token usage from non-streaming billing endpoint 200 responses
+            if is_billing_endpoint(&request_path) {
                 let resp_status_code = StatusCode::from_u16(upstream_resp.status().as_u16())
                     .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
                 let mut response_headers = HeaderMap::new();
@@ -1077,8 +1205,22 @@ async fn proxy_handler(
                 if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes)
                     && let Some(usage) = json.get("usage")
                 {
-                    let input = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                    let output = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                    let (input, output, cache_creation, cache_read) = if is_openai_endpoint(&request_path) {
+                        let inp = usage.get("prompt_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let out = usage.get("completion_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let cr = usage
+                            .get("prompt_tokens_details")
+                            .and_then(|d| d.get("cached_tokens"))
+                            .and_then(|v| v.as_i64())
+                            .map(|v| v as i32);
+                        (inp, out, None, cr)
+                    } else {
+                        let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let out = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                        (inp, out, cc, cr)
+                    };
                     if let (Some(inp), Some(out)) = (input, output) {
                         let is_dk = parsed.dynamic_keys.contains_key(&server.short_id);
                         let kh = {
@@ -1089,54 +1231,74 @@ async fn proxy_handler(
                             };
                             if raw.is_empty() { None } else { Some(hash_key(&raw)) }
                         };
-                        let cache_creation = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
 
                         // Calculate cost and update subscription counters
                         let cost_usd = if let Some(ref model_name) = request_model {
-                            let pricing_cache = state.pricing_cache.read().await;
-                            if let Some(pricing) = pricing_cache.get(model_name) {
-                                let ri = server.rate_input.unwrap_or(1.0);
-                                let ro = server.rate_output.unwrap_or(1.0);
-                                let rcw = server.rate_cache_write.unwrap_or(1.0);
-                                let rcr = server.rate_cache_read.unwrap_or(1.0);
-                                let cost = crate::subscription::calculate_cost(
-                                    pricing, ri, ro, rcw, rcr,
-                                    inp, out, cache_creation, cache_read,
-                                    server.normalize_cache_read,
-                                );
-                                drop(pricing_cache);
+                            if let Some(sub_id) = selected_subscription_id {
+                                if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
+                                    "SELECT * FROM key_subscriptions WHERE id = $1",
+                                )
+                                .bind(sub_id)
+                                .fetch_one(&state.db)
+                                .await
+                                {
+                                    let cost = if sub.sub_type == "pay_per_request" {
+                                        // Flat cost from model_request_costs
+                                        sub.model_request_costs
+                                            .as_object()
+                                            .and_then(|m| m.get(model_name.as_str()))
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0)
+                                    } else {
+                                        let pricing_cache = state.pricing_cache.read().await;
+                                        if let Some(pricing) = pricing_cache.get(model_name) {
+                                            let ri = server.rate_input.unwrap_or(1.0);
+                                            let ro = server.rate_output.unwrap_or(1.0);
+                                            let rcw = server.rate_cache_write.unwrap_or(1.0);
+                                            let rcr = server.rate_cache_read.unwrap_or(1.0);
+                                            let c = crate::subscription::calculate_cost(
+                                                pricing, ri, ro, rcw, rcr,
+                                                inp, out, cache_creation, cache_read,
+                                                server.normalize_cache_read,
+                                            );
+                                            drop(pricing_cache);
+                                            c
+                                        } else {
+                                            drop(pricing_cache);
+                                            0.0
+                                        }
+                                    };
 
-                                if let Some(sub_id) = selected_subscription_id {
                                     // Lazy activation
-                                    crate::subscription::ensure_activated(&state, sub_id, {
-                                        // Look up duration_days from DB (quick query)
-                                        sqlx::query_scalar::<_, i32>(
-                                            "SELECT duration_days FROM key_subscriptions WHERE id = $1",
-                                        )
-                                        .bind(sub_id)
-                                        .fetch_one(&state.db)
-                                        .await
-                                        .unwrap_or(30)
-                                    }).await;
+                                    crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
 
-                                    // Get subscription details for counter update
-                                    if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
-                                        "SELECT * FROM key_subscriptions WHERE id = $1",
-                                    )
-                                    .bind(sub_id)
-                                    .fetch_one(&state.db)
-                                    .await
-                                    {
-                                        crate::subscription::update_cost_counters(
-                                            &state, sub_id, model_name, cost,
-                                            &sub.sub_type, sub.activated_at, sub.reset_hours,
-                                        ).await;
-                                    }
+                                    crate::subscription::update_cost_counters(
+                                        &state, sub_id, model_name, cost,
+                                        sub.reset_hours,
+                                    ).await;
+
+                                    Some(cost)
+                                } else {
+                                    None
                                 }
-                                Some(cost)
                             } else {
-                                None
+                                // No subscription — still calculate cost for logging
+                                let pricing_cache = state.pricing_cache.read().await;
+                                if let Some(pricing) = pricing_cache.get(model_name) {
+                                    let ri = server.rate_input.unwrap_or(1.0);
+                                    let ro = server.rate_output.unwrap_or(1.0);
+                                    let rcw = server.rate_cache_write.unwrap_or(1.0);
+                                    let rcr = server.rate_cache_read.unwrap_or(1.0);
+                                    let cost = crate::subscription::calculate_cost(
+                                        pricing, ri, ro, rcw, rcr,
+                                        inp, out, cache_creation, cache_read,
+                                        server.normalize_cache_read,
+                                    );
+                                    drop(pricing_cache);
+                                    Some(cost)
+                                } else {
+                                    None
+                                }
                             }
                         } else {
                             None
@@ -1243,7 +1405,7 @@ async fn proxy_handler(
                     let first = futures_util::stream::iter(std::iter::once(Ok::<_, std::io::Error>(first_chunk)));
                     let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
                     let combined = first.chain(rest);
-                    let body = if request_path == "/v1/messages" {
+                    let body = if is_billing_endpoint(&request_path) {
                         let is_dk = parsed.dynamic_keys.contains_key(&server.short_id);
                         let kh = {
                             let raw = if let Some(dk) = parsed.dynamic_keys.get(&server.short_id) {
@@ -1252,6 +1414,11 @@ async fn proxy_handler(
                                 server.api_key.clone().unwrap_or_default()
                             };
                             if raw.is_empty() { None } else { Some(hash_key(&raw)) }
+                        };
+                        let parser = if is_openai_endpoint(&request_path) {
+                            AnyParser::OpenAi(OpenAiSseUsageParser::new())
+                        } else {
+                            AnyParser::Anthropic(SseUsageParser::new())
                         };
                         Body::from_stream(wrap_stream_with_usage_tracking(
                             combined, state.clone(), config.group_id, server.server_id,
@@ -1262,6 +1429,7 @@ async fn proxy_handler(
                             server.rate_cache_write.unwrap_or(1.0),
                             server.rate_cache_read.unwrap_or(1.0),
                             server.normalize_cache_read,
+                            parser,
                         ))
                     } else {
                         Body::from_stream(combined)
@@ -1332,7 +1500,7 @@ async fn proxy_handler(
                     let first = futures_util::stream::iter(std::iter::once(Ok::<_, std::io::Error>(first_chunk)));
                     let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
                     let combined = first.chain(rest);
-                    let body = if request_path == "/v1/messages" {
+                    let body = if is_billing_endpoint(&request_path) {
                         let is_dk = parsed.dynamic_keys.contains_key(&server.short_id);
                         let kh = {
                             let raw = if let Some(dk) = parsed.dynamic_keys.get(&server.short_id) {
@@ -1341,6 +1509,11 @@ async fn proxy_handler(
                                 server.api_key.clone().unwrap_or_default()
                             };
                             if raw.is_empty() { None } else { Some(hash_key(&raw)) }
+                        };
+                        let parser = if is_openai_endpoint(&request_path) {
+                            AnyParser::OpenAi(OpenAiSseUsageParser::new())
+                        } else {
+                            AnyParser::Anthropic(SseUsageParser::new())
                         };
                         Body::from_stream(wrap_stream_with_usage_tracking(
                             combined, state.clone(), config.group_id, server.server_id,
@@ -1351,6 +1524,7 @@ async fn proxy_handler(
                             server.rate_cache_write.unwrap_or(1.0),
                             server.rate_cache_read.unwrap_or(1.0),
                             server.normalize_cache_read,
+                            parser,
                         ))
                     } else {
                         Body::from_stream(combined)
@@ -1380,7 +1554,8 @@ async fn proxy_handler(
 
     // All servers rate-limited — return 429 with rate_limit_error
     if !any_server_attempted && any_rate_limited {
-        return anthropic_error(
+        return api_error(
+            &request_path,
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limit_error",
             "Rate limit exceeded",
@@ -1389,7 +1564,8 @@ async fn proxy_handler(
 
     // All servers skipped — no key available for any server
     if !any_server_attempted {
-        return anthropic_error(
+        return api_error(
+            &request_path,
             StatusCode::UNAUTHORIZED,
             "authentication_error",
             "No server keys configured",
@@ -1421,7 +1597,7 @@ async fn proxy_handler(
         None, None, None,
     );
 
-    if request_path == "/v1/messages" && final_status != 0 {
+    if is_billing_endpoint(&request_path) && final_status != 0 {
         let db = state.db.clone();
         let redis = state.redis.clone();
         let http_client = state.http_client.clone();
@@ -1435,7 +1611,8 @@ async fn proxy_handler(
         }));
     }
 
-    let mut resp = anthropic_error(
+    let mut resp = api_error(
+        &request_path,
         StatusCode::TOO_MANY_REQUESTS,
         "overloaded_error",
         "All upstream servers unavailable",
@@ -1452,7 +1629,7 @@ use std::task::{Context, Poll};
 
 struct UsageTrackingStream<S> {
     inner: S,
-    parser: Option<SseUsageParser>,
+    parser: Option<AnyParser>,
     state: AppState,
     group_id: uuid::Uuid,
     server_id: uuid::Uuid,
@@ -1518,45 +1695,67 @@ where
                     // Spawn async task for cost calculation and usage tracking
                     tokio::spawn(async move {
                         let cost_usd = if let Some(ref model_name) = model {
-                            let pricing_cache = state.pricing_cache.read().await;
-                            if let Some(pricing) = pricing_cache.get(model_name) {
-                                let cost = crate::subscription::calculate_cost(
-                                    pricing,
-                                    rate_input, rate_output,
-                                    rate_cache_write, rate_cache_read,
-                                    input_tokens, output_tokens,
-                                    cache_creation_tokens, cache_read_tokens,
-                                    normalize_cache_read,
-                                );
-                                drop(pricing_cache);
+                            if let Some(sub_id) = subscription_id {
+                                if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
+                                    "SELECT * FROM key_subscriptions WHERE id = $1",
+                                )
+                                .bind(sub_id)
+                                .fetch_one(&state.db)
+                                .await
+                                {
+                                    let cost = if sub.sub_type == "pay_per_request" {
+                                        sub.model_request_costs
+                                            .as_object()
+                                            .and_then(|m| m.get(model_name.as_str()))
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0)
+                                    } else {
+                                        let pricing_cache = state.pricing_cache.read().await;
+                                        if let Some(pricing) = pricing_cache.get(model_name) {
+                                            let c = crate::subscription::calculate_cost(
+                                                pricing,
+                                                rate_input, rate_output,
+                                                rate_cache_write, rate_cache_read,
+                                                input_tokens, output_tokens,
+                                                cache_creation_tokens, cache_read_tokens,
+                                                normalize_cache_read,
+                                            );
+                                            drop(pricing_cache);
+                                            c
+                                        } else {
+                                            drop(pricing_cache);
+                                            0.0
+                                        }
+                                    };
 
-                                if let Some(sub_id) = subscription_id {
-                                    crate::subscription::ensure_activated(&state, sub_id, {
-                                        sqlx::query_scalar::<_, i32>(
-                                            "SELECT duration_days FROM key_subscriptions WHERE id = $1",
-                                        )
-                                        .bind(sub_id)
-                                        .fetch_one(&state.db)
-                                        .await
-                                        .unwrap_or(30)
-                                    }).await;
+                                    crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
 
-                                    if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
-                                        "SELECT * FROM key_subscriptions WHERE id = $1",
-                                    )
-                                    .bind(sub_id)
-                                    .fetch_one(&state.db)
-                                    .await
-                                    {
-                                        crate::subscription::update_cost_counters(
-                                            &state, sub_id, model_name, cost,
-                                            &sub.sub_type, sub.activated_at, sub.reset_hours,
-                                        ).await;
-                                    }
+                                    crate::subscription::update_cost_counters(
+                                        &state, sub_id, model_name, cost,
+                                        sub.reset_hours,
+                                    ).await;
+
+                                    Some(cost)
+                                } else {
+                                    None
                                 }
-                                Some(cost)
                             } else {
-                                None
+                                // No subscription — still calculate cost for logging
+                                let pricing_cache = state.pricing_cache.read().await;
+                                if let Some(pricing) = pricing_cache.get(model_name) {
+                                    let cost = crate::subscription::calculate_cost(
+                                        pricing,
+                                        rate_input, rate_output,
+                                        rate_cache_write, rate_cache_read,
+                                        input_tokens, output_tokens,
+                                        cache_creation_tokens, cache_read_tokens,
+                                        normalize_cache_read,
+                                    );
+                                    drop(pricing_cache);
+                                    Some(cost)
+                                } else {
+                                    None
+                                }
                             }
                         } else {
                             None
@@ -1605,13 +1804,14 @@ fn wrap_stream_with_usage_tracking<S>(
     rate_cache_write: f64,
     rate_cache_read: f64,
     normalize_cache_read: bool,
+    parser: AnyParser,
 ) -> UsageTrackingStream<S>
 where
     S: futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Unpin,
 {
     UsageTrackingStream {
         inner: stream,
-        parser: Some(SseUsageParser::new()),
+        parser: Some(parser),
         state,
         group_id,
         server_id,
@@ -1978,7 +2178,7 @@ mod tests {
     fn test_transform_request_body_with_model_mapping_and_system_merge() {
         let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
         let mappings = serde_json::json!({"claude-opus-4-6": "my-opus"});
-        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), true);
+        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), "/v1/messages");
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["model"], "my-opus");
         assert_eq!(parsed["system"], "You are helpful\n\nAlways respond in Vietnamese");
@@ -1988,7 +2188,7 @@ mod tests {
     fn test_transform_request_body_no_merge_on_non_messages_endpoint() {
         let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
         let mappings = serde_json::json!({});
-        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), false);
+        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), "/v1/other");
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["system"], "You are helpful");
     }

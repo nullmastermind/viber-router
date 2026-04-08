@@ -26,6 +26,17 @@
           </span>
         </q-td>
       </template>
+      <template #body-cell-model_request_costs="props">
+        <q-td :props="props">
+          <span v-if="props.row.sub_type !== 'pay_per_request'">&mdash;</span>
+          <span v-else-if="Object.keys(props.row.model_request_costs || {}).length === 0">&mdash;</span>
+          <span v-else>
+            <q-chip v-for="(val, key) in props.row.model_request_costs" :key="key" dense size="sm">
+              {{ key }}: ${{ Number(val).toFixed(4) }}
+            </q-chip>
+          </span>
+        </q-td>
+      </template>
       <template #body-cell-is_active="props">
         <q-td :props="props">
           <q-toggle :model-value="props.row.is_active" @update:model-value="toggleActive(props.row, $event)" />
@@ -59,7 +70,7 @@
           </q-select>
           <q-input v-model.number="form.cost_limit_usd" label="Cost Limit ($)" outlined dense type="number" :min="0" />
           <q-input v-model.number="form.duration_days" label="Duration (days)" outlined dense type="number" :min="1" />
-          <q-input v-if="form.sub_type === 'hourly_reset'" v-model.number="form.reset_hours" label="Reset Hours" outlined dense type="number" :min="1" />
+          <q-input v-if="form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request'" v-model.number="form.reset_hours" label="Reset Hours" outlined dense type="number" :min="1" />
           <q-input v-model.number="form.rpm_limit" label="RPM Limit" outlined dense type="number" :min="0" :step="0.1" hint="Requests per minute (empty = unlimited)" clearable @clear="form.rpm_limit = null" />
           <div class="text-subtitle2 q-mt-sm">Model Limits</div>
           <div v-for="(entry, idx) in modelLimitEntries" :key="idx" class="row q-gutter-sm q-mb-xs">
@@ -68,6 +79,15 @@
             <q-btn flat dense icon="close" @click="modelLimitEntries.splice(idx, 1)" />
           </div>
           <q-btn flat dense icon="add" label="Add model limit" @click="modelLimitEntries.push({ model: '', limit: 0 })" />
+          <template v-if="form.sub_type === 'pay_per_request'">
+            <div class="text-subtitle2 q-mt-sm">Model Request Costs</div>
+            <div v-for="(entry, idx) in modelRequestCostEntries" :key="idx" class="row q-gutter-sm q-mb-xs">
+              <q-select v-model="entry.model" :options="availableModels" label="Model" outlined dense emit-value map-options style="flex:2" />
+              <q-input v-model.number="entry.cost" label="$ per request" outlined dense type="number" :min="0" :step="0.01" style="flex:1" />
+              <q-btn flat dense icon="close" @click="modelRequestCostEntries.splice(idx, 1)" />
+            </div>
+            <q-btn flat dense icon="add" label="Add model cost" @click="modelRequestCostEntries.push({ model: '', cost: 0 })" />
+          </template>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
@@ -91,6 +111,7 @@ interface Plan {
   sub_type: string;
   cost_limit_usd: number;
   model_limits: Record<string, number>;
+  model_request_costs: Record<string, number>;
   reset_hours: number | null;
   rpm_limit: number | null;
   duration_days: number;
@@ -109,6 +130,7 @@ const editingId = ref<string | null>(null);
 const saving = ref(false);
 const availableModels = ref<string[]>([]);
 const modelLimitEntries = ref<{ model: string; limit: number }[]>([]);
+const modelRequestCostEntries = ref<{ model: string; cost: number }[]>([]);
 
 const form = reactive({
   name: '',
@@ -125,6 +147,7 @@ const columns = [
   { name: 'cost_limit_usd', label: 'Cost Limit', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'model_limits', label: 'Model Limits', field: 'model_limits', align: 'left' as const },
+  { name: 'model_request_costs', label: 'Request Costs', field: 'model_request_costs', align: 'left' as const },
   { name: 'reset_hours', label: 'Reset Hours', field: 'reset_hours', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'duration_days', label: 'Duration (days)', field: 'duration_days', align: 'right' as const },
   { name: 'is_active', label: 'Active', field: 'is_active', align: 'center' as const },
@@ -167,6 +190,7 @@ function openEdit(row: Plan) {
   form.reset_hours = row.reset_hours;
   form.rpm_limit = row.rpm_limit;
   modelLimitEntries.value = Object.entries(row.model_limits || {}).map(([model, limit]) => ({ model, limit: limit as number }));
+  modelRequestCostEntries.value = Object.entries(row.model_request_costs || {}).map(([model, cost]) => ({ model, cost: cost as number }));
   showDialog.value = true;
 }
 
@@ -178,6 +202,7 @@ function resetForm() {
   form.reset_hours = null;
   form.rpm_limit = null;
   modelLimitEntries.value = [];
+  modelRequestCostEntries.value = [];
 }
 
 function buildModelLimits(): Record<string, number> {
@@ -188,10 +213,25 @@ function buildModelLimits(): Record<string, number> {
   return limits;
 }
 
+function buildModelRequestCosts(): Record<string, number> {
+  const costs: Record<string, number> = {};
+  for (const e of modelRequestCostEntries.value) {
+    if (e.model) costs[e.model] = e.cost;
+  }
+  return costs;
+}
+
 async function onSave() {
   if (!form.name.trim()) {
     $q.notify({ type: 'negative', message: 'Name is required' });
     return;
+  }
+  if (form.sub_type === 'pay_per_request') {
+    const costs = buildModelRequestCosts();
+    if (Object.keys(costs).length === 0) {
+      $q.notify({ type: 'negative', message: 'At least one model request cost is required for Pay Per Request plans' });
+      return;
+    }
   }
   saving.value = true;
   try {
@@ -200,9 +240,10 @@ async function onSave() {
       sub_type: form.sub_type,
       cost_limit_usd: form.cost_limit_usd,
       duration_days: form.duration_days,
-      reset_hours: form.sub_type === 'hourly_reset' ? form.reset_hours : null,
+      reset_hours: (form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request') ? form.reset_hours : null,
       rpm_limit: form.rpm_limit && Number.isFinite(form.rpm_limit) ? form.rpm_limit : null,
       model_limits: buildModelLimits(),
+      model_request_costs: buildModelRequestCosts(),
     };
     if (editingId.value) {
       await api.patch(`/api/admin/subscription-plans/${editingId.value}`, payload);

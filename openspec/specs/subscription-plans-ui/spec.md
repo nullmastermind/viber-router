@@ -8,7 +8,7 @@ The system SHALL display a "Plans" page accessible from the main sidebar navigat
 - **THEN** a "Plans" link SHALL be visible and navigate to the Plans page
 
 ### Requirement: Plans list view
-The Plans page SHALL display all subscription plans in a table with columns: Name, Type (fixed/hourly_reset), Cost Limit, Model Limits, Reset Hours, Duration (days), Active status.
+The Plans page SHALL display all subscription plans in a table with columns: Name, Type (fixed/hourly_reset/pay_per_request), Cost Limit, Model Limits, Model Request Costs, Reset Hours, Duration (days), Active status.
 
 #### Scenario: Display plans
 - **WHEN** the user navigates to the Plans page
@@ -18,8 +18,12 @@ The Plans page SHALL display all subscription plans in a table with columns: Nam
 - **WHEN** no plans exist
 - **THEN** the system SHALL display "No subscription plans created"
 
+#### Scenario: Model request costs displayed
+- **WHEN** a plan has `sub_type: "pay_per_request"` and `model_request_costs: {"claude-sonnet-4-6": 0.10}`
+- **THEN** the table SHALL display the model request costs as chips (e.g., "claude-sonnet-4-6: $0.10")
+
 ### Requirement: Create plan dialog
-The system SHALL provide a dialog to create a new plan with fields: name (text), type (select: fixed/hourly_reset), cost limit (number), duration days (number), reset hours (number, shown only when type is hourly_reset), and model limits editor.
+The system SHALL provide a dialog to create a new plan with fields: name (text), type (select: fixed/hourly_reset/pay_per_request), cost limit (number), duration days (number), reset hours (number, shown when type is hourly_reset OR pay_per_request), model limits editor (shown for all types), and model request costs editor (shown only when type is pay_per_request).
 
 #### Scenario: Create fixed plan
 - **WHEN** the user fills in the form with type "fixed" and submits
@@ -29,27 +33,25 @@ The system SHALL provide a dialog to create a new plan with fields: name (text),
 - **WHEN** the user selects type "hourly_reset"
 - **THEN** the reset hours field SHALL become visible and required
 
-### Requirement: Model limits editor
-The create/edit plan dialog SHALL include a model limits editor where the admin can add per-model cost limits by selecting a model from a dropdown (populated from the `models` table) and entering a dollar amount.
+#### Scenario: Create pay_per_request plan
+- **WHEN** the user selects type "pay_per_request"
+- **THEN** the model request costs editor SHALL become visible and the reset hours field SHALL become visible but optional
 
-#### Scenario: Add model limit
-- **WHEN** the admin selects "claude-opus-4-6" from the dropdown and enters 30.0
-- **THEN** the model limit SHALL be added to the `model_limits` JSONB as `{"claude-opus-4-6": 30.0}`
+#### Scenario: pay_per_request requires model_request_costs
+- **WHEN** the user selects type "pay_per_request" and submits without adding any model request costs
+- **THEN** the system SHALL show a validation error and not submit
 
-#### Scenario: Remove model limit
-- **WHEN** the admin removes a model limit entry
-- **THEN** the model SHALL be removed from the `model_limits` JSONB
+### Requirement: Model request costs editor
+The create/edit plan dialog SHALL include a model request costs editor (visible only when `sub_type` is `pay_per_request`) where the admin can add per-model flat costs by selecting a model from a dropdown and entering a dollar amount per request.
 
-### Requirement: Edit plan
-The system SHALL allow editing a plan's fields via an edit action on each row.
+#### Scenario: Add model request cost
+- **WHEN** the admin selects "claude-sonnet-4-6" from the dropdown and enters 0.10
+- **THEN** the model request cost SHALL be added to `model_request_costs` as `{"claude-sonnet-4-6": 0.10}`
 
-#### Scenario: Edit plan
-- **WHEN** the admin edits a plan and saves
-- **THEN** the system SHALL PATCH `/api/admin/subscription-plans/:id` with the changed fields
+#### Scenario: Remove model request cost
+- **WHEN** the admin removes a model request cost entry
+- **THEN** the model SHALL be removed from `model_request_costs`
 
-### Requirement: Toggle plan active status
-The system SHALL allow toggling a plan's `is_active` status directly from the table.
-
-#### Scenario: Disable plan
-- **WHEN** the admin toggles a plan to inactive
-- **THEN** the system SHALL PATCH with `{ "is_active": false }` and the plan SHALL be visually distinguished as inactive
+#### Scenario: Editor hidden for non-pay_per_request types
+- **WHEN** the plan type is "fixed" or "hourly_reset"
+- **THEN** the model request costs editor SHALL NOT be visible

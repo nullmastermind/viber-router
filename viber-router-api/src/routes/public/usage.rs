@@ -4,6 +4,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
 };
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -15,6 +16,7 @@ use crate::subscription;
 #[derive(Debug, Deserialize)]
 pub struct UsageParams {
     key: Option<String>,
+    period: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,16 +118,27 @@ pub async fn public_usage(
         }
     };
 
-    // Query usage aggregated by model (no server info), last 30 days
+    // Map period param to a SQL interval (allowlist — never interpolate user input directly)
+    let interval = match params.period.as_deref() {
+        Some("1h") => "1 hour",
+        Some("6h") => "6 hours",
+        Some("24h") => "24 hours",
+        Some("7d") => "7 days",
+        _ => "30 days",
+    };
+
+    // Query usage aggregated by model (no server info), for the selected period
     let usage = sqlx::query_as::<_, ModelUsage>(
-        "SELECT model, \
-         (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_creation_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0))::bigint as effective_input_tokens, \
-         COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens, \
-         COUNT(*)::bigint as request_count, \
-         SUM(cost_usd) as cost_usd \
-         FROM token_usage_logs \
-         WHERE group_key_id = $1 AND created_at >= now() - interval '30 days' \
-         GROUP BY model ORDER BY model",
+        &format!(
+            "SELECT model, \
+             (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_creation_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0))::bigint as effective_input_tokens, \
+             COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens, \
+             COUNT(*)::bigint as request_count, \
+             SUM(cost_usd) as cost_usd \
+             FROM token_usage_logs \
+             WHERE group_key_id = $1 AND created_at >= now() - interval '{interval}' \
+             GROUP BY model ORDER BY model"
+        ),
     )
     .bind(key_info.key_id)
     .fetch_all(&state.db)
@@ -148,7 +161,7 @@ pub async fn public_usage(
         } else {
             0.0
         };
-        let window_reset_at = compute_window_reset_at(sub);
+        let window_reset_at = compute_window_reset_at(&state, sub).await;
         subscriptions.push(PublicSubscription {
             id: sub.id,
             sub_type: sub.sub_type.clone(),
@@ -199,18 +212,20 @@ pub async fn public_usage(
     .into_response()
 }
 
-fn compute_window_reset_at(sub: &crate::models::KeySubscription) -> Option<String> {
-    if sub.sub_type != "hourly_reset" {
-        return None;
-    }
-    let (activated_at, reset_hours) = match (sub.activated_at, sub.reset_hours) {
-        (Some(a), Some(r)) => (a, r),
-        _ => return None,
-    };
-    let elapsed = (chrono::Utc::now() - activated_at).num_seconds().max(0) as u64;
-    let window_seconds = (reset_hours as u64) * 3600;
-    let window_idx = elapsed / window_seconds;
-    let window_end = activated_at
-        + chrono::Duration::seconds(((window_idx + 1) * window_seconds) as i64);
-    Some(window_end.to_rfc3339())
+async fn compute_window_reset_at(
+    state: &AppState,
+    sub: &crate::models::KeySubscription,
+) -> Option<String> {
+    let reset_hours = sub.reset_hours?;
+
+    // Read the active window start from Redis
+    use deadpool_redis::redis::AsyncCommands;
+    let key = format!("sub_window_start:{}", sub.id);
+    let mut conn = state.redis.get().await.ok()?;
+    let val: Option<String> = conn.get(&key).await.ok()?;
+    let ws: i64 = val?.parse().ok()?;
+
+    let ws_dt = chrono::Utc.timestamp_opt(ws, 0).single()?;
+    let reset_at = ws_dt + chrono::Duration::seconds((reset_hours as i64) * 3600);
+    Some(reset_at.to_rfc3339())
 }

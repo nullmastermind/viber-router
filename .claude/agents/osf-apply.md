@@ -257,5 +257,6 @@ When implementing directly from conversation plan without an openspec change:
 - **Auto-fix on first pass** — fix CRITICALs, WARNINGs, and SUGGESTIONs as each verifier result arrives
 - **Re-verify loop** — after fixing, re-verify the ENTIRE implementation. Loop exits when 0 CRITICALs. Max 2 re-verify rounds.
 - **Verify fix log** — after fixing issues from verify results, MUST append to `verify-fixes.md` in the change directory
+- **Never commit** — writing code and marking tasks complete is your job. Committing is the user's responsibility.
 
 The following is the user's request:

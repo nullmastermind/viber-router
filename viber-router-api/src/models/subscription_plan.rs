@@ -18,6 +18,7 @@ pub struct SubscriptionPlan {
     pub sub_type: String,
     pub cost_limit_usd: f64,
     pub model_limits: serde_json::Value,
+    pub model_request_costs: serde_json::Value,
     pub reset_hours: Option<i32>,
     pub duration_days: i32,
     pub rpm_limit: Option<f64>,
@@ -32,6 +33,7 @@ pub struct CreateSubscriptionPlan {
     pub sub_type: String,
     pub cost_limit_usd: f64,
     pub model_limits: Option<serde_json::Value>,
+    pub model_request_costs: Option<serde_json::Value>,
     pub reset_hours: Option<i32>,
     pub duration_days: i32,
     pub rpm_limit: Option<f64>,
@@ -43,6 +45,7 @@ pub struct UpdateSubscriptionPlan {
     pub sub_type: Option<String>,
     pub cost_limit_usd: Option<f64>,
     pub model_limits: Option<serde_json::Value>,
+    pub model_request_costs: Option<serde_json::Value>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub reset_hours: Option<Option<i32>>,
     pub duration_days: Option<i32>,

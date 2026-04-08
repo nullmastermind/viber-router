@@ -17,6 +17,8 @@ export function getSubTypeLabel(subType: string): string {
       return 'Fixed Quota';
     case 'hourly_reset':
       return 'Hourly Reset';
+    case 'pay_per_request':
+      return 'Pay Per Request';
     default:
       return subType; // Fallback to raw value for unknown types
   }
@@ -31,6 +33,8 @@ export function getSubTypeTooltip(subType: string): string {
       return 'Budget does not reset. Once exhausted, the subscription ends.';
     case 'hourly_reset':
       return 'Budget resets every X hours. Usage counter resets at the start of each window.';
+    case 'pay_per_request':
+      return 'Each request costs a flat rate based on the model. Budget can optionally reset.';
     default:
       return '';
   }
@@ -50,6 +54,11 @@ export function getSubTypeOptions(): SubTypeOption[] {
       label: 'Hourly Reset',
       value: 'hourly_reset',
       tooltip: 'Budget resets every X hours. Usage counter resets at the start of each window.',
+    },
+    {
+      label: 'Pay Per Request',
+      value: 'pay_per_request',
+      tooltip: 'Each request costs a flat rate based on the model. Budget can optionally reset.',
     },
   ];
 }

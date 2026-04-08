@@ -31,23 +31,31 @@ async fn create_plan(
     State(state): State<AppState>,
     Json(input): Json<CreateSubscriptionPlan>,
 ) -> Result<(StatusCode, Json<SubscriptionPlan>), ApiError> {
-    if input.sub_type != "fixed" && input.sub_type != "hourly_reset" {
-        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed' or 'hourly_reset'"));
+    if input.sub_type != "fixed" && input.sub_type != "hourly_reset" && input.sub_type != "pay_per_request" {
+        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'"));
     }
     if input.sub_type == "hourly_reset" && input.reset_hours.is_none() {
         return Err(err(StatusCode::BAD_REQUEST, "reset_hours is required for hourly_reset plans"));
     }
 
     let model_limits = input.model_limits.unwrap_or(serde_json::json!({}));
+    let model_request_costs = input.model_request_costs.unwrap_or(serde_json::json!({}));
+
+    if input.sub_type == "pay_per_request"
+        && model_request_costs.as_object().map(|o| o.is_empty()).unwrap_or(true)
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "model_request_costs must not be empty for pay_per_request plans"));
+    }
 
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, model_limits, reset_hours, duration_days, rpm_limit) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
     .bind(input.cost_limit_usd)
     .bind(&model_limits)
+    .bind(&model_request_costs)
     .bind(input.reset_hours)
     .bind(input.duration_days)
     .bind(input.rpm_limit)
@@ -93,9 +101,9 @@ async fn update_plan(
     Json(input): Json<UpdateSubscriptionPlan>,
 ) -> Result<Json<SubscriptionPlan>, ApiError> {
     if let Some(ref st) = input.sub_type
-        && st != "fixed" && st != "hourly_reset"
+        && st != "fixed" && st != "hourly_reset" && st != "pay_per_request"
     {
-        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed' or 'hourly_reset'"));
+        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'"));
     }
 
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
@@ -104,17 +112,19 @@ async fn update_plan(
          sub_type = COALESCE($2, sub_type), \
          cost_limit_usd = COALESCE($3, cost_limit_usd), \
          model_limits = COALESCE($4, model_limits), \
-         reset_hours = CASE WHEN $5 THEN $6 ELSE reset_hours END, \
-         duration_days = COALESCE($7, duration_days), \
-         is_active = COALESCE($8, is_active), \
-         rpm_limit = CASE WHEN $9 THEN $10 ELSE rpm_limit END, \
+         model_request_costs = COALESCE($5, model_request_costs), \
+         reset_hours = CASE WHEN $6 THEN $7 ELSE reset_hours END, \
+         duration_days = COALESCE($8, duration_days), \
+         is_active = COALESCE($9, is_active), \
+         rpm_limit = CASE WHEN $10 THEN $11 ELSE rpm_limit END, \
          updated_at = now() \
-         WHERE id = $11 RETURNING *",
+         WHERE id = $12 RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
     .bind(input.cost_limit_usd)
     .bind(&input.model_limits)
+    .bind(&input.model_request_costs)
     .bind(input.reset_hours.is_some())
     .bind(input.reset_hours.flatten())
     .bind(input.duration_days)
