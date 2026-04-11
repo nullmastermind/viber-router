@@ -130,6 +130,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                 group_key_id: Some(sub_key_id),
                 allowed_models: vec![],
                 key_allowed_models: vec![],
+                blocked_user_agents: vec![],
             };
             cache::set_group_config(&state.redis, api_key, &config).await;
             return Some(config);
@@ -232,6 +233,16 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         vec![]
     };
 
+    // Query blocked user agents for this group
+    let blocked_ua_rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT user_agent FROM group_blocked_user_agents WHERE group_id = $1",
+    )
+    .bind(group.id)
+    .fetch_all(&state.db)
+    .await
+    .ok()?;
+    let blocked_user_agents: Vec<String> = blocked_ua_rows.into_iter().map(|(ua,)| ua).collect();
+
     let config = GroupConfig {
         group_id: group.id,
         group_name: group.name.clone(),
@@ -244,6 +255,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         group_key_id,
         allowed_models,
         key_allowed_models,
+        blocked_user_agents,
     };
 
     // Cache it for next time
@@ -586,6 +598,55 @@ async fn proxy_handler(
             "permission_error",
             "API key is disabled",
         );
+    }
+
+    // Extract and normalize User-Agent header
+    let user_agent = req
+        .headers()
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "(empty)".to_string());
+
+    // Block check: exact match against blocked_user_agents (after is_active, before servers check)
+    if config.blocked_user_agents.iter().any(|ua| ua == &user_agent) {
+        return api_error(
+            original_uri.path(),
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "Access denied",
+        );
+    }
+
+    // Fire-and-forget UA recording
+    {
+        let redis = state.redis.clone();
+        let db = state.db.clone();
+        let group_id = config.group_id;
+        let ua = user_agent.clone();
+        tokio::spawn(async move {
+            match cache::add_group_ua(&redis, group_id, &ua).await {
+                Ok(true) => {
+                    // New UA — insert into DB
+                    if let Err(e) = sqlx::query(
+                        "INSERT INTO group_user_agents (group_id, user_agent) VALUES ($1, $2) \
+                         ON CONFLICT DO NOTHING",
+                    )
+                    .bind(group_id)
+                    .bind(&ua)
+                    .execute(&db)
+                    .await
+                    {
+                        tracing::warn!("Failed to insert group_user_agents: {e}");
+                    }
+                }
+                Ok(false) => {} // Already seen — skip DB write
+                Err(e) => {
+                    tracing::warn!("Failed to SADD group UA to Redis: {e}");
+                }
+            }
+        });
     }
 
     if config.servers.is_empty() {

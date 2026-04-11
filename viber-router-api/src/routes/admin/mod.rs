@@ -14,6 +14,7 @@ pub mod subscription_plans;
 pub mod key_subscriptions;
 pub mod uptime;
 pub mod spam_detection;
+pub mod group_user_agents;
 
 use axum::{
     Json, Router,

@@ -363,6 +363,31 @@ export const useGroupsStore = defineStore('groups', () => {
     return data;
   }
 
+  // User agent management
+  async function fetchGroupUserAgents(groupId: string) {
+    const { data } = await api.get<{ user_agent: string; first_seen_at: string }[]>(
+      `/api/admin/groups/${groupId}/user-agents`,
+    );
+    return data;
+  }
+
+  async function fetchGroupBlockedUserAgents(groupId: string) {
+    const { data } = await api.get<{ user_agent: string; created_at: string }[]>(
+      `/api/admin/groups/${groupId}/user-agents/blocked`,
+    );
+    return data;
+  }
+
+  async function addGroupBlockedUserAgent(groupId: string, userAgent: string) {
+    await api.post(`/api/admin/groups/${groupId}/user-agents/blocked`, { user_agent: userAgent });
+  }
+
+  async function removeGroupBlockedUserAgent(groupId: string, userAgent: string) {
+    await api.delete(`/api/admin/groups/${groupId}/user-agents/blocked`, {
+      data: { user_agent: userAgent },
+    });
+  }
+
   return {
     groups, total, totalPages, loading,
     fetchGroups, getGroup, createGroup, updateGroup, deleteGroup, regenerateKey,
@@ -374,5 +399,6 @@ export const useGroupsStore = defineStore('groups', () => {
     fetchKeyAllowedModels, addKeyAllowedModel, removeKeyAllowedModel,
     fetchKeyServers, assignKeyServer, removeKeyServer,
     fetchSpamDetection,
+    fetchGroupUserAgents, fetchGroupBlockedUserAgents, addGroupBlockedUserAgent, removeGroupBlockedUserAgent,
   };
 });

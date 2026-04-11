@@ -60,6 +60,7 @@ pub fn router() -> Router<AppState> {
         .nest("/{group_id}/keys", super::group_keys::router())
         .nest("/{group_id}/allowed-models", super::group_allowed_models::router())
         .nest("/{group_id}/uptime", super::uptime::router())
+        .nest("/{group_id}/user-agents", super::group_user_agents::router())
 }
 
 async fn create_group(

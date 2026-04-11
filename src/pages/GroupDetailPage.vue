@@ -16,6 +16,7 @@
         <q-tab name="ttft" label="TTFT" />
         <q-tab name="token-usage" label="Token Usage" />
         <q-tab name="spam" label="Spam" />
+        <q-tab name="user-agents" label="User Agents" />
       </q-tabs>
       <q-separator />
 
@@ -552,6 +553,52 @@
             </q-card-section>
           </q-card>
         </q-tab-panel>
+
+        <!-- User Agents Tab -->
+        <q-tab-panel name="user-agents" class="q-pa-none">
+          <q-card flat bordered>
+            <q-card-section>
+              <div class="text-subtitle1 q-mb-sm">Blocked User Agents</div>
+              <div v-if="uaLoading" class="flex flex-center q-pa-lg">
+                <q-spinner size="md" />
+              </div>
+              <template v-else>
+                <div class="row items-center q-gutter-sm q-mb-md">
+                  <q-select
+                    v-model="selectedUa"
+                    :options="filteredUaOptions"
+                    label="User Agent"
+                    outlined
+                    dense
+                    use-input
+                    clearable
+                    input-debounce="0"
+                    class="col"
+                    @filter="onUaFilter"
+                    @new-value="onUaNewValue"
+                  />
+                  <q-btn color="primary" label="Add" :disable="!selectedUa" :loading="addingBlockedUa" @click="onAddBlockedUa" />
+                </div>
+                <div v-if="blockedUserAgents.length === 0" class="text-grey q-pa-sm">
+                  No blocked user agents
+                </div>
+                <div v-else class="q-gutter-xs">
+                  <q-chip
+                    v-for="ua in blockedUserAgents"
+                    :key="ua.user_agent"
+                    :removable="removingBlockedUa !== ua.user_agent"
+                    color="negative"
+                    text-color="white"
+                    @remove="onRemoveBlockedUa(ua.user_agent)"
+                  >
+                    <q-spinner v-if="removingBlockedUa === ua.user_agent" size="xs" class="q-mr-xs" />
+                    {{ ua.user_agent }}
+                  </q-chip>
+                </div>
+              </template>
+            </q-card-section>
+          </q-card>
+        </q-tab-panel>
       </q-tab-panels>
 
       <q-dialog v-model="showAddServer" @hide="resetAddForm">
@@ -911,6 +958,15 @@ const spamLoading = ref(false);
 const spamError = ref('');
 const spamPagination = ref({ page: 1, rowsPerPage: 20, rowsNumber: 0, sortBy: '', descending: false });
 
+// User agents state
+const userAgents = ref<{ user_agent: string; first_seen_at: string }[]>([]);
+const blockedUserAgents = ref<{ user_agent: string; created_at: string }[]>([]);
+const uaLoading = ref(false);
+const selectedUa = ref<string | null>(null);
+const addingBlockedUa = ref(false);
+const removingBlockedUa = ref<string | null>(null);
+const uaFilterText = ref('');
+
 // Sub-keys state
 const subKeys = ref<GroupKey[]>([]);
 const subKeysLoading = ref(false);
@@ -1237,6 +1293,69 @@ function onSpamRequest(props: { pagination: { page: number; rowsPerPage: number 
   loadSpam();
 }
 
+const filteredUaOptions = computed(() => {
+  const text = uaFilterText.value.toLowerCase();
+  return userAgents.value
+    .map((ua) => ua.user_agent)
+    .filter((ua) => !text || ua.toLowerCase().includes(text));
+});
+
+function onUaFilter(val: string, update: (fn: () => void) => void) {
+  update(() => {
+    uaFilterText.value = val;
+  });
+}
+
+function onUaNewValue(val: string, done: (val: string) => void) {
+  if (val.trim()) done(val.trim());
+}
+
+async function loadUserAgents() {
+  if (!group.value) return;
+  uaLoading.value = true;
+  try {
+    const [recorded, blocked] = await Promise.all([
+      groupsStore.fetchGroupUserAgents(group.value.id),
+      groupsStore.fetchGroupBlockedUserAgents(group.value.id),
+    ]);
+    userAgents.value = recorded;
+    blockedUserAgents.value = blocked;
+  } catch {
+    $q.notify({ type: 'negative', message: 'Failed to load user agents' });
+  } finally {
+    uaLoading.value = false;
+  }
+}
+
+async function onAddBlockedUa() {
+  if (!group.value || !selectedUa.value) return;
+  addingBlockedUa.value = true;
+  try {
+    await groupsStore.addGroupBlockedUserAgent(group.value.id, selectedUa.value);
+    selectedUa.value = null;
+    $q.notify({ type: 'positive', message: 'User agent blocked' });
+    await loadUserAgents();
+  } catch {
+    $q.notify({ type: 'negative', message: 'Failed to block user agent' });
+  } finally {
+    addingBlockedUa.value = false;
+  }
+}
+
+async function onRemoveBlockedUa(ua: string) {
+  if (!group.value) return;
+  removingBlockedUa.value = ua;
+  try {
+    await groupsStore.removeGroupBlockedUserAgent(group.value.id, ua);
+    $q.notify({ type: 'positive', message: 'User agent unblocked' });
+    await loadUserAgents();
+  } catch {
+    $q.notify({ type: 'negative', message: 'Failed to unblock user agent' });
+  } finally {
+    removingBlockedUa.value = null;
+  }
+}
+
 // Sub-key methods
 function maskKey(key: string) {
   if (key.length <= 16) return key;
@@ -1363,6 +1482,7 @@ watch(activeTab, (tab) => {
   if (tab === 'allowed-models') loadAllowedModels();
   if (tab === 'token-usage') loadTokenUsage();
   if (tab === 'spam') loadSpam();
+  if (tab === 'user-agents') loadUserAgents();
 });
 
 function onCbFieldClear(field: 'cb_max_failures' | 'cb_window_seconds' | 'cb_cooldown_seconds') {

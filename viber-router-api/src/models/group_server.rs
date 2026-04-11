@@ -147,4 +147,6 @@ pub struct GroupConfig {
     pub allowed_models: Vec<String>,
     #[serde(default)]
     pub key_allowed_models: Vec<String>,
+    #[serde(default)]
+    pub blocked_user_agents: Vec<String>,
 }

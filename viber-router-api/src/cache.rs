@@ -100,3 +100,12 @@ pub async fn invalidate_blocked_paths(redis: &Pool) {
         let _: Result<(), _> = conn.del(BLOCKED_PATHS_KEY).await;
     }
 }
+
+/// Add a user-agent to the group's seen-UA set.
+/// Returns Ok(true) if the UA is new (SADD returned 1), Ok(false) if already present.
+pub async fn add_group_ua(redis: &Pool, group_id: Uuid, user_agent: &str) -> Result<bool, anyhow::Error> {
+    let mut conn = redis.get().await?;
+    let key = format!("group:{group_id}:user_agents");
+    let added: i64 = conn.sadd(key, user_agent).await?;
+    Ok(added == 1)
+}
