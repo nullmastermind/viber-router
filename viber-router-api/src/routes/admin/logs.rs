@@ -1,9 +1,9 @@
-use axum::{Json, Router, extract::{Query, State}, http::StatusCode, routing::get};
-use chrono::{DateTime, Utc};
+use axum::{Json, Router, extract::{Query, State}, http::StatusCode, routing::{get, post}};
+use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::routes::AppState;
+use crate::{partition, routes::AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct LogQueryParams {
@@ -60,6 +60,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_logs))
         .route("/stats", get(log_stats))
+        .route("/purge-preview", get(purge_preview))
+        .route("/purge", post(purge_logs))
 }
 
 async fn list_logs(
@@ -284,4 +286,125 @@ async fn log_stats(
 struct StatusCountRow {
     status_code: i16,
     count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PurgeParams {
+    keep_days: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct PurgePreviewResponse {
+    count: i64,
+    cutoff: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PurgeBody {
+    keep_days: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct PurgeResponse {
+    deleted: i64,
+}
+
+async fn purge_preview(
+    State(state): State<AppState>,
+    Query(params): Query<PurgeParams>,
+) -> Result<Json<PurgePreviewResponse>, (StatusCode, Json<serde_json::Value>)> {
+    if params.keep_days < 1 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "keep_days must be >= 1"})),
+        ));
+    }
+
+    let cutoff_naive = Utc::now().naive_utc().date() - chrono::Duration::days(params.keep_days);
+    let cutoff = Utc.from_utc_datetime(&cutoff_naive.and_time(NaiveTime::MIN));
+
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM proxy_logs WHERE created_at < $1",
+    )
+    .bind(cutoff)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
+    })?;
+
+    Ok(Json(PurgePreviewResponse { count, cutoff }))
+}
+
+async fn purge_logs(
+    State(state): State<AppState>,
+    Json(body): Json<PurgeBody>,
+) -> Result<Json<PurgeResponse>, (StatusCode, Json<serde_json::Value>)> {
+    if body.keep_days < 1 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "keep_days must be >= 1"})),
+        ));
+    }
+
+    let cutoff_naive = Utc::now().naive_utc().date() - chrono::Duration::days(body.keep_days);
+    let cutoff = Utc.from_utc_datetime(&cutoff_naive.and_time(NaiveTime::MIN));
+
+    // Find all proxy_logs partitions
+    let partitions = sqlx::query_scalar::<_, String>(
+        "SELECT tablename FROM pg_tables \
+         WHERE schemaname = 'public' AND tablename LIKE 'proxy_logs_%' \
+         AND tablename != 'proxy_logs' \
+         ORDER BY tablename",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
+    })?;
+
+    let mut total_deleted: i64 = 0;
+
+    for partition_name in partitions {
+        let end_date = partition::parse_partition_end_date(&partition_name, "proxy_logs");
+
+        match end_date {
+            Some(end) if end <= cutoff_naive => {
+                // Entire partition is before cutoff — drop it
+                // Count rows first so we can report them
+                let count_sql = format!("SELECT COUNT(*) FROM \"{partition_name}\"");
+                let count = sqlx::query_scalar::<_, i64>(&count_sql)
+                    .fetch_one(&state.db)
+                    .await
+                    .unwrap_or(0);
+
+                let drop_sql = format!("DROP TABLE IF EXISTS \"{partition_name}\"");
+                if let Err(e) = sqlx::query(&drop_sql).execute(&state.db).await {
+                    tracing::warn!("Failed to drop partition {partition_name}: {e}");
+                } else {
+                    tracing::info!("Dropped partition {partition_name} ({count} rows)");
+                    total_deleted += count;
+                }
+            }
+            Some(_) => {
+                // Partition overlaps cutoff — delete rows older than cutoff
+                let delete_sql =
+                    format!("DELETE FROM \"{partition_name}\" WHERE created_at < $1");
+                match sqlx::query(&delete_sql).bind(cutoff).execute(&state.db).await {
+                    Ok(result) => {
+                        total_deleted += result.rows_affected() as i64;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to delete from partition {partition_name}: {e}");
+                    }
+                }
+            }
+            None => {
+                // Can't parse partition name — skip
+                tracing::warn!("Could not parse partition end date for {partition_name}");
+            }
+        }
+    }
+
+    Ok(Json(PurgeResponse { deleted: total_deleted }))
 }

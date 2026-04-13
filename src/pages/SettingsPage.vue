@@ -108,6 +108,43 @@
       </q-card-section>
     </q-card>
 
+    <q-card flat bordered style="max-width: 640px" class="q-mt-md">
+      <q-card-section>
+        <div class="text-subtitle1 q-mb-md">Database Maintenance</div>
+
+        <div class="row q-gutter-sm items-center q-mb-sm">
+          <q-select
+            v-model="purgeKeepDays"
+            :options="purgeKeepDaysOptions"
+            label="Keep logs from last"
+            outlined
+            dense
+            emit-value
+            map-options
+            style="min-width: 200px"
+            @update:model-value="fetchPurgePreview"
+          />
+          <q-spinner v-if="fetchingPurgePreview" size="sm" />
+        </div>
+
+        <div
+          v-if="purgePreviewCount > 0"
+          class="text-warning q-mb-md"
+        >
+          &#9888; {{ purgePreviewCount }} logs older than {{ purgeKeepDays }} days will be permanently deleted
+        </div>
+
+        <q-btn
+          color="negative"
+          label="Purge Old Logs"
+          icon="delete"
+          :loading="purging"
+          :disable="purgePreviewCount === 0 || fetchingPurgePreview"
+          @click="showPurgeDialog = true"
+        />
+      </q-card-section>
+    </q-card>
+
     <!-- Chat discovery dialog -->
     <q-dialog v-model="showChatsDialog">
       <q-card style="min-width: 400px">
@@ -147,6 +184,23 @@
             @click="addSelectedChats"
             v-close-popup
           />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Purge confirmation dialog -->
+    <q-dialog v-model="showPurgeDialog">
+      <q-card style="min-width: 400px">
+        <q-card-section>
+          <div class="text-h6">Confirm Purge</div>
+        </q-card-section>
+        <q-card-section>
+          Are you sure you want to permanently delete {{ purgePreviewCount }} logs older than
+          {{ purgeKeepDays }} days? This cannot be undone.
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup />
+          <q-btn color="negative" label="Delete" @click="confirmPurge" v-close-popup />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -202,6 +256,19 @@ const discoveredChats = ref<TelegramChat[]>([]);
 const selectedChats = ref<string[]>([]);
 const newBlockedPath = ref('');
 
+const purgeKeepDaysOptions = [
+  { label: '1 day', value: 1 },
+  { label: '3 days', value: 3 },
+  { label: '7 days', value: 7 },
+  { label: '14 days', value: 14 },
+  { label: '30 days', value: 30 },
+];
+const purgeKeepDays = ref(7);
+const purgePreviewCount = ref(0);
+const fetchingPurgePreview = ref(false);
+const purging = ref(false);
+const showPurgeDialog = ref(false);
+
 onMounted(async () => {
   try {
     const { data } = await api.get<Settings>('/api/admin/settings');
@@ -209,6 +276,7 @@ onMounted(async () => {
   } catch {
     // use defaults
   }
+  fetchPurgePreview();
 });
 
 function removeChatId(id: string) {
@@ -287,5 +355,37 @@ function addBlockedPath() {
 
 function removeBlockedPath(path: string) {
   form.value.blocked_paths = form.value.blocked_paths.filter((p) => p !== path);
+}
+
+async function fetchPurgePreview() {
+  fetchingPurgePreview.value = true;
+  try {
+    const { data } = await api.get<{ count: number; cutoff: string }>(
+      `/api/admin/logs/purge-preview?keep_days=${purgeKeepDays.value}`,
+    );
+    purgePreviewCount.value = data.count;
+  } catch {
+    purgePreviewCount.value = 0;
+  } finally {
+    fetchingPurgePreview.value = false;
+  }
+}
+
+async function confirmPurge() {
+  purging.value = true;
+  try {
+    const { data } = await api.post<{ deleted: number }>('/api/admin/logs/purge', {
+      keep_days: purgeKeepDays.value,
+    });
+    $q.notify({ type: 'positive', message: `Deleted ${data.deleted} logs` });
+    await fetchPurgePreview();
+  } catch (err: unknown) {
+    const msg =
+      (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+      'Purge failed';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    purging.value = false;
+  }
 }
 </script>

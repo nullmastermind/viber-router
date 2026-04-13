@@ -60,7 +60,7 @@ pub async fn drop_expired_partitions(pool: &PgPool, table: &str, retention_days:
     }
 }
 
-fn next_month(year: i32, month: u32) -> (i32, u32) {
+pub fn next_month(year: i32, month: u32) -> (i32, u32) {
     if month == 12 {
         (year + 1, 1)
     } else {
@@ -69,7 +69,7 @@ fn next_month(year: i32, month: u32) -> (i32, u32) {
 }
 
 /// Parse "{table}_YYYY_MM" → end date of that month (first day of next month).
-fn parse_partition_end_date(name: &str, table: &str) -> Option<NaiveDate> {
+pub fn parse_partition_end_date(name: &str, table: &str) -> Option<NaiveDate> {
     let prefix = format!("{table}_");
     let suffix = name.strip_prefix(&prefix)?;
     let mut parts = suffix.splitn(2, '_');
