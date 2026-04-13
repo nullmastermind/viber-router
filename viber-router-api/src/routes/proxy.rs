@@ -845,6 +845,7 @@ async fn proxy_handler(
                     let server_latency = server_start.elapsed().as_millis() as i32;
                     let status = resp.status().as_u16();
 
+                    let is_first = failover_chain.is_empty();
                     failover_chain.push(FailoverAttempt {
                         server_id: ct_server.server_id,
                         server_name: ct_server.server_name.clone(),
@@ -852,8 +853,8 @@ async fn proxy_handler(
                         latency_ms: server_latency,
                         resolved_key: Some(resolved_key.clone()),
                         upstream_url: Some(attempt_url),
-                        request_headers: Some(attempt_headers),
-                        request_body: attempt_body,
+                        request_headers: if is_first { Some(attempt_headers) } else { None },
+                        request_body: if is_first { attempt_body } else { None },
                     });
                     last_server_id = ct_server.server_id;
                     last_server_name = ct_server.server_name.clone();
@@ -888,6 +889,7 @@ async fn proxy_handler(
                     // Failover status code — fall through to waterfall
                 }
                 Err(_) => {
+                    let is_first = failover_chain.is_empty();
                     failover_chain.push(FailoverAttempt {
                         server_id: ct_server.server_id,
                         server_name: ct_server.server_name.clone(),
@@ -895,8 +897,8 @@ async fn proxy_handler(
                         latency_ms: server_start.elapsed().as_millis() as i32,
                         resolved_key: Some(resolved_key.clone()),
                         upstream_url: Some(attempt_url),
-                        request_headers: Some(attempt_headers),
-                        request_body: attempt_body,
+                        request_headers: if is_first { Some(attempt_headers) } else { None },
+                        request_body: if is_first { attempt_body } else { None },
                     });
                     last_server_id = ct_server.server_id;
                     last_server_name = ct_server.server_name.clone();
@@ -1055,6 +1057,7 @@ async fn proxy_handler(
             Ok(resp) => resp,
             Err(_) => {
                 // Connection error → record attempt and try next server
+                let is_first = failover_chain.is_empty();
                 failover_chain.push(FailoverAttempt {
                     server_id: server.server_id,
                     server_name: server.server_name.clone(),
@@ -1062,8 +1065,8 @@ async fn proxy_handler(
                     latency_ms: server_start.elapsed().as_millis() as i32,
                     resolved_key: Some(resolved_key.clone()),
                     upstream_url: Some(attempt_url),
-                    request_headers: Some(attempt_headers.clone()),
-                    request_body: attempt_body,
+                    request_headers: if is_first { Some(attempt_headers.clone()) } else { None },
+                    request_body: if is_first { attempt_body } else { None },
                 });
                 last_server_id = server.server_id;
                 last_server_name = server.server_name.clone();
@@ -1087,6 +1090,7 @@ async fn proxy_handler(
         let server_latency = server_start.elapsed().as_millis() as i32;
         let status = upstream_resp.status().as_u16();
 
+        let is_first = failover_chain.is_empty();
         failover_chain.push(FailoverAttempt {
             server_id: server.server_id,
             server_name: server.server_name.clone(),
@@ -1094,8 +1098,8 @@ async fn proxy_handler(
             latency_ms: server_latency,
             resolved_key: Some(resolved_key.clone()),
             upstream_url: Some(attempt_url),
-            request_headers: Some(attempt_headers.clone()),
-            request_body: attempt_body,
+            request_headers: if is_first { Some(attempt_headers.clone()) } else { None },
+            request_body: if is_first { attempt_body } else { None },
         });
         last_server_id = server.server_id;
         last_server_name = server.server_name.clone();
@@ -1147,7 +1151,7 @@ async fn proxy_handler(
                         latency_ms: server_start.elapsed().as_millis() as i32,
                         resolved_key: Some(resolved_key.clone()),
                         upstream_url: Some(upstream_url.clone()),
-                        request_headers: Some(attempt_headers.clone()),
+                        request_headers: None,
                         request_body: None,
                     });
 

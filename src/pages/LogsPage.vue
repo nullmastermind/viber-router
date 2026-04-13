@@ -507,7 +507,7 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-function generateCurl(attempt: FailoverAttempt, method: string): string {
+function generateCurl(attempt: FailoverAttempt, method: string, firstAttempt?: FailoverAttempt): string {
   const parts: string[] = ['curl'];
 
   if (method !== 'GET') {
@@ -516,14 +516,16 @@ function generateCurl(attempt: FailoverAttempt, method: string): string {
 
   parts.push(shellEscape(attempt.upstream_url ?? ''));
 
-  if (attempt.request_headers) {
-    for (const [name, value] of Object.entries(attempt.request_headers)) {
+  const headers = attempt.request_headers ?? firstAttempt?.request_headers;
+  if (headers) {
+    for (const [name, value] of Object.entries(headers)) {
       parts.push(`-H ${shellEscape(`${name}: ${value}`)}`);
     }
   }
 
-  if (attempt.request_body) {
-    parts.push(`-d ${shellEscape(JSON.stringify(attempt.request_body))}`);
+  const body = attempt.request_body ?? firstAttempt?.request_body;
+  if (body) {
+    parts.push(`-d ${shellEscape(JSON.stringify(body))}`);
   }
 
   return parts.join(' \\\n  ');
@@ -538,7 +540,8 @@ function downloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
 }
 
 function doDownloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
-  const curl = generateCurl(attempt, log.request_method);
+  const firstAttempt = log.failover_chain[0];
+  const curl = generateCurl(attempt, log.request_method, firstAttempt);
   const blob = new Blob([`${curl}\n`], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
