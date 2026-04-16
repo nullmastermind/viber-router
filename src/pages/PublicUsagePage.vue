@@ -91,6 +91,44 @@
           <q-separator />
           <q-tab-panels v-model="setupTab" animated>
             <q-tab-panel name="claude-code" class="q-pa-sm">
+              <div class="row q-col-gutter-sm q-mb-sm">
+                <div class="col-6 col-sm-3">
+                  <q-select
+                    v-model="selectedOpus"
+                    :options="data?.allowed_models ?? []"
+                    label="Opus"
+                    dense outlined
+                    aria-label="Select Opus model"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-select
+                    v-model="selectedSonnet"
+                    :options="data?.allowed_models ?? []"
+                    label="Sonnet"
+                    dense outlined
+                    aria-label="Select Sonnet model"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-select
+                    v-model="selectedHaiku"
+                    :options="data?.allowed_models ?? []"
+                    label="Haiku"
+                    dense outlined
+                    aria-label="Select Haiku model"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-select
+                    v-model="selectedSubAgent"
+                    :options="data?.allowed_models ?? []"
+                    label="Sub-agent"
+                    dense outlined
+                    aria-label="Select Sub-agent model"
+                  />
+                </div>
+              </div>
               <div class="row items-start no-wrap">
                 <code style="font-size: 12px; flex: 1; min-width: 0; word-break: break-all; white-space: pre-wrap">{{ claudeCodeCmd }}</code>
                 <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy setup command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(claudeCodeCmd)" />
@@ -427,6 +465,10 @@ const loading = ref(false);
 const error = ref('');
 const data = ref<UsageData | null>(null);
 const setupTab = ref('claude-code');
+const selectedOpus = ref('');
+const selectedSonnet = ref('');
+const selectedHaiku = ref('');
+const selectedSubAgent = ref('');
 const showQr = ref(false);
 const qrDataUrl = ref('');
 
@@ -446,17 +488,60 @@ watch(showQr, async (visible) => {
   }
 });
 
+watch(data, (d) => {
+  if (!d) return;
+  const models = d.allowed_models;
+  const defaultOpus = models.find((m) => m.includes('opus')) ?? models[0] ?? '';
+  const defaultSonnet = models.find((m) => m.includes('sonnet')) ?? models[0] ?? '';
+  const defaultHaiku = models.find((m) => m.includes('haiku')) ?? models[0] ?? '';
+  const defaultSubAgent = models.find((m) => m.includes('sonnet')) ?? models[0] ?? '';
+  const stored = localStorage.getItem(`model-selections-${d.api_key}`);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as {
+        opus?: string;
+        sonnet?: string;
+        haiku?: string;
+        subAgent?: string;
+      };
+      selectedOpus.value = models.includes(parsed.opus ?? '') ? parsed.opus ?? '' : defaultOpus;
+      selectedSonnet.value = models.includes(parsed.sonnet ?? '') ? parsed.sonnet ?? '' : defaultSonnet;
+      selectedHaiku.value = models.includes(parsed.haiku ?? '') ? parsed.haiku ?? '' : defaultHaiku;
+      selectedSubAgent.value = models.includes(parsed.subAgent ?? '') ? parsed.subAgent ?? '' : defaultSubAgent;
+      return;
+    } catch {
+      // Ignore invalid stored model selections.
+    }
+  }
+  selectedOpus.value = defaultOpus;
+  selectedSonnet.value = defaultSonnet;
+  selectedHaiku.value = defaultHaiku;
+  selectedSubAgent.value = defaultSubAgent;
+});
+
+function saveModelSelections() {
+  if (!data.value) return;
+  localStorage.setItem(`model-selections-${data.value.api_key}`, JSON.stringify({
+    opus: selectedOpus.value,
+    sonnet: selectedSonnet.value,
+    haiku: selectedHaiku.value,
+    subAgent: selectedSubAgent.value,
+  }));
+}
+
+watch([selectedOpus, selectedSonnet, selectedHaiku, selectedSubAgent], saveModelSelections);
+
 const routeKey = computed(() => route.params.key as string | undefined);
 
 const baseUrl = computed(() => window.location.origin);
 
 const claudeCodeCmd = computed(() => {
   if (!data.value) return '';
-  const models = data.value.allowed_models;
-  const opus = models.find((m) => m.includes('opus')) ?? 'claude-opus-4-6';
-  const sonnet = models.find((m) => m.includes('sonnet')) ?? 'claude-sonnet-4-6';
-  const haiku = models.find((m) => m.includes('haiku')) ?? 'claude-haiku-4-5-20251001';
-  return `npx -y superclaude-cli@latest ${data.value.api_key} ${baseUrl.value} --opus-model ${opus} --sonnet-model ${sonnet} --haiku-model ${haiku} --sub-agent-model ${sonnet}`;
+  const opus = selectedOpus.value || 'claude-opus-4-6';
+  const sonnet = selectedSonnet.value || 'claude-sonnet-4-6';
+  const haiku = selectedHaiku.value || 'claude-haiku-4-5-20251001';
+  const subAgent = selectedSubAgent.value || sonnet;
+  return `npx -y superclaude-cli@latest ${data.value.api_key} ${baseUrl.value} --opus-model ${opus} --sonnet-model ${sonnet} --haiku-model ${haiku} --sub-agent-model ${subAgent}`;
 });
 
 function copyText(text: string) {
