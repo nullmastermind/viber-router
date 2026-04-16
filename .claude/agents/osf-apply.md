@@ -82,13 +82,34 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
 6. **Implement tasks (loop until done or blocked)**
 
    For each pending task:
-   - Show which task is being worked on
-   - **Explore the relevant codebase area yourself** — don't rely solely on plan artifacts. Read the actual files you'll modify, trace how they connect, understand the current state.
-   - **Look up API docs when unsure** — if a task involves a library/function you're not certain about (exact params, return type, version behavior), look it up before writing code.
-   - Make the code changes required
-   - Keep changes minimal and focused
-   - **Mark task complete IMMEDIATELY** in the tasks file: `- [ ]` → `- [x]` — do NOT batch updates, do NOT wait until multiple tasks are done. Each task gets marked the moment it's finished.
-   - Continue to next task
+
+   **a) Show** which task is being worked on.
+
+   **b) Explore** the relevant codebase area yourself — don't rely solely on plan artifacts. Read the actual files you'll modify, trace how they connect, understand the current state.
+
+   **c) BLAST RADIUS CHECK (MANDATORY)** — before editing any function, class, or method, you MUST run these two commands in terminal. Do NOT skip this step. Do NOT proceed to writing code until both commands have run.
+
+   ```bash
+   npx gitnexus context "symbolName"
+   npx gitnexus impact "symbolName"
+   ```
+
+   - `context` shows callers, callees, and execution flows the symbol participates in. Read the output — it tells you what else you need to update.
+   - `impact` shows upstream dependents (what breaks if you change it). Check the risk level.
+   - If risk is HIGH or CRITICAL: you MUST update all d=1 (direct callers/importers) dependents as part of the task. Warn the user if blast radius is larger than expected.
+   - For renames: NEVER find-replace across files. Run `npx gitnexus context "oldName"` to find all references first, then update each call site with full understanding of its context.
+
+   After blast radius check, **search for related specs** — grep the file path you're about to modify in `openspec/archive/` (specifically in `tasks.md` files). If a previous spec touched this file, read its `proposal.md` and `design.md` to understand the original design intent before making changes. This prevents breaking assumptions from earlier work.
+
+   If you catch yourself writing code without having run `gitnexus context` and `gitnexus impact` on the symbol you're about to modify, STOP and run them now.
+
+   **d) Look up API docs when unsure** — if a task involves a library/function you're not certain about (exact params, return type, version behavior), look it up before writing code.
+
+   **e) Make the code changes.** Keep changes minimal and focused.
+
+   **f) Mark task complete IMMEDIATELY** in the tasks file: `- [ ]` → `- [x]` — do NOT batch updates, do NOT wait until multiple tasks are done. Each task gets marked the moment it's finished.
+
+   **g) Continue** to next task.
 
    **Pause if:**
    - Task is unclear → ask for clarification

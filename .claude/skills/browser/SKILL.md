@@ -1,6 +1,6 @@
 ---
 name: browser
-description: Reproduce bugs and explore apps via Playwright MCP. Use when the user wants to reproduce a bug in the browser, gather visual evidence, or proactively find UI/UX issues by navigating the running app.
+description: Reproduce bugs and explore apps via dev-browser. Use when the user wants to reproduce a bug in the browser, gather visual evidence, or proactively find UI/UX issues by navigating the running app.
 ---
 
 You are using the browser command for E2E testing and bug reproduction.
@@ -9,9 +9,26 @@ See it, prove it, trace it. Browser is your eyes. Codebase is your brain.
 
 **MODE: E2E DIAGNOSTIC** — You drive the browser like a real user. You see what users see. You capture evidence that code reading alone cannot provide. Then you trace root cause in the codebase.
 
-**PREREQUISITE**: App must be running locally. Ask user for the URL if not obvious. Confirm Playwright MCP tools are available before starting.
-
 **Input**: Either a bug report (reproduce mode) or a request to explore the app (explore mode).
+
+---
+
+## SETUP (MANDATORY — DO THIS FIRST)
+
+Before ANY browser interaction, ensure dev-browser is installed. Run this via Bash:
+
+```bash
+which dev-browser || (npm install -g dev-browser && dev-browser install)
+```
+
+If the install fails, ask the user to run `npm install -g dev-browser && dev-browser install` manually.
+
+After install, ask user for the app URL if not obvious from context.
+
+**Arguments**: Check if user passed flags:
+- `--headless` → run in headless mode (no visible browser window)
+- `--connect` → connect to user's already-running Chrome (useful for logged-in sessions)
+- Default: headed mode so user can watch what you're doing
 
 ---
 
@@ -25,130 +42,324 @@ See it, prove it, trace it. Browser is your eyes. Codebase is your brain.
 
 ---
 
-## Playwright Interaction Rules
+## dev-browser Guide
+
+dev-browser is a sandboxed browser automation tool. You write JavaScript scripts and pipe them to the `dev-browser` CLI via Bash heredoc. Scripts run in a QuickJS WASM sandbox (not Node.js) with full Playwright Page API.
+
+**CRITICAL**: Always use quoted heredoc `<<'SCRIPT'` to prevent shell variable expansion.
+
+### CLI Usage
+
+```bash
+# Basic usage — pipe script via heredoc
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+await page.goto("https://example.com", { waitUntil: "domcontentloaded" });
+console.log(await page.title());
+SCRIPT
+
+# Headless mode
+dev-browser --headless <<'SCRIPT'
+...
+SCRIPT
+
+# Connect to user's running Chrome (must have remote debugging enabled)
+dev-browser --connect <<'SCRIPT'
+...
+SCRIPT
+```
+
+### Core API
+
+```javascript
+// Browser control — available as global `browser`
+const page = await browser.getPage("main");  // Get or create named page (PERSISTS across scripts)
+const page = await browser.newPage();         // Anonymous page (cleaned up after script)
+const tabs = await browser.listPages();       // List open tabs: [{id, url, title, name}]
+await browser.closePage("main");              // Close a named page
+```
+
+Named pages persist across script invocations. Use `browser.getPage("main")` to continue working with the same tab across multiple dev-browser calls. This is a key advantage — you don't lose state between scripts.
+
+### Page API (Playwright-based)
+
+**Navigation:**
+```javascript
+await page.goto("http://localhost:3000", { waitUntil: "domcontentloaded" });
+await page.goBack();
+await page.goForward();
+await page.reload();
+const url = page.url();
+const title = await page.title();
+```
+
+**Snapshots (AI-friendly page reading):**
+```javascript
+// snapshotForAI() returns a text representation of the page optimized for AI understanding
+// This is your PRIMARY way to "see" the page structure and find elements
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);  // Full page snapshot
+```
+
+Use `snapshotForAI()` instead of screenshots when you need to understand page structure, find elements, or check element presence. It's faster and more informative than screenshots for element discovery.
+
+**Locators (finding elements):**
+```javascript
+// By CSS selector
+const btn = page.locator("button.submit");
+
+// By text content
+const link = page.locator("text=Sign In");
+
+// By role (accessibility)
+const button = page.getByRole("button", { name: "Submit" });
+const input = page.getByRole("textbox", { name: "Email" });
+
+// By placeholder, label, test id
+const field = page.getByPlaceholder("Enter email");
+const field2 = page.getByLabel("Password");
+const el = page.getByTestId("login-form");
+```
+
+**Actions (user-like interactions):**
+```javascript
+await page.locator("button.submit").click();
+await page.locator("#email").fill("user@example.com");           // Set value instantly
+await page.locator("#email").pressSequentially("user@example.com"); // Type character by character (more human-like)
+await page.locator("select#country").selectOption("US");
+await page.keyboard.press("Enter");
+await page.locator(".menu-item").hover();
+await page.locator("#agree").check();
+await page.locator("#agree").uncheck();
+```
+
+Prefer `pressSequentially()` over `fill()` when testing input validation or when the app has key-by-key handlers. Use `fill()` for speed when exact typing behavior doesn't matter.
+
+**Waiting:**
+```javascript
+await page.locator("text=Welcome").waitFor();                    // Wait for element to appear
+await page.waitForURL("**/dashboard");                           // Wait for navigation
+await page.waitForLoadState("networkidle");                      // Wait for network to settle
+await page.waitForTimeout(1000);                                 // Explicit wait (use sparingly)
+```
+
+**Screenshots:**
+```javascript
+const buf = await page.screenshot();                             // Full viewport
+const path = await saveScreenshot(buf, "before-click");          // Save to ~/.dev-browser/tmp/
+const buf2 = await page.screenshot({ fullPage: true });          // Full scrollable page
+const buf3 = await page.locator(".modal").screenshot();          // Specific element
+```
+
+Screenshots are saved to `~/.dev-browser/tmp/`. Use `saveScreenshot()` to persist them with meaningful names.
+
+**Evaluate (run JS in page context):**
+```javascript
+const result = await page.evaluate(() => {
+  return document.querySelectorAll(".error").length;
+});
+console.log(result);
+```
+
+Use `page.evaluate()` for monitoring and measurement only — NOT for triggering interactions. Rule: interact like a user, measure like an engineer.
+
+**File I/O (restricted to ~/.dev-browser/tmp/):**
+```javascript
+await writeFile("results.json", JSON.stringify(data));
+const content = await readFile("results.json");
+```
+
+### Workflow Loop
+
+Every dev-browser script should follow this pattern:
+
+```
+GET PAGE → NAVIGATE → SNAPSHOT → PLAN → EXECUTE → VERIFY
+```
+
+1. `browser.getPage("main")` — get or create the page
+2. `page.goto(url)` — navigate if needed
+3. `page.snapshotForAI()` — understand current state
+4. Plan your next action based on the snapshot
+5. Execute the action (click, fill, etc.)
+6. Verify with snapshot or screenshot
+
+### Practical Examples
+
+**Navigate and read a page:**
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+await page.goto("http://localhost:3000", { waitUntil: "domcontentloaded" });
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);
+SCRIPT
+```
+
+**Click a button and capture evidence:**
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+// Screenshot before
+const before = await page.screenshot();
+await saveScreenshot(before, "before-submit");
+// Click
+await page.getByRole("button", { name: "Submit" }).click();
+// Wait for response
+await page.waitForLoadState("networkidle");
+// Screenshot after
+const after = await page.screenshot();
+await saveScreenshot(after, "after-submit");
+// Check for errors
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);
+SCRIPT
+```
+
+**Fill a form:**
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+await page.goto("http://localhost:3000/login", { waitUntil: "domcontentloaded" });
+await page.getByLabel("Email").fill("test@example.com");
+await page.getByLabel("Password").fill("password123");
+await page.getByRole("button", { name: "Sign In" }).click();
+await page.waitForURL("**/dashboard");
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);
+SCRIPT
+```
+
+**Multi-step with console error capture:**
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+// Capture console errors
+const errors = [];
+page.on("console", msg => { if (msg.type() === "error") errors.push(msg.text()); });
+page.on("pageerror", err => errors.push(err.message));
+
+await page.goto("http://localhost:3000/dashboard", { waitUntil: "domcontentloaded" });
+await page.getByRole("link", { name: "Settings" }).click();
+await page.waitForLoadState("networkidle");
+
+// Report
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);
+console.log("CONSOLE ERRORS:", JSON.stringify(errors));
+SCRIPT
+```
+
+### Interaction Rules
 
 MANDATORY — these rules govern ALL browser interactions:
 
-1. **User-like actions only**
-   - Use `browser_click` to click (by visible text or accessibility role, not CSS selectors)
-   - Use `browser_type` to type (character by character, like a human)
-   - Use `browser_hover` to hover
-   - Use `browser_press_key` for keyboard shortcuts
-   - Use `browser_select_option` for dropdowns
-   - Use `browser_drag` for drag-and-drop
-   - Use `browser_scroll` to scroll
+1. **User-like actions only** — Use Playwright locator actions (click, fill, hover, press) inside dev-browser scripts. Never use `page.evaluate()` to trigger clicks, form submissions, or navigation.
 
-2. **Finding elements**
-   - Use `browser_snapshot` (accessibility tree) to understand page structure and find elements
-   - Prefer clicking by text content or ARIA role over CSS selectors
-   - If an element isn't in the accessibility tree, it's likely not accessible to real users either — note this as a finding
+2. **Finding elements** — Use `page.snapshotForAI()` to understand page structure and find elements. Prefer role-based and text-based locators over CSS selectors. If an element isn't findable via accessible locators, note this as an accessibility finding.
 
-3. **Interactions = user-like only**
-   - Do NOT use `page.evaluate()` or JavaScript injection to trigger clicks, form submissions, or navigation
-   - Do NOT set values directly on DOM elements
-   - Do NOT dispatch synthetic events
+3. **Monitoring & evidence = JS allowed** — `page.evaluate()` IS allowed for: reading computed styles, DOM state, element geometry, setting up observers, reading `window.performance`, capturing network details. Rule: interact like a user, measure like an engineer.
 
-4. **Monitoring & evidence collection = JS allowed**
-   - `page.evaluate()` IS allowed for: reading computed styles, DOM state, element geometry, stacking context, overflow chains
-   - Setting up MutationObservers, IntersectionObservers, PerformanceObservers to monitor behavior
-   - Polling style/layout changes over time
-   - Reading `window.performance`, memory usage, resource timing
-   - Capturing network request/response details via injected listeners
-   - Running diagnostic scripts (visibility-chain, stacking-context, element-geometry, etc.)
-   - Rule: interact like a user, measure like an engineer
+4. **Realistic pacing** — Add `waitForLoadState("networkidle")` or `waitForTimeout(500)` between rapid actions. Humans don't click at machine speed.
 
-5. **Realistic pacing**
-   - Pause briefly between actions — humans don't click at machine speed
-   - Wait for navigation/loading to complete before next action
-   - Use `browser_wait_for_text` when expecting async content
+5. **Evidence at every step** — Screenshot before and after each critical action. Capture console errors. Note any unexpected visual state.
 
-6. **Evidence at every step**
-   - `browser_screenshot` before and after each critical action
-   - `browser_console_messages` after every interaction — catch errors immediately
-   - Note any unexpected visual state, even if not the reported bug
+6. **Never close the browser** — Do NOT call `browser.closePage()` on the main page. The user may want to inspect it manually. If you need to close, ASK first.
 
-7. **Never close the browser**
-   - Do NOT call `browser_close` or close tabs automatically
-   - The browser session belongs to the user — they may want to inspect it manually after your diagnosis
-   - If you need to close the browser for any reason, ASK the user first
+7. **One script per logical action** — Keep scripts focused. One navigation + action + verification per script. This makes it easy to see what happened at each step.
 
 ---
 
 ## Network & WebSocket Monitoring
 
-Use `page.evaluate()` to inject monitoring BEFORE performing user interactions. These listeners capture what happens under the hood while you interact like a user.
+Inject monitoring scripts via `page.evaluate()` inside a dev-browser script BEFORE performing user interactions. These listeners capture what happens under the hood.
 
 **HTTP Request/Response monitoring** — inject early, capture everything:
 
-```js
-// Inject via page.evaluate() BEFORE interacting
-window.__NET_LOG = [];
-const _origFetch = window.fetch;
-window.fetch = async (...args) => {
-  const req = { type: "fetch", url: args[0]?.url || args[0], method: args[1]?.method || "GET", ts: Date.now() };
-  try {
-    const res = await _origFetch(...args);
-    const clone = res.clone();
-    let body;
-    try { body = await clone.json(); } catch { body = await clone.text(); }
-    req.status = res.status;
-    req.ok = res.ok;
-    req.response = typeof body === "string" ? body.slice(0, 500) : body;
-    req.duration = Date.now() - req.ts;
-  } catch (e) { req.error = e.message; }
-  window.__NET_LOG.push(req);
-  return _origFetch(...args);
-};
-
-const _origXHR = XMLHttpRequest.prototype.open;
-XMLHttpRequest.prototype.open = function(method, url) {
-  this.__meta = { type: "xhr", method, url, ts: Date.now() };
-  this.addEventListener("load", () => {
-    this.__meta.status = this.status;
-    this.__meta.duration = Date.now() - this.__meta.ts;
-    this.__meta.response = this.responseText?.slice(0, 500);
-    window.__NET_LOG.push(this.__meta);
-  });
-  this.addEventListener("error", () => {
-    this.__meta.error = "network error";
-    window.__NET_LOG.push(this.__meta);
-  });
-  return _origXHR.apply(this, arguments);
-};
-```
-
-Read captured logs anytime via `page.evaluate(() => window.__NET_LOG)`.
-
-**WebSocket monitoring** — capture messages, connection state, errors:
-
-```js
-window.__WS_LOG = [];
-const _origWS = window.WebSocket;
-window.WebSocket = function(url, protocols) {
-  const ws = new _origWS(url, protocols);
-  const meta = { url, ts: Date.now(), messages: [], errors: [], state: [] };
-  window.__WS_LOG.push(meta);
-
-  meta.state.push({ event: "connecting", ts: Date.now() });
-  ws.addEventListener("open", () => meta.state.push({ event: "open", ts: Date.now() }));
-  ws.addEventListener("close", (e) => meta.state.push({ event: "close", code: e.code, reason: e.reason, ts: Date.now() }));
-  ws.addEventListener("error", () => meta.errors.push({ ts: Date.now() }));
-  ws.addEventListener("message", (e) => {
-    const data = typeof e.data === "string" ? e.data.slice(0, 500) : "[binary]";
-    meta.messages.push({ dir: "in", data, ts: Date.now() });
-  });
-
-  const _origSend = ws.send.bind(ws);
-  ws.send = (data) => {
-    const d = typeof data === "string" ? data.slice(0, 500) : "[binary]";
-    meta.messages.push({ dir: "out", data: d, ts: Date.now() });
-    return _origSend(data);
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+await page.evaluate(() => {
+  window.__NET_LOG = [];
+  const _origFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const req = { type: "fetch", url: args[0]?.url || args[0], method: args[1]?.method || "GET", ts: Date.now() };
+    try {
+      const res = await _origFetch(...args);
+      const clone = res.clone();
+      let body;
+      try { body = await clone.json(); } catch { body = await clone.text(); }
+      req.status = res.status;
+      req.ok = res.ok;
+      req.response = typeof body === "string" ? body.slice(0, 500) : body;
+      req.duration = Date.now() - req.ts;
+    } catch (e) { req.error = e.message; }
+    window.__NET_LOG.push(req);
+    return _origFetch(...args);
   };
-  return ws;
-};
+
+  const _origXHR = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this.__meta = { type: "xhr", method, url, ts: Date.now() };
+    this.addEventListener("load", () => {
+      this.__meta.status = this.status;
+      this.__meta.duration = Date.now() - this.__meta.ts;
+      this.__meta.response = this.responseText?.slice(0, 500);
+      window.__NET_LOG.push(this.__meta);
+    });
+    this.addEventListener("error", () => {
+      this.__meta.error = "network error";
+      window.__NET_LOG.push(this.__meta);
+    });
+    return _origXHR.apply(this, arguments);
+  };
+});
+console.log("Network monitoring injected");
+SCRIPT
 ```
 
-Read captured logs via `page.evaluate(() => window.__WS_LOG)`.
+Read captured logs in a later script:
+
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+const logs = await page.evaluate(() => window.__NET_LOG);
+console.log(JSON.stringify(logs, null, 2));
+SCRIPT
+```
+
+**WebSocket monitoring** — inject in the same setup script or separately:
+
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+await page.evaluate(() => {
+  window.__WS_LOG = [];
+  const _origWS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    const ws = new _origWS(url, protocols);
+    const meta = { url, ts: Date.now(), messages: [], errors: [], state: [] };
+    window.__WS_LOG.push(meta);
+    meta.state.push({ event: "connecting", ts: Date.now() });
+    ws.addEventListener("open", () => meta.state.push({ event: "open", ts: Date.now() }));
+    ws.addEventListener("close", (e) => meta.state.push({ event: "close", code: e.code, reason: e.reason, ts: Date.now() }));
+    ws.addEventListener("error", () => meta.errors.push({ ts: Date.now() }));
+    ws.addEventListener("message", (e) => {
+      const data = typeof e.data === "string" ? e.data.slice(0, 500) : "[binary]";
+      meta.messages.push({ dir: "in", data, ts: Date.now() });
+    });
+    const _origSend = ws.send.bind(ws);
+    ws.send = (data) => {
+      const d = typeof data === "string" ? data.slice(0, 500) : "[binary]";
+      meta.messages.push({ dir: "out", data: d, ts: Date.now() });
+      return _origSend(data);
+    };
+    return ws;
+  };
+});
+console.log("WebSocket monitoring injected");
+SCRIPT
+```
 
 **When to use network monitoring:**
 - Bug involves data not loading, wrong data, or stale data
@@ -164,9 +375,9 @@ Read captured logs via `page.evaluate(() => window.__WS_LOG)`.
 - Wrong message ordering or duplicate messages
 
 **How to use in workflow:**
-1. Inject monitoring scripts via `page.evaluate()` BEFORE performing user actions
-2. Perform user actions via Playwright (click, type, navigate — user-like)
-3. Read captured logs via `page.evaluate()` AFTER the interaction sequence
+1. Run the monitoring injection script FIRST (via dev-browser)
+2. Run user action scripts (click, type, navigate) — monitoring captures in background
+3. Run a log-reading script to retrieve captured data
 4. Correlate: match request URLs/payloads with API endpoint source code via `codebase-retrieval`
 
 **Network evidence format:**
@@ -245,19 +456,28 @@ Use `codebase-retrieval` to find relevant source code BEFORE opening the browser
 
 ### 3. REPRODUCE
 
-Drive the browser through the exact steps from the bug report:
+Drive the browser through the exact steps from the bug report. For each step, run a dev-browser script:
 
-```
-For each step:
-  1. browser_screenshot (before)
-  2. Perform action (browser_click / browser_type / etc.)
-  3. browser_screenshot (after)
-  4. browser_console_messages (check for errors)
-  5. Note: did the expected thing happen? What actually happened?
+```bash
+dev-browser <<'SCRIPT'
+const page = await browser.getPage("main");
+// 1. Screenshot before
+const before = await page.screenshot();
+await saveScreenshot(before, "step-N-before");
+// 2. Perform action
+await page.getByRole("button", { name: "Submit" }).click();
+await page.waitForLoadState("networkidle");
+// 3. Screenshot after
+const after = await page.screenshot();
+await saveScreenshot(after, "step-N-after");
+// 4. Check for errors + page state
+const snapshot = await page.snapshotForAI();
+console.log(snapshot.full);
+SCRIPT
 ```
 
 **If bug reproduces**: proceed to CAPTURE.
-**If bug doesn't reproduce**: try variations — different input data, different timing, different viewport size (`browser_resize`). Report if still can't reproduce after 3 attempts.
+**If bug doesn't reproduce**: try variations — different input data, different timing, different viewport size (`page.setViewportSize({width: 375, height: 812})`). Report if still can't reproduce after 3 attempts.
 
 ### 4. CAPTURE
 
@@ -269,17 +489,17 @@ EVIDENCE BLOCK
 Step: [which step failed]
 Expected: [what should happen]
 Actual: [what happened]
-Screenshot: [captured — describe what's visible]
+Screenshot: [saved to ~/.dev-browser/tmp/ — describe what's visible]
 Console errors: [exact error messages, if any]
 Network: [failed requests, unexpected responses, if observable]
-DOM state: [use browser_snapshot to check element presence/state]
+DOM state: [use snapshotForAI() to check element presence/state]
 Viewport: [dimensions if relevant to the bug]
 ```
 
 For UI bugs, also capture:
-- `browser_snapshot` to check if element exists in accessibility tree
-- `browser_resize` to test responsive behavior if relevant
-- `browser_hover` over suspect elements to check hover states
+- `page.snapshotForAI()` to check if element exists and is accessible
+- `page.setViewportSize({width: 375, height: 812})` to test responsive behavior
+- `page.locator(".suspect").hover()` to check hover states
 
 ### 5. TRACE
 
@@ -364,8 +584,6 @@ Provide the diagnosis as starting context for /feat.
 
 Stay in e2e mode, run more scenarios.
 
-Clean up Playwright artifacts before ending (see Cleanup section).
-
 ---
 
 ## Mode B: EXPLORE
@@ -397,16 +615,16 @@ Ask user if they want to prioritize specific flows or test everything.
 
 ### 3. WALK
 
-For each flow, drive the browser through the happy path AND edge cases:
+For each flow, drive the browser through the happy path AND edge cases.
 
 **At every page/step, check:**
-- [ ] Page loads without console errors
-- [ ] All visible elements are in accessibility tree (`browser_snapshot`)
+- [ ] Page loads without console errors (capture via `page.on("console")` and `page.on("pageerror")`)
+- [ ] All visible elements are findable via accessible locators (`snapshotForAI()`)
 - [ ] Interactive elements respond to click/hover
 - [ ] Forms accept input and validate correctly
 - [ ] Navigation works (links, buttons, back/forward)
 - [ ] No visual glitches (screenshot and inspect)
-- [ ] Responsive: resize to 375px width, check layout doesn't break
+- [ ] Responsive: `page.setViewportSize({width: 375, height: 812})`, check layout doesn't break
 
 **Edge cases to try:**
 - Empty form submission
@@ -426,7 +644,7 @@ Page: /path
 Action: [what was done]
 Issue: [what went wrong]
 Severity: CRITICAL / WARNING / INFO
-Screenshot: [captured]
+Screenshot: [saved to ~/.dev-browser/tmp/]
 Console: [errors if any]
 ```
 
@@ -463,15 +681,13 @@ For each finding, suggest next step:
 - Warnings → batch into a single `osf-apply` session or `/feat` if architectural
 - Info → note for later, no immediate action needed
 
-Clean up Playwright artifacts before ending (see Cleanup section).
-
 ---
 
 ## VERIFY (Post-Fix)
 
 After a fix is applied via `osf-apply`, re-run the reproduction steps to confirm:
 
-1. Navigate to the same page
+1. Navigate to the same page (use `browser.getPage("main")` — page persists)
 2. Perform the same actions
 3. Screenshot at the same points
 4. Compare: does the bug still occur?
@@ -488,23 +704,25 @@ After a fix is applied via `osf-apply`, re-run the reproduction steps to confirm
 
 If FAIL: the fix didn't work or introduced a regression. Go back to TRACE with new evidence.
 
-Clean up Playwright artifacts before ending (see Cleanup section).
-
 ---
 
 ## Cleanup
 
-After your session ends (diagnosis routed, exploration reported, or verification done), clean up Playwright artifacts:
+After your session ends (diagnosis routed, exploration reported, or verification done), clean up dev-browser artifacts:
 
-1. Find generated files:
-   - Screenshots: `*.png` files created by `browser_screenshot`
-   - Snapshots: accessibility tree dumps if saved to disk
-   - Traces: Playwright trace files if tracing was enabled
-   - Any temp files in the project's working directory created during the session
+1. Find generated files in `~/.dev-browser/tmp/`:
+   - Screenshots saved via `saveScreenshot()`
+   - Data files saved via `writeFile()`
 
-2. Delete them via Bash — don't leave diagnostic debris in the user's project
+2. Delete them via Bash if no longer needed:
+   ```bash
+   rm -rf ~/.dev-browser/tmp/*
+   ```
 
-3. If unsure which files were generated during this session, list candidates and ask the user before deleting
+3. If unsure which files were generated during this session, list them and ask the user before deleting:
+   ```bash
+   ls -la ~/.dev-browser/tmp/
+   ```
 
 Exception: If the user explicitly asks to keep evidence files (e.g., for a bug report), skip cleanup and tell them where the files are.
 
@@ -513,13 +731,14 @@ Exception: If the user explicitly asks to keep evidence files (e.g., for a bug r
 ## Guardrails
 
 - **NEVER skip codebase mapping** — Always use `codebase-retrieval` before and during browser interaction. Browser evidence without code context is just symptoms.
-- **NEVER inject JavaScript for interactions** — Click, type, hover like a user. The whole point is to reproduce what users experience.
+- **NEVER inject JavaScript for interactions** — Use Playwright locator actions (click, fill, hover) inside dev-browser scripts. The whole point is to reproduce what users experience.
 - **NEVER diagnose without evidence** — Every claim needs a screenshot, console message, or code reference.
 - **Screenshot liberally** — When in doubt, take a screenshot. Evidence you don't need is better than evidence you don't have.
-- **Check console after EVERY action** — Silent JavaScript errors are the most common hidden bugs.
+- **Check console after EVERY action** — Use `page.on("console")` and `page.on("pageerror")` to capture errors. Silent JavaScript errors are the most common hidden bugs.
 - **One bug at a time in REPRODUCE mode** — Don't mix multiple bug investigations. Each gets its own reproduce → trace → report cycle.
 - **Respect the routing** — Don't fix bugs yourself. Diagnose and route to `osf-apply` or `/feat`. Your job is evidence and diagnosis, not implementation.
 - **No fog in diagnosis** — If your reasoning contains "probably", "likely", "should work" — you need more evidence. Go back to the browser or the codebase.
+- **Always use quoted heredoc** — `<<'SCRIPT'` not `<<SCRIPT`. Prevents shell variable expansion from breaking your scripts.
 
 ---
 
@@ -529,5 +748,5 @@ After diagnosis:
 - Simple fix → `osf-apply` (pass diagnosis as context)
 - Complex fix → `/feat` then `osf-apply`
 - More bugs to investigate → stay in `/browser`
-- Want manual deep diagnosis (no Playwright) → `/vibe`
+- Want manual deep diagnosis (no browser) → `/vibe`
 - Want to verify full implementation → `/verify`
