@@ -51,6 +51,9 @@ export interface GroupServerDetail {
   active_hours_start: string | null;
   active_hours_end: string | null;
   active_hours_timezone: string | null;
+  retry_status_codes: number[] | null;
+  retry_count: number | null;
+  retry_delay_seconds: number | null;
 }
 
 export interface GroupWithServers extends Group {
@@ -225,6 +228,9 @@ export const useGroupsStore = defineStore('groups', () => {
       active_hours_start?: string | null;
       active_hours_end?: string | null;
       active_hours_timezone?: string | null;
+      retry_status_codes?: number[] | null;
+      retry_count?: number | null;
+      retry_delay_seconds?: number | null;
     },
   ) {
     await api.put(`/api/admin/groups/${groupId}/servers/${serverId}`, input);

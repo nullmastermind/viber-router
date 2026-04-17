@@ -210,7 +210,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
-         gs.active_hours_start, gs.active_hours_end, gs.active_hours_timezone \
+         gs.active_hours_start, gs.active_hours_end, gs.active_hours_timezone, \
+         gs.retry_status_codes, gs.retry_count, gs.retry_delay_seconds \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -1167,6 +1168,57 @@ async fn proxy_handler(
         });
         last_server_id = server.server_id;
         last_server_name = server.server_name.clone();
+
+        // Per-server retry: if server has retry config and status matches, retry before failover
+        let (upstream_resp, status) = {
+            let mut current_resp = upstream_resp;
+            let mut current_status = status;
+            if let (Some(retry_codes), Some(retry_count), Some(retry_delay)) = (
+                &server.retry_status_codes,
+                server.retry_count,
+                server.retry_delay_seconds,
+            ) {
+                for _ in 0..retry_count {
+                    if !retry_codes.contains(&(current_status as i32)) {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs_f64(retry_delay)).await;
+                    let mut retry_req = client.request(method.clone(), &upstream_url);
+                    for (name, value) in headers.iter() {
+                        if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                            continue;
+                        }
+                        if let Ok(rn) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                            && let Ok(rv) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+                        {
+                            retry_req = retry_req.header(rn, rv);
+                        }
+                    }
+                    retry_req = retry_req.header("x-api-key", &resolved_key);
+                    retry_req = retry_req.header("authorization", format!("Bearer {}", resolved_key));
+                    retry_req = retry_req.body(transformed_body.clone());
+                    match retry_req.send().await {
+                        Ok(retry_resp) => {
+                            let retry_status = retry_resp.status().as_u16();
+                            failover_chain.push(FailoverAttempt {
+                                server_id: server.server_id,
+                                server_name: server.server_name.clone(),
+                                status: retry_status,
+                                latency_ms: server_start.elapsed().as_millis() as i32,
+                                resolved_key: Some(resolved_key.clone()),
+                                upstream_url: Some(upstream_url.clone()),
+                                request_headers: None,
+                                request_body: None,
+                            });
+                            current_resp = retry_resp;
+                            current_status = retry_status;
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+            (current_resp, current_status)
+        };
 
         // Before failover: intercept 400 thinking signature errors on /v1/messages
         if status == 400 && is_billing_endpoint(&request_path) {

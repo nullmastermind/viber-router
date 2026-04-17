@@ -32,6 +32,15 @@ pub struct GroupServer {
     #[sqlx(default)]
     #[serde(default)]
     pub active_hours_timezone: Option<String>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_status_codes: Option<Vec<i32>>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_count: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_delay_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -71,6 +80,15 @@ pub struct GroupServerDetail {
     #[sqlx(default)]
     #[serde(default)]
     pub active_hours_timezone: Option<String>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_status_codes: Option<Vec<i32>>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_count: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_delay_seconds: Option<f64>,
 }
 
 /// Admin-facing server detail with rate fields (not used in proxy cache)
@@ -108,6 +126,15 @@ pub struct AdminGroupServerDetail {
     #[sqlx(default)]
     #[serde(default)]
     pub active_hours_timezone: Option<String>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_status_codes: Option<Vec<i32>>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_count: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub retry_delay_seconds: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +169,9 @@ pub struct UpdateAssignment {
     pub active_hours_start: Option<Option<String>>,
     pub active_hours_end: Option<Option<String>>,
     pub active_hours_timezone: Option<Option<String>>,
+    pub retry_status_codes: Option<Option<Vec<i32>>>,
+    pub retry_count: Option<Option<i32>>,
+    pub retry_delay_seconds: Option<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize)]

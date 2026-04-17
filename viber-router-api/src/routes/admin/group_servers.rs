@@ -175,6 +175,81 @@ fn is_valid_hhmm(s: &str) -> bool {
     h <= 23 && m <= 59
 }
 
+/// Validate retry fields: all-or-nothing; when set: retry_count >= 1, retry_delay_seconds > 0,
+/// status codes in 400-599 and non-empty.
+fn validate_retry_fields(
+    retry_status_codes: &Option<Option<Vec<i32>>>,
+    retry_count: &Option<Option<i32>>,
+    retry_delay_seconds: &Option<Option<f64>>,
+) -> Result<(), ApiError> {
+    // Count how many of the three outer Options are Some (i.e., provided by caller)
+    let provided_count = [
+        retry_status_codes.is_some(),
+        retry_count.is_some(),
+        retry_delay_seconds.is_some(),
+    ]
+    .iter()
+    .filter(|&&b| b)
+    .count();
+
+    if provided_count == 0 {
+        return Ok(()); // Not provided — leave unchanged
+    }
+
+    if provided_count != 3 {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Retry fields must all be provided or all omitted (retry_status_codes, retry_count, retry_delay_seconds)",
+        ));
+    }
+
+    // All three provided. Check if they are all null (clearing) or all non-null (setting).
+    let inner_count = [
+        retry_status_codes.as_ref().and_then(|v| v.as_ref()).is_some(),
+        retry_count.as_ref().and_then(|v| v.as_ref()).is_some(),
+        retry_delay_seconds.as_ref().and_then(|v| v.as_ref()).is_some(),
+    ]
+    .iter()
+    .filter(|&&b| b)
+    .count();
+
+    if inner_count == 0 {
+        return Ok(()); // All null — clearing retry config, no further validation needed
+    }
+
+    if inner_count != 3 {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Retry fields must all be set or all null",
+        ));
+    }
+
+    // All three are non-null — validate values
+    let codes = retry_status_codes.as_ref().unwrap().as_ref().unwrap();
+    let count = retry_count.as_ref().unwrap().as_ref().unwrap();
+    let delay = retry_delay_seconds.as_ref().unwrap().as_ref().unwrap();
+
+    if codes.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "retry_status_codes must be non-empty"));
+    }
+
+    for &code in codes {
+        if !(400..=599).contains(&code) {
+            return Err(err(StatusCode::BAD_REQUEST, "retry_status_codes values must be in range 400-599"));
+        }
+    }
+
+    if *count < 1 {
+        return Err(err(StatusCode::BAD_REQUEST, "retry_count must be >= 1"));
+    }
+
+    if *delay <= 0.0 {
+        return Err(err(StatusCode::BAD_REQUEST, "retry_delay_seconds must be > 0"));
+    }
+
+    Ok(())
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(assign_server))
@@ -244,6 +319,13 @@ async fn update_assignment(
         &input.active_hours_start,
         &input.active_hours_end,
         &input.active_hours_timezone,
+    )?;
+
+    // Validate retry fields
+    validate_retry_fields(
+        &input.retry_status_codes,
+        &input.retry_count,
+        &input.retry_delay_seconds,
     )?;
 
     // Determine whether to update CB fields
@@ -320,6 +402,20 @@ async fn update_assignment(
         None => (false, None),
     };
 
+    // Determine whether to update retry fields
+    let (update_retry_status_codes, retry_status_codes_val) = match input.retry_status_codes {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_retry_count, retry_count_val) = match input.retry_count {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_retry_delay, retry_delay_val) = match input.retry_delay_seconds {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
     let gs = sqlx::query_as::<_, GroupServer>(
         "UPDATE group_servers SET \
          priority = COALESCE($1, priority), \
@@ -340,7 +436,10 @@ async fn update_assignment(
          supported_models = CASE WHEN $29 THEN $30 ELSE supported_models END, \
          active_hours_start = CASE WHEN $31 THEN $32 ELSE active_hours_start END, \
          active_hours_end = CASE WHEN $33 THEN $34 ELSE active_hours_end END, \
-         active_hours_timezone = CASE WHEN $35 THEN $36 ELSE active_hours_timezone END \
+         active_hours_timezone = CASE WHEN $35 THEN $36 ELSE active_hours_timezone END, \
+         retry_status_codes = CASE WHEN $37 THEN $38 ELSE retry_status_codes END, \
+         retry_count = CASE WHEN $39 THEN $40 ELSE retry_count END, \
+         retry_delay_seconds = CASE WHEN $41 THEN $42 ELSE retry_delay_seconds END \
          WHERE group_id = $4 AND server_id = $5 RETURNING *",
     )
     .bind(input.priority)
@@ -379,6 +478,12 @@ async fn update_assignment(
     .bind(active_hours_end_val)
     .bind(update_active_hours_timezone)
     .bind(active_hours_timezone_val)
+    .bind(update_retry_status_codes)
+    .bind(retry_status_codes_val)
+    .bind(update_retry_count)
+    .bind(retry_count_val)
+    .bind(update_retry_delay)
+    .bind(retry_delay_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

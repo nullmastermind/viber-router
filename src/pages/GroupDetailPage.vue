@@ -131,6 +131,15 @@
                       >
                         {{ s.active_hours_start }}-{{ s.active_hours_end }} ({{ s.active_hours_timezone }})
                       </q-badge>
+                      <q-badge
+                        v-if="s.retry_status_codes != null && s.retry_count != null && s.retry_delay_seconds != null"
+                        outline
+                        color="deep-orange"
+                        class="q-ml-sm"
+                        :aria-label="`Retry: ${s.retry_count}x on [${s.retry_status_codes?.join(',')}] delay ${s.retry_delay_seconds}s`"
+                      >
+                        retry x{{ s.retry_count }}
+                      </q-badge>
                     </q-item-label>
                     <q-item-label caption>
                       <template v-if="serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)">
@@ -175,6 +184,7 @@
                       />
                       <q-btn flat dense icon="edit" :aria-label="`Edit server ${s.server_name}`" @click="openEditServer(s)" />
                       <q-btn flat dense icon="tune" :aria-label="`Edit model mappings for ${s.server_name}`" @click="editMappings(s)" />
+                      <q-btn flat dense icon="replay" :aria-label="`Edit retry config for ${s.server_name}`" @click="openRetryDialog(s)" />
                       <q-btn flat dense icon="delete" color="negative" :aria-label="`Remove server ${s.server_name}`" @click="onRemoveServer(s)" />
                     </div>
                   </q-item-section>
@@ -924,6 +934,51 @@
           </q-card-actions>
         </q-card>
       </q-dialog>
+
+      <q-dialog v-model="showRetryDialog">
+        <q-card style="width: 420px">
+          <q-card-section><div class="text-h6">Retry Config — {{ retryEditServer?.server_name }}</div></q-card-section>
+          <q-card-section class="q-gutter-sm">
+            <q-input
+              v-model="retryForm.retry_status_codes_str"
+              label="Retry Status Codes (comma-separated, e.g. 503,429)"
+              outlined
+              dense
+              placeholder="503,429"
+              clearable
+              @clear="retryForm.retry_status_codes_str = ''"
+            />
+            <q-input
+              v-model.number="retryForm.retry_count"
+              label="Retry Count"
+              outlined
+              dense
+              type="number"
+              :min="1"
+              placeholder="2"
+              clearable
+              @clear="retryForm.retry_count = null"
+            />
+            <q-input
+              v-model.number="retryForm.retry_delay_seconds"
+              label="Retry Delay (seconds)"
+              outlined
+              dense
+              type="number"
+              :min="0.1"
+              :step="0.1"
+              placeholder="1.0"
+              clearable
+              @clear="retryForm.retry_delay_seconds = null"
+            />
+            <div class="text-caption text-grey">Leave all fields empty to disable retry for this server.</div>
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" label="Save" :loading="savingRetry" @click="saveRetryConfig" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
     <div v-else class="flex flex-center" style="min-height: 200px">
       <q-spinner size="lg" />
@@ -1151,6 +1206,16 @@ function subStatusColor(status: string): string {
 
 // Rate modal state
 const showRateModal = ref(false);
+
+// Retry config dialog state
+const showRetryDialog = ref(false);
+const retryEditServer = ref<GroupServerDetail | null>(null);
+const savingRetry = ref(false);
+const retryForm = ref({
+  retry_status_codes_str: '',
+  retry_count: null as number | null,
+  retry_delay_seconds: null as number | null,
+});
 
 // Uptime state
 interface ServerUptime {
@@ -2204,8 +2269,74 @@ function displayRate(s: GroupServerDetail): string {
   return 'custom';
 }
 
-function openRateModal(s: GroupServerDetail) {
-  rateEditServer.value = s;
+function openRetryDialog(s: GroupServerDetail) {
+  retryEditServer.value = s;
+  retryForm.value = {
+    retry_status_codes_str: s.retry_status_codes != null ? s.retry_status_codes.join(',') : '',
+    retry_count: s.retry_count,
+    retry_delay_seconds: s.retry_delay_seconds,
+  };
+  showRetryDialog.value = true;
+}
+
+async function saveRetryConfig() {
+  if (!group.value || !retryEditServer.value) return;
+
+  const { retry_status_codes_str, retry_count, retry_delay_seconds } = retryForm.value;
+  const hasStr = retry_status_codes_str.trim() !== '';
+  const hasCount = retry_count !== null && retry_count !== undefined;
+  const hasDelay = retry_delay_seconds !== null && retry_delay_seconds !== undefined;
+  const filledCount = [hasStr, hasCount, hasDelay].filter(Boolean).length;
+
+  // Determine payload: all null (clear) or all set
+  let payload: { retry_status_codes: number[] | null; retry_count: number | null; retry_delay_seconds: number | null };
+
+  if (filledCount === 0) {
+    // Clear retry config
+    payload = { retry_status_codes: null, retry_count: null, retry_delay_seconds: null };
+  } else if (filledCount === 3) {
+    // Parse status codes
+    const codes = retry_status_codes_str
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !Number.isNaN(n));
+    if (codes.length === 0) {
+      $q.notify({ type: 'negative', message: 'retry_status_codes must be non-empty' });
+      return;
+    }
+    if (codes.some((c) => c < 400 || c > 599)) {
+      $q.notify({ type: 'negative', message: 'retry_status_codes values must be in range 400-599' });
+      return;
+    }
+    if ((retry_count as number) < 1) {
+      $q.notify({ type: 'negative', message: 'retry_count must be >= 1' });
+      return;
+    }
+    if ((retry_delay_seconds as number) <= 0) {
+      $q.notify({ type: 'negative', message: 'retry_delay_seconds must be > 0' });
+      return;
+    }
+    payload = { retry_status_codes: codes, retry_count: retry_count as number, retry_delay_seconds: retry_delay_seconds as number };
+  } else {
+    $q.notify({ type: 'negative', message: 'All three retry fields must be filled or all left empty.' });
+    return;
+  }
+
+  savingRetry.value = true;
+  try {
+    await groupsStore.updateAssignment(group.value.id, retryEditServer.value.server_id, payload);
+    showRetryDialog.value = false;
+    await loadGroup();
+    $q.notify({ type: 'positive', message: 'Retry config saved' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to save retry config';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    savingRetry.value = false;
+  }
+}
+
+function openRateModal(s: GroupServerDetail) {  rateEditServer.value = s;
   rateForm.value = {
     rate_input: s.rate_input,
     rate_output: s.rate_output,
