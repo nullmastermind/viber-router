@@ -1,6 +1,6 @@
 ---
 name: browser
-description: Reproduce bugs and explore apps via dev-browser. Use when the user wants to reproduce a bug in the browser, gather visual evidence, or proactively find UI/UX issues by navigating the running app.
+description: Reproduce bugs, explore apps, or run QA test flows via dev-browser. Use when the user wants to reproduce a bug in the browser, gather visual evidence, proactively find UI/UX issues, or run a specific user flow as a tester (e2e/test mode).
 ---
 
 You are using the browser command for E2E testing and bug reproduction.
@@ -9,7 +9,7 @@ See it, prove it, trace it. Browser is your eyes. Codebase is your brain.
 
 **MODE: E2E DIAGNOSTIC** — You drive the browser like a real user. You see what users see. You capture evidence that code reading alone cannot provide. Then you trace root cause in the codebase.
 
-**Input**: Either a bug report (reproduce mode) or a request to explore the app (explore mode).
+**Input**: Either a bug report (reproduce mode), a request to explore the app (explore mode), or a specific user flow to test as QA (e2e/test mode).
 
 ---
 
@@ -26,6 +26,7 @@ If the install fails, ask the user to run `npm install -g dev-browser && dev-bro
 After install, ask user for the app URL if not obvious from context.
 
 **Arguments**: Check if user passed flags:
+- `e2e` or `test` (first argument) → activate **Mode C: QA TEST** — report-only mode, no code modification. Remaining arguments = flow name + app URL. Example: `/osf browser e2e login http://localhost:3000`
 - `--headless` → run in headless mode (no visible browser window)
 - `--connect` → connect to user's already-running Chrome (useful for logged-in sessions)
 - Default: headed mode so user can watch what you're doing
@@ -570,14 +571,14 @@ Output a structured diagnosis:
 Based on complexity:
 
 **SIMPLE** (single root cause, 1-2 files, clear fix, no architectural impact):
-> "Root cause rõ ràng, fix đơn giản. Suggest chạy `osf-apply` để fix."
+> "Root cause rõ ràng, fix đơn giản. Suggest chạy `/osf apply` để fix."
 
-Provide the diagnosis as context for osf-apply to pick up.
+Provide the diagnosis as context for `/osf apply` to pick up.
 
 **COMPLEX** (multi-file, breaking change, needs design decisions, architectural impact):
-> "Bug này phức tạp — cần plan trước khi fix. Suggest chạy `/feat` để explore approach, sau đó `osf-apply`."
+> "Bug này phức tạp — cần plan trước khi fix. Suggest chạy `/osf feat` để explore approach, sau đó `/osf apply`."
 
-Provide the diagnosis as starting context for /feat.
+Provide the diagnosis as starting context for `/osf feat`.
 
 **UNCERTAIN** (can't determine root cause, need more investigation):
 > "Chưa xác định được root cause. Cần thêm evidence."
@@ -677,15 +678,175 @@ Summarize all findings:
 ### 6. ROUTE
 
 For each finding, suggest next step:
-- Critical bugs → trace root cause (switch to REPRODUCE mode for each), then route to `osf-apply` or `/feat`
-- Warnings → batch into a single `osf-apply` session or `/feat` if architectural
+- Critical bugs → trace root cause (switch to REPRODUCE mode for each), then route to `/osf apply` or `/osf feat`
+- Warnings → batch into a single `/osf apply` session or `/osf feat` if architectural
 - Info → note for later, no immediate action needed
+
+---
+
+## Mode C: QA TEST
+
+**Activated when**: first argument is `e2e` or `test`. Example: `/osf browser e2e login http://localhost:3000`
+
+**Purpose**: You are a QA tester. Walk through a specific user flow, document everything you find, and deliver a structured test report. You do NOT modify code — report only.
+
+**REPORT-ONLY RULE (MANDATORY)**: In QA TEST mode, you NEVER modify code, NEVER route to `/osf apply`, NEVER route to `/osf feat` or `/osf fix`. Your only output is a test report. If you catch yourself about to edit a file or suggest running `/osf apply`, STOP.
+
+### 1. PARSE
+
+Extract from user arguments:
+- **Flow name**: what flow to test (e.g., "login", "checkout", "registration")
+- **App URL**: where the app is running (e.g., `http://localhost:3000`)
+
+If either is missing, ask ONE question to clarify.
+
+### 2. MAP
+
+Use `codebase-retrieval` to understand the flow before opening the browser:
+- Which routes/pages are involved in this flow?
+- What components render each step?
+- What API endpoints does this flow call?
+- What state management drives the flow?
+
+Build a mental model of the expected flow. This helps you recognize when something is wrong and identify root causes when errors happen.
+
+### 3. EXECUTE
+
+Walk through the flow step by step, exactly like a real user would. For each step:
+
+a) **Screenshot before** the action
+b) **Perform the action** (click, type, navigate)
+c) **Screenshot after** the action
+d) **Capture console errors** via `page.on("console")` and `page.on("pageerror")`
+e) **Check page state** via `snapshotForAI()`
+f) **Log findings** as you go — don't wait until the end
+
+While executing, observe and note:
+
+**Bugs/errors:**
+- Console errors or warnings
+- Network failures (inject monitoring if the flow involves API calls)
+- Broken UI elements (missing, overlapping, wrong state)
+- Incorrect data displayed
+- Actions that don't respond or produce wrong results
+
+**UX issues:**
+- Confusing labels or unclear instructions
+- Missing loading states (user clicks and nothing visible happens)
+- Missing error messages (form fails silently)
+- Missing success feedback (action completes but no confirmation)
+- Inconsistent styling or layout breaks
+- Poor responsive behavior
+- Accessibility gaps (elements not reachable via keyboard, missing ARIA labels)
+- Slow responses without feedback (no spinner, no skeleton)
+
+**Automation difficulties:**
+- Elements without accessible roles, labels, or test IDs — hard to target in automation
+- Dynamic selectors that change on each render
+- Actions that require complex timing (race conditions, animations that must complete)
+- Flows that depend on external state (email verification, CAPTCHA, third-party OAuth)
+- Elements hidden behind hover/scroll that are hard to reliably reach
+
+### 4. INVESTIGATE
+
+For each bug or error found during execution, use `codebase-retrieval` to trace the likely root cause:
+- Console error → find the source file and line from stack trace
+- Network error → find the API handler and check the logic
+- Missing element → find the component and check conditional rendering
+- Wrong data → trace the data pipeline from API to render
+
+For stuck points (flow can't proceed), investigate:
+- Is the required element rendered? Check component code.
+- Is there a prerequisite state not met? Check state management.
+- Is the API returning unexpected data? Check handler logic.
+
+Record what you found — file paths, line numbers, the code pattern that causes the issue.
+
+### 5. REPORT
+
+Output a structured QA test report. This report must be clear enough that a developer who was not watching can reproduce every issue and understand where to fix it.
+
+```
+## QA Test Report
+
+**Flow**: [flow name from user request]
+**App URL**: [url]
+**Date**: [current date]
+**Status**: PASS / FAIL / PARTIAL
+
+---
+
+### Test Steps
+
+| # | Action | Expected Result | Actual Result | Status |
+|---|--------|-----------------|---------------|--------|
+| 1 | [what was done] | [what should happen] | [what actually happened] | PASS/FAIL |
+| 2 | ... | ... | ... | ... |
+
+---
+
+### Bugs Found
+
+#### BUG-1: [short title]
+- **Step**: #N
+- **Severity**: CRITICAL / HIGH / MEDIUM / LOW
+- **What happened**: [describe the symptom clearly]
+- **Expected**: [what should have happened]
+- **How to reproduce**: [exact steps from the start of the flow]
+- **Evidence**: screenshot at [path], console error: [exact message]
+- **Root cause (from codebase)**: [file:line — what the code does wrong and why]
+
+#### BUG-2: ...
+
+---
+
+### UX Issues
+
+#### UX-1: [short title]
+- **Step**: #N
+- **Severity**: HIGH / MEDIUM / LOW
+- **What happened**: [describe what the user experiences]
+- **Why it's bad**: [impact on user — confusion, delay, frustration]
+- **Suggestion**: [brief improvement idea]
+- **Related code**: [file:line if applicable]
+
+#### UX-2: ...
+
+---
+
+### Automation Notes
+
+#### AUTO-1: [short title]
+- **Step**: #N
+- **Element/Action**: [what was hard to automate]
+- **Why it's hard**: [missing test-id, dynamic selector, timing issue, etc.]
+- **Suggestion**: [add data-testid, stabilize selector, etc.]
+
+#### AUTO-2: ...
+
+---
+
+### Summary
+
+- **Total steps**: [N]
+- **Passed**: [N]
+- **Failed**: [N]
+- **Bugs**: [count by severity]
+- **UX issues**: [count]
+- **Automation blockers**: [count]
+
+### Screenshots
+[List all saved screenshots with their step references]
+```
+
+After the report, do NOT suggest fixing anything. Just say:
+> "QA test report xong. Developer có thể dùng report này để tái hiện và fix."
 
 ---
 
 ## VERIFY (Post-Fix)
 
-After a fix is applied via `osf-apply`, re-run the reproduction steps to confirm:
+After a fix is applied via `/osf apply`, re-run the reproduction steps to confirm:
 
 1. Navigate to the same page (use `browser.getPage("main")` — page persists)
 2. Perform the same actions
@@ -730,13 +891,14 @@ Exception: If the user explicitly asks to keep evidence files (e.g., for a bug r
 
 ## Guardrails
 
+- **NEVER modify code in QA TEST mode** — Mode C is report-only. No edits, no `/osf apply`, no `/osf feat`, no `/osf fix`. Your output is a test report, period.
 - **NEVER skip codebase mapping** — Always use `codebase-retrieval` before and during browser interaction. Browser evidence without code context is just symptoms.
 - **NEVER inject JavaScript for interactions** — Use Playwright locator actions (click, fill, hover) inside dev-browser scripts. The whole point is to reproduce what users experience.
 - **NEVER diagnose without evidence** — Every claim needs a screenshot, console message, or code reference.
 - **Screenshot liberally** — When in doubt, take a screenshot. Evidence you don't need is better than evidence you don't have.
 - **Check console after EVERY action** — Use `page.on("console")` and `page.on("pageerror")` to capture errors. Silent JavaScript errors are the most common hidden bugs.
 - **One bug at a time in REPRODUCE mode** — Don't mix multiple bug investigations. Each gets its own reproduce → trace → report cycle.
-- **Respect the routing** — Don't fix bugs yourself. Diagnose and route to `osf-apply` or `/feat`. Your job is evidence and diagnosis, not implementation.
+- **Respect the routing** — Don't fix bugs yourself. Diagnose and route to `/osf apply` or `/osf feat`. Your job is evidence and diagnosis, not implementation.
 - **No fog in diagnosis** — If your reasoning contains "probably", "likely", "should work" — you need more evidence. Go back to the browser or the codebase.
 - **Always use quoted heredoc** — `<<'SCRIPT'` not `<<SCRIPT`. Prevents shell variable expansion from breaking your scripts.
 
@@ -744,9 +906,9 @@ Exception: If the user explicitly asks to keep evidence files (e.g., for a bug r
 
 ## Mode Transition Hints
 
-After diagnosis:
-- Simple fix → `osf-apply` (pass diagnosis as context)
-- Complex fix → `/feat` then `osf-apply`
-- More bugs to investigate → stay in `/browser`
-- Want manual deep diagnosis (no browser) → `/vibe`
-- Want to verify full implementation → `/verify`
+After diagnosis (Mode A/B only — Mode C does NOT route):
+- Simple fix → `/osf apply` (pass diagnosis as context)
+- Complex fix → `/osf feat` then `/osf apply`
+- More bugs to investigate → stay in `/osf browser`
+- Want to verify full implementation → `/osf verify`
+- Want QA test report for a specific flow → `/osf browser e2e [flow] [url]`

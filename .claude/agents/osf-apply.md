@@ -95,12 +95,12 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    ```
 
    - `--repo xxx` is MANDATORY for both commands. If you do not yet know the repo value, run `npx gitnexus list` first to identify the current repo, then use that value. Do NOT run either command without `--repo`.
-   - `context` shows callers, callees, and execution flows the symbol participates in. Read the output — it tells you what else you need to update.
-   - `impact` shows upstream dependents (what breaks if you change it). Check the risk level.
+   - `context` shows callers, callees, and execution flows the symbol participates in. Read the output — it tells you what else you need to update. If the symbol name is ambiguous (multiple matches), add `--file <path>` to disambiguate. `--file` ONLY works with `context` — do NOT use it with `impact`.
+   - `impact` shows upstream dependents (what breaks if you change it). Check the risk level. Do NOT pass `--file` to `impact` — it does not support this flag and will fail.
    - If risk is HIGH or CRITICAL: you MUST update all d=1 (direct callers/importers) dependents as part of the task. Warn the user if blast radius is larger than expected.
    - For renames: NEVER find-replace across files. Run `npx gitnexus context --repo xxx "oldName"` to find all references first, then update each call site with full understanding of its context.
 
-   After blast radius check, **search for related specs** — grep the file path you're about to modify in `openspec/archive/` (specifically in `tasks.md` files). If a previous spec touched this file, read its `proposal.md` and `design.md` to understand the original design intent before making changes. This prevents breaking assumptions from earlier work.
+   After blast radius check, **search for related specs** — grep the file path you're about to modify in `openspec/changes/archive/` (specifically in `tasks.md` files). If a previous spec touched this file, read its `proposal.md` and `design.md` to understand the original design intent before making changes. This prevents breaking assumptions from earlier work.
 
    If you catch yourself writing code without having run `gitnexus context` and `gitnexus impact` on the symbol you're about to modify, STOP and run them now.
 
