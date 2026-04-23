@@ -79,7 +79,23 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    - Remaining tasks overview
    - Dynamic instruction from CLI
 
-6. **Implement tasks (loop until done or blocked)**
+6. **Index codebase for blast radius checks (MANDATORY — ONE TIME)**
+
+   Before the implementation loop, run GitNexus indexing so that `context` and `impact` commands return accurate results:
+
+   ```
+   gitnexus analyze
+   ```
+
+   If the command fails with "not found", install first then retry:
+
+   ```
+   npm i -g gitnexus && gitnexus analyze
+   ```
+
+   This is BLOCKING — do NOT start implementing until indexing completes. If you skip this step, every `gitnexus context` and `gitnexus impact` call in the implementation loop will return stale or empty results.
+
+7. **Implement tasks (loop until done or blocked)**
 
    For each pending task:
 
@@ -94,6 +110,10 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    npx gitnexus impact --repo xxx "symbolName"
    ```
 
+   If either command returns "Symbol not found", fall back to Grep to find the symbol by text search, then Read the files to trace callers and usage manually. Do NOT skip the blast radius check just because GitNexus couldn't find the symbol.
+
+   When ANY tool call or command fails, you MUST try an alternative approach — never silently skip the step. If GitNexus fails → use Grep/Read. If a command fails → investigate and retry differently. Skipping a failed step is NEVER acceptable.
+
    - `--repo xxx` is MANDATORY for both commands. If you do not yet know the repo value, run `npx gitnexus list` first to identify the current repo, then use that value. Do NOT run either command without `--repo`.
    - `context` shows callers, callees, and execution flows the symbol participates in. Read the output — it tells you what else you need to update. If the symbol name is ambiguous (multiple matches), add `--file <path>` to disambiguate. `--file` ONLY works with `context` — do NOT use it with `impact`.
    - `impact` shows upstream dependents (what breaks if you change it). Check the risk level. Do NOT pass `--file` to `impact` — it does not support this flag and will fail.
@@ -103,6 +123,8 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    After blast radius check, **search for related specs** — grep the file path you're about to modify in `openspec/changes/archive/` (specifically in `tasks.md` files). If a previous spec touched this file, read its `proposal.md` and `design.md` to understand the original design intent before making changes. This prevents breaking assumptions from earlier work.
 
    If you catch yourself writing code without having run `gitnexus context` and `gitnexus impact` on the symbol you're about to modify, STOP and run them now.
+
+   Only `context` and `impact` are available as CLI commands. Do NOT run `detect_changes`, `rename`, or any other gitnexus subcommand — they do not exist in the CLI and will fail.
 
    **d) Look up API docs when unsure** — if a task involves a library/function you're not certain about (exact params, return type, version behavior), look it up before writing code.
 
@@ -118,36 +140,31 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
-7. **On completion or pause, show status**
+8. **On completion or pause, show status**
 
    Display:
    - Tasks completed this session
    - Overall progress: "N/M tasks complete"
    - If paused: explain why and wait for guidance
-   - If all done: proceed to auto-verify (step 8)
+   - If all done: proceed to auto-verify (step 9)
 
-8. **Auto-Verify on Completion**
+9. **Auto-Verify on Completion**
 
-   When all tasks are complete, automatically run verification:
+   When all tasks are complete, automatically run verification yourself (inline, not via subagent — you are already in implementation context with full knowledge of what was changed):
 
    ```
    ## All Tasks Complete — Running Verification...
    ```
 
-   Detect change characteristics and determine which verifiers to spawn based on actual files modified during implementation:
-   - **Has UI files**: check if modified files include UI components (by file extension/content — `.tsx`, `.vue`, `.svelte`, component directories, style files)
-   - **Has architectural changes**: new files/modules created, dependency changes, new patterns introduced, structural refactors
-   - **Has testable code**: project has test framework AND modified code has corresponding test files or should have tests
-
-   Run selected verifiers:
-   - `verify` (always) — full artifact completeness check
-   - `verify` with arch focus — ONLY if change introduced new patterns, dependencies, structural changes, or 3+ new files
-   - `verify` with UI focus — ONLY if modified files include UI components
-   - `verify` with test focus — ONLY if project has test framework AND change touched testable code
+   Check the implementation against the spec/plan artifacts. Focus your verification based on actual files modified during implementation:
+   - **Always check**: Are all tasks complete? Does the implementation match the spec/plan? Are there obvious logic errors or bugs?
+   - **If UI files were modified** (`.tsx`, `.vue`, `.svelte`, component directories, style files): Check accessibility, design token consistency, responsive behavior, component states.
+   - **If architectural changes were made** (new files/modules, dependency changes, new patterns, structural refactors): Check design pattern correctness, dependency direction, SOLID principles.
+   - **If testable code was modified** and project has test framework: Check test existence, coverage of requirements, edge case handling.
 
    If `openspec/changes/<name>/verify-fixes.md` exists, read it and pass to verifiers.
 
-9. **Auto-Fix Loop**
+10. **Auto-Fix Loop**
 
    After receiving verification report, fix issues on the FIRST pass — CRITICAL, WARNING, and SUGGESTION.
 
@@ -178,7 +195,7 @@ You are an implementation subagent. Your job is to implement tasks from an OpenS
    - **Max 2 re-verify rounds** — if CRITICALs persist after 2 rounds of fixing, STOP. Report the persistent issues and let the user decide.
    - **Exit if only user-decision items remain**.
 
-10. **Final Output**
+11. **Final Output**
 
     **If all clear:**
     ```

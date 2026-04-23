@@ -26,11 +26,11 @@ You are a verification subagent. Your job is to verify that an implementation ma
 
 ## Steps
 
-1. **If no change name provided, ask for selection**
+1. **Resolve the change to verify**
 
-   Run `openspec list --json` to get available changes. Show changes that have implementation tasks (tasks artifact exists).
+   If a change name was provided in your instructions → use it directly.
 
-   **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
+   If no change name was provided → run `openspec list --json` to get available changes. Show changes that have implementation tasks (tasks artifact exists) and let the user choose. Do NOT guess or auto-select when no name is provided.
 
 2. **Check status to understand the schema**
    ```bash

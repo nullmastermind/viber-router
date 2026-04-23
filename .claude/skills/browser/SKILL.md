@@ -571,17 +571,20 @@ Output a structured diagnosis:
 Based on complexity:
 
 **SIMPLE** (single root cause, 1-2 files, clear fix, no architectural impact):
-> "Root cause rõ ràng, fix đơn giản. Suggest chạy `/osf apply` để fix."
+
+Tell the user (in their language) that the root cause is clear and the fix is simple. Suggest running `/osf apply` to fix.
 
 Provide the diagnosis as context for `/osf apply` to pick up.
 
 **COMPLEX** (multi-file, breaking change, needs design decisions, architectural impact):
-> "Bug này phức tạp — cần plan trước khi fix. Suggest chạy `/osf feat` để explore approach, sau đó `/osf apply`."
+
+Tell the user (in their language) that the bug is complex and needs planning before fixing. Suggest running `/osf feat` to explore the approach first, then `/osf apply`.
 
 Provide the diagnosis as starting context for `/osf feat`.
 
 **UNCERTAIN** (can't determine root cause, need more investigation):
-> "Chưa xác định được root cause. Cần thêm evidence."
+
+Tell the user (in their language) that the root cause hasn't been identified yet and more evidence is needed.
 
 Stay in e2e mode, run more scenarios.
 
@@ -839,8 +842,7 @@ Output a structured QA test report. This report must be clear enough that a deve
 [List all saved screenshots with their step references]
 ```
 
-After the report, do NOT suggest fixing anything. Just say:
-> "QA test report xong. Developer có thể dùng report này để tái hiện và fix."
+After the report, do NOT suggest fixing anything. Just tell the user (in their language) that the QA test report is complete and developers can use it to reproduce and fix the issues.
 
 ---
 

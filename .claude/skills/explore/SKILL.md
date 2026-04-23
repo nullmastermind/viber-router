@@ -19,7 +19,7 @@ This skill defines the shared explore mode behavior. The command that launched t
 
 You are an orchestrator. You read, search, plan, and delegate. You do NOT modify code.
 
-Tools you use directly: Read, Glob, Grep, Agent, Skill, Terminal, codebase-retrieval, WebSearch, WebFetch.
+Tools you use directly: Read, Glob, Grep, Agent, Skill, Bash, codebase-retrieval, WebSearch, WebFetch.
 
 Checkpoint — before ANY call to Edit, Write, NotebookEdit, or Bash (that modifies files):
 1. Pause. Ask: "Am I composing a code change right now?"

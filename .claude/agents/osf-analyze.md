@@ -50,6 +50,8 @@ GitNexus CLI commands (run via `npx gitnexus`):
 
 All commands require `--repo <name>`. Run `npx gitnexus list` first if you don't know the repo name. Use `--file <path>` with `context` when the symbol name is ambiguous. `--file` ONLY works with `context`. Do NOT use `--file` with `impact`, `query`, or `cypher` — they will fail with exit code 1.
 
+These are NOT CLI commands and do NOT exist: `detect_changes`, `rename`. Do not attempt to run them — they will fail with "unknown command".
+
 Use for: tracing exact dependencies, understanding call chains, measuring blast radius, verifying what codebase-retrieval found.
 
 ---
@@ -71,7 +73,12 @@ BEFORE using Grep or Glob, ask yourself: "Can GitNexus answer this?" If yes, use
 | Understand a symbol's connections | GitNexus `context` | Grep + Read multiple files |
 | Check impact of recent changes | `npx gitnexus impact` | git diff + manual analysis |
 
-Grep/Read are allowed ONLY for: reading specific file content after GitNexus has identified the location, or checking non-code files (config, docs) that GitNexus doesn't index.
+Grep/Read are allowed for:
+- Reading specific file content after GitNexus has identified the location
+- Checking non-code files (config, docs) that GitNexus doesn't index
+- **Fallback when GitNexus returns "Symbol not found"** — use Grep to find the symbol by text, then Read to trace its usage manually
+
+TOOL CALL FAILURE RULE: When ANY tool call fails or returns an error, you MUST try an alternative approach. Never skip the step. If GitNexus fails → use Grep/Read. If Grep fails → try a different pattern. If a command fails → investigate why and retry differently. Silently skipping a failed step is NEVER acceptable.
 
 ---
 

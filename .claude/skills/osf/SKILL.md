@@ -14,9 +14,12 @@ Supporting subagents (used internally by skills):
 - osf-uiux-designer — UI/UX design analysis and reports
 - osf-verify — Verify implementation matches spec
 
+Aliases:
+- auto → autopilot
+
 Dispatch rules:
 
-1. If "$0" is present and matches a supported skill, use the Skill tool to invoke "$0".
+1. If "$0" is present and matches a supported skill or alias, resolve the alias first, then use the Skill tool to invoke the resolved skill name.
 2. If "$0" is empty or not in the supported skill list, infer the best matching skill from the user's request and invoke that instead.
 3. Use the most specific match:
    - bug fix, broken behavior, error, regression, "sửa lỗi" → `fix`

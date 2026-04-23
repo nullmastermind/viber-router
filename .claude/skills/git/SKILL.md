@@ -42,7 +42,7 @@ ACTION: COMMIT
 Phase 1 — STAGE
 
 1. Check `git status` for staged files
-   - NO staged files → run `git add -A` (stage everything)
+   - NO staged files → review untracked and modified files, then stage relevant files by name (`git add <file1> <file2> ...`). Do NOT use `git add -A` or `git add .` — these can accidentally stage secrets (.env, credentials), large binaries, or generated files. Exclude files that look sensitive or irrelevant to the change.
    - Staged files exist → keep as-is, do NOT stage additional files
 2. Nothing to commit (clean tree) → report and stop
 
