@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::rate_limiter;
@@ -20,13 +21,22 @@ pub struct PublicUptimeResponse {
     status: String,
     uptime_percent: f64,
     buckets: Vec<ChainBucket>,
+    models: Vec<ModelUptime>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChainBucket {
     timestamp: i64,
     total_requests: i64,
     successful_requests: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelUptime {
+    model: String,
+    status: String,
+    uptime_percent: f64,
+    buckets: Vec<ChainBucket>,
 }
 
 fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -40,6 +50,22 @@ fn extract_client_ip(headers: &HeaderMap, addr: SocketAddr) -> String {
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| addr.ip().to_string())
+}
+
+fn derive_status(total: i64, successful: i64) -> (String, f64) {
+    if total == 0 {
+        ("no_data".to_string(), 0.0)
+    } else {
+        let pct = successful as f64 / total as f64 * 100.0;
+        let status = if pct > 95.0 {
+            "operational"
+        } else if pct >= 50.0 {
+            "degraded"
+        } else {
+            "down"
+        };
+        (status.to_string(), pct)
+    }
 }
 
 // PLACEHOLDER_HANDLER
@@ -102,28 +128,43 @@ pub async fn public_uptime(
     let cutoff = chrono::DateTime::from_timestamp(bucket_timestamps[0], 0)
         .unwrap_or_default();
 
-    // Chain-level aggregation: a request is successful if ANY attempt has 2xx
+    // --- All uptime data (overall + per-model) from proxy_logs ---
+
+    // 1. Get allowed model names for this group
     #[derive(sqlx::FromRow)]
-    struct RawChainBucket {
+    struct ModelName {
+        name: String,
+    }
+
+    let allowed_models = sqlx::query_as::<_, ModelName>(
+        "SELECT m.name \
+         FROM models m \
+         JOIN group_allowed_models gam ON m.id = gam.model_id \
+         WHERE gam.group_id = $1 \
+         ORDER BY m.name",
+    )
+    .bind(key_info.group_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    // 2. Query proxy_logs grouped by request_model and 30-min bucket
+    #[derive(sqlx::FromRow)]
+    struct RawModelBucket {
+        request_model: String,
         bucket: i64,
         total_requests: i64,
         successful_requests: i64,
     }
 
-    let raw_buckets = sqlx::query_as::<_, RawChainBucket>(
-        "WITH bucketed AS ( \
-           SELECT request_id, \
-             (floor(extract(epoch from created_at) / 1800) * 1800)::bigint as bucket, \
-             bool_or(status_code BETWEEN 200 AND 299) as any_success \
-           FROM uptime_checks \
-           WHERE group_id = $1 AND created_at >= $2 \
-           GROUP BY request_id, bucket \
-         ) \
-         SELECT bucket, \
+    let raw_model_buckets = sqlx::query_as::<_, RawModelBucket>(
+        "SELECT request_model, \
+           (floor(extract(epoch from created_at) / 1800) * 1800)::bigint as bucket, \
            COUNT(*)::bigint as total_requests, \
-           COUNT(*) FILTER (WHERE any_success)::bigint as successful_requests \
-         FROM bucketed \
-         GROUP BY bucket",
+           COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 299)::bigint as successful_requests \
+         FROM proxy_logs \
+         WHERE group_id = $1 AND created_at >= $2 AND request_model IS NOT NULL \
+         GROUP BY request_model, bucket",
     )
     .bind(key_info.group_id)
     .bind(cutoff)
@@ -131,37 +172,80 @@ pub async fn public_uptime(
     .await
     .unwrap_or_default();
 
-    // Build buckets
-    let mut buckets = Vec::with_capacity(90);
-    for &ts in &bucket_timestamps {
-        let matching = raw_buckets.iter().find(|b| b.bucket == ts);
-        buckets.push(ChainBucket {
-            timestamp: ts,
-            total_requests: matching.map_or(0, |b| b.total_requests),
-            successful_requests: matching.map_or(0, |b| b.successful_requests),
-        });
+    // Index raw model buckets by (model, bucket_ts) for fast lookup
+    let mut model_bucket_map: HashMap<(&str, i64), (i64, i64)> = HashMap::new();
+    for rb in &raw_model_buckets {
+        model_bucket_map.insert(
+            (rb.request_model.as_str(), rb.bucket),
+            (rb.total_requests, rb.successful_requests),
+        );
     }
 
-    // Derive status from the most recent bucket
-    let last_bucket = buckets.last().unwrap();
-    let (status_text, uptime_percent) = if last_bucket.total_requests == 0 {
-        ("no_data".to_string(), 0.0)
-    } else {
-        let pct = last_bucket.successful_requests as f64 / last_bucket.total_requests as f64 * 100.0;
-        let status = if pct > 95.0 {
-            "operational"
-        } else if pct >= 50.0 {
-            "degraded"
-        } else {
-            "down"
-        };
-        (status.to_string(), pct)
-    };
+    // 3. Build per-model entries
+    let models: Vec<ModelUptime> = allowed_models
+        .iter()
+        .map(|m| {
+            let model_buckets: Vec<ChainBucket> = bucket_timestamps
+                .iter()
+                .map(|&ts| {
+                    let (total, success) = model_bucket_map
+                        .get(&(m.name.as_str(), ts))
+                        .copied()
+                        .unwrap_or((0, 0));
+                    ChainBucket {
+                        timestamp: ts,
+                        total_requests: total,
+                        successful_requests: success,
+                    }
+                })
+                .collect();
+
+            // Use aggregate across all buckets for per-model status
+            // (individual models have sparser traffic than the group total,
+            // so the last-bucket-only approach often yields "no_data")
+            let total_all: i64 = model_buckets.iter().map(|b| b.total_requests).sum();
+            let success_all: i64 = model_buckets.iter().map(|b| b.successful_requests).sum();
+            let (status, uptime_pct) = derive_status(total_all, success_all);
+
+            ModelUptime {
+                model: m.name.clone(),
+                status,
+                uptime_percent: uptime_pct,
+                buckets: model_buckets,
+            }
+        })
+        .collect();
+
+    // 4. Build overall buckets by aggregating all proxy_logs data
+    //    (uses the same data source as per-model bars so they are always consistent)
+    let mut overall_map: HashMap<i64, (i64, i64)> = HashMap::new();
+    for rb in &raw_model_buckets {
+        let entry = overall_map.entry(rb.bucket).or_insert((0, 0));
+        entry.0 += rb.total_requests;
+        entry.1 += rb.successful_requests;
+    }
+    let buckets: Vec<ChainBucket> = bucket_timestamps
+        .iter()
+        .map(|&ts| {
+            let (total, success) = overall_map.get(&ts).copied().unwrap_or((0, 0));
+            ChainBucket {
+                timestamp: ts,
+                total_requests: total,
+                successful_requests: success,
+            }
+        })
+        .collect();
+
+    // 5. Derive overall status from aggregated proxy_logs data
+    let overall_total: i64 = buckets.iter().map(|b| b.total_requests).sum();
+    let overall_success: i64 = buckets.iter().map(|b| b.successful_requests).sum();
+    let (status_text, uptime_percent) = derive_status(overall_total, overall_success);
 
     Json(PublicUptimeResponse {
         status: status_text,
         uptime_percent,
         buckets,
+        models,
     })
     .into_response()
 }

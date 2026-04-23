@@ -235,6 +235,25 @@
                 />
               </div>
               <UptimeBars :buckets="uptimeBuckets" />
+              <!-- Per-model status rows -->
+              <template v-if="uptimeData.models && uptimeData.models.length > 0">
+                <q-separator class="q-my-md" />
+                <div
+                  v-for="m in uptimeData.models"
+                  :key="m.model"
+                  class="q-mb-sm"
+                >
+                  <div class="row items-center q-mb-xs">
+                    <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
+                    <q-badge
+                      :color="statusBadgeColor(m.status)"
+                      :label="statusBadgeLabel(m.status)"
+                      class="text-capitalize"
+                    />
+                  </div>
+                  <UptimeBars :buckets="modelBucketsMap[m.model] ?? []" />
+                </div>
+              </template>
             </template>
             <div v-else-if="uptimeLoading" class="flex flex-center q-pa-sm">
               <q-spinner size="sm" />
@@ -681,6 +700,19 @@ const uptimeBuckets = computed<Bucket[]>(() => {
   }));
 });
 
+const modelBucketsMap = computed<Record<string, Bucket[]>>(() => {
+  if (!uptimeData.value?.models) return {};
+  const map: Record<string, Bucket[]> = {};
+  for (const m of uptimeData.value.models) {
+    map[m.model] = m.buckets.map((b) => ({
+      timestamp: b.timestamp,
+      total: b.total_requests,
+      success: b.successful_requests,
+    }));
+  }
+  return map;
+});
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
@@ -716,10 +748,17 @@ interface UptimeBucketRaw {
   total_requests: number;
   successful_requests: number;
 }
+interface UptimeModelRaw {
+  model: string;
+  status: string;
+  uptime_percent: number;
+  buckets: UptimeBucketRaw[];
+}
 interface UptimeApiResponse {
   status: string;
   uptime_percent: number;
   buckets: UptimeBucketRaw[];
+  models?: UptimeModelRaw[];
 }
 const uptimeData = ref<UptimeApiResponse | null>(null);
 const uptimeLoading = ref(false);
