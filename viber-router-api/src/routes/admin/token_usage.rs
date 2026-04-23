@@ -60,8 +60,29 @@ fn resolve_interval(period: &str) -> &'static str {
     }
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct KeyTokenUsage {
+    group_key_id: Option<Uuid>,
+    key_name: Option<String>,
+    api_key: Option<String>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+    total_cache_creation_tokens: i64,
+    total_cache_read_tokens: i64,
+    request_count: i64,
+    cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct KeyUsageResponse {
+    keys: Vec<KeyTokenUsage>,
+}
+
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(get_token_usage))
+    Router::new()
+        .route("/", get(get_token_usage))
+        .route("/by-key", get(get_token_usage_by_key))
 }
 
 enum GroupKeyIdFilter {
@@ -214,4 +235,77 @@ async fn get_token_usage(
     };
 
     Ok(Json(TokenUsageResponse { servers }))
+}
+
+async fn get_token_usage_by_key(
+    State(state): State<AppState>,
+    Query(params): Query<TokenUsageParams>,
+) -> Result<Json<KeyUsageResponse>, ApiError> {
+    let group_id = params
+        .group_id
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "group_id is required"))?;
+
+    let keys = if let (Some(start), Some(end)) = (params.start, params.end) {
+        let qb = String::from(
+            "SELECT t.group_key_id, gk.name as key_name, gk.api_key, gk.created_at, \
+             COALESCE(SUM(t.input_tokens)::bigint, 0) as total_input_tokens, \
+             COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
+             COALESCE(SUM(t.cache_creation_tokens)::bigint, 0) as total_cache_creation_tokens, \
+             COALESCE(SUM(t.cache_read_tokens)::bigint, 0) as total_cache_read_tokens, \
+             COUNT(*)::bigint as request_count, \
+             CASE WHEN bool_or(m.id IS NOT NULL AND (m.input_1m_usd IS NOT NULL OR m.output_1m_usd IS NOT NULL OR m.cache_write_1m_usd IS NOT NULL OR m.cache_read_1m_usd IS NOT NULL)) THEN \
+               (COALESCE(SUM(t.input_tokens::float8 * COALESCE(m.input_1m_usd, 0) * COALESCE(gs.rate_input, 1.0)), 0) + \
+                COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
+             ELSE NULL END as cost_usd \
+             FROM token_usage_logs t \
+             LEFT JOIN group_keys gk ON gk.id = t.group_key_id \
+             LEFT JOIN models m ON m.name = t.model \
+             LEFT JOIN group_servers gs ON gs.group_id = t.group_id AND gs.server_id = t.server_id \
+             WHERE t.group_id = $1 AND t.created_at >= $2 AND t.created_at < $3 \
+             GROUP BY t.group_key_id, gk.name, gk.api_key, gk.created_at \
+             ORDER BY request_count DESC",
+        );
+
+        sqlx::query_as::<_, KeyTokenUsage>(&qb)
+            .bind(group_id)
+            .bind(start)
+            .bind(end)
+            .fetch_all(&state.db)
+            .await
+            .map_err(internal)?
+    } else {
+        let interval = resolve_interval(params.period.as_deref().unwrap_or("24h"));
+
+        let qb = format!(
+            "SELECT t.group_key_id, gk.name as key_name, gk.api_key, gk.created_at, \
+             COALESCE(SUM(t.input_tokens)::bigint, 0) as total_input_tokens, \
+             COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
+             COALESCE(SUM(t.cache_creation_tokens)::bigint, 0) as total_cache_creation_tokens, \
+             COALESCE(SUM(t.cache_read_tokens)::bigint, 0) as total_cache_read_tokens, \
+             COUNT(*)::bigint as request_count, \
+             CASE WHEN bool_or(m.id IS NOT NULL AND (m.input_1m_usd IS NOT NULL OR m.output_1m_usd IS NOT NULL OR m.cache_write_1m_usd IS NOT NULL OR m.cache_read_1m_usd IS NOT NULL)) THEN \
+               (COALESCE(SUM(t.input_tokens::float8 * COALESCE(m.input_1m_usd, 0) * COALESCE(gs.rate_input, 1.0)), 0) + \
+                COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
+                COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
+             ELSE NULL END as cost_usd \
+             FROM token_usage_logs t \
+             LEFT JOIN group_keys gk ON gk.id = t.group_key_id \
+             LEFT JOIN models m ON m.name = t.model \
+             LEFT JOIN group_servers gs ON gs.group_id = t.group_id AND gs.server_id = t.server_id \
+             WHERE t.group_id = $1 AND t.created_at > now() - interval '{interval}' \
+             GROUP BY t.group_key_id, gk.name, gk.api_key, gk.created_at \
+             ORDER BY request_count DESC"
+        );
+
+        sqlx::query_as::<_, KeyTokenUsage>(&qb)
+            .bind(group_id)
+            .fetch_all(&state.db)
+            .await
+            .map_err(internal)?
+    };
+
+    Ok(Json(KeyUsageResponse { keys }))
 }

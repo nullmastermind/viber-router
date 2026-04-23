@@ -294,7 +294,8 @@
                           </q-btn>
                           <span v-else class="text-caption text-grey q-ml-sm">No active plans available</span>
                         </div>
-                        <div v-if="!keySubscriptions[props.row.id] || keySubscriptions[props.row.id]?.total === 0" class="text-caption text-grey q-mb-sm">
+                        <div v-if="keySubsLoading[props.row.id]" class="flex flex-center q-pa-sm q-mb-sm"><q-spinner size="sm" /></div>
+                        <div v-else-if="!keySubscriptions[props.row.id] || keySubscriptions[props.row.id]?.total === 0" class="text-caption text-grey q-mb-sm">
                           No subscriptions &mdash; unlimited usage
                         </div>
                         <q-table
@@ -454,8 +455,17 @@
 
         <!-- Token Usage Tab -->
         <q-tab-panel name="token-usage" class="q-pa-none">
-          <q-card flat bordered>
-            <q-card-section>
+          <q-tabs v-model="tokenUsageChildTab" dense inline-label align="left" class="text-grey" active-color="primary" indicator-color="primary">
+            <q-tab name="by-server" label="By Server" />
+            <q-tab name="by-sub-key" label="By Sub-Key" />
+          </q-tabs>
+          <q-separator />
+
+          <q-tab-panels v-model="tokenUsageChildTab" animated>
+            <!-- By Server child tab -->
+            <q-tab-panel name="by-server" class="q-pa-none">
+              <q-card flat bordered>
+                <q-card-section>
           <div class="row items-center q-mb-sm">
             <div class="text-subtitle1">Token Usage</div>
             <q-space />
@@ -519,8 +529,142 @@
               </q-tr>
             </template>
           </q-table>
-            </q-card-section>
-          </q-card>
+                </q-card-section>
+              </q-card>
+            </q-tab-panel>
+
+            <!-- By Sub-Key child tab -->
+            <q-tab-panel name="by-sub-key" class="q-pa-none">
+              <q-card flat bordered>
+                <q-card-section>
+                  <div class="row items-center q-mb-sm q-gutter-sm">
+                    <div class="text-subtitle1">Usage by Sub-Key</div>
+                    <q-space />
+                    <q-input v-model="subKeyDateStart" type="date" label="Start" outlined dense style="max-width: 170px" />
+                    <q-input v-model="subKeyDateEnd" type="date" label="End" outlined dense style="max-width: 170px" />
+                    <q-btn flat dense icon="refresh" @click="loadSubKeyUsage" />
+                  </div>
+                  <div v-if="subKeyUsageLoading && subKeyUsageData.length === 0" class="flex flex-center q-pa-lg">
+                    <q-spinner size="md" />
+                  </div>
+                  <q-banner v-else-if="subKeyUsageError" class="bg-negative text-white q-mb-sm" rounded>
+                    {{ subKeyUsageError }}
+                    <template #action>
+                      <q-btn flat label="Retry" @click="loadSubKeyUsage" />
+                    </template>
+                  </q-banner>
+                  <q-banner v-else-if="subKeyUsageData.length === 0 && !subKeyUsageLoading" class="q-mb-sm" rounded>
+                    No usage data for this period
+                  </q-banner>
+                  <q-table
+                    v-else-if="subKeyUsageData.length > 0"
+                    flat bordered dense
+                    :rows="subKeyUsageData"
+                    :columns="subKeyUsageColumns"
+                    :row-key="subKeyRowKey"
+                    :pagination="{ rowsPerPage: 0 }"
+                    hide-pagination
+                    :loading="subKeyUsageLoading"
+                  >
+                    <template #body="props">
+                      <q-tr
+                        :props="props"
+                        :class="props.row.group_key_id != null ? 'cursor-pointer' : ''"
+                        @click="onExpandSubKeyUsageRow(props)"
+                      >
+                        <q-td key="index" :props="props" class="text-center">{{ props.rowIndex + 1 }}</q-td>
+                        <q-td key="key_name" :props="props">
+                          <q-icon
+                            v-if="props.row.group_key_id != null"
+                            :name="props.expand ? 'expand_less' : 'expand_more'"
+                            size="xs"
+                            class="q-mr-xs"
+                          />
+                          {{ props.row.key_name != null ? props.row.key_name : (props.row.group_key_id == null ? 'Master / Dynamic Keys' : 'Deleted Key') }}
+                        </q-td>
+                        <q-td key="input" :props="props" class="text-right">{{ formatCompact(props.row.total_input_tokens) }}</q-td>
+                        <q-td key="output" :props="props" class="text-right">{{ formatCompact(props.row.total_output_tokens) }}</q-td>
+                        <q-td key="cache_creation" :props="props" class="text-right">{{ formatCompact(props.row.total_cache_creation_tokens) }}</q-td>
+                        <q-td key="cache_read" :props="props" class="text-right">{{ formatCompact(props.row.total_cache_read_tokens) }}</q-td>
+                        <q-td key="requests" :props="props" class="text-right">{{ formatCompact(props.row.request_count) }}</q-td>
+                        <q-td key="cost" :props="props" class="text-right">{{ props.row.cost_usd != null ? `$${props.row.cost_usd.toFixed(4)}` : '\u2014' }}</q-td>
+                        <q-td key="created_at" :props="props">{{ props.row.created_at != null ? props.row.created_at.slice(0, 10) : '\u2014' }}</q-td>
+                        <q-td key="actions" :props="props">
+                          <q-btn v-if="props.row.api_key" flat dense round size="sm" icon="open_in_new" aria-label="Open usage page" :href="usageLink(props.row.api_key)" target="_blank" @click.stop>
+                            <q-tooltip>Usage page</q-tooltip>
+                          </q-btn>
+                        </q-td>
+                      </q-tr>
+                      <q-tr v-if="props.expand && props.row.group_key_id != null" :props="props">
+                        <q-td colspan="10" class="q-pa-sm">
+                          <div class="row items-center q-mb-xs">
+                            <div class="text-subtitle2">Subscriptions</div>
+                            <q-space />
+                            <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
+                              <q-menu>
+                                <q-list dense style="min-width: 200px">
+                                  <q-item v-for="plan in activePlans" :key="plan.id" clickable v-close-popup @click="onAssignSubscription(props.row.group_key_id ?? '', plan.id)">
+                                    <q-item-section>
+                                      <q-item-label>{{ plan.name }}</q-item-label>
+                                      <q-item-label caption>{{ getSubTypeLabel(plan.sub_type) }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
+                                    </q-item-section>
+                                  </q-item>
+                                </q-list>
+                              </q-menu>
+                            </q-btn>
+                            <span v-else class="text-caption text-grey q-ml-sm">No active plans available</span>
+                          </div>
+                          <div v-if="keySubsLoading[props.row.group_key_id ?? '']" class="flex flex-center q-pa-sm q-mb-sm"><q-spinner size="sm" /></div>
+                          <div v-else-if="!keySubscriptions[props.row.group_key_id ?? ''] || keySubscriptions[props.row.group_key_id ?? '']?.total === 0" class="text-caption text-grey q-mb-sm">
+                            No subscriptions &mdash; unlimited usage
+                          </div>
+                          <q-table
+                            v-else
+                            flat bordered dense
+                            :rows="keySubscriptions[props.row.group_key_id ?? '']?.data ?? []"
+                            :columns="subColumns"
+                            row-key="id"
+                            :pagination="subPagination[props.row.group_key_id ?? '']"
+                            @request="(p: { pagination: { page: number; rowsPerPage: number } }) => onSubPaginationRequest(props.row.group_key_id ?? '', p)"
+                          >
+                            <template #body-cell-status="sProps">
+                              <q-td :props="sProps">
+                                <q-badge :color="subStatusColor(sProps.row.status)" :label="sProps.row.status" />
+                              </q-td>
+                            </template>
+                            <template #body-cell-cost_used="sProps">
+                              <q-td :props="sProps">
+                                ${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}
+                              </q-td>
+                            </template>
+                            <template #body-cell-actions="sProps">
+                              <q-td :props="sProps">
+                                <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.group_key_id ?? '', sProps.row.id)" />
+                              </q-td>
+                            </template>
+                          </q-table>
+                        </q-td>
+                      </q-tr>
+                    </template>
+                    <template #bottom-row>
+                      <q-tr class="text-weight-bold">
+                        <q-td />
+                        <q-td>Total</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.input.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.output.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.cacheCreation.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.cacheRead.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.requests.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.cost != null ? `$${totalSubKeyUsage.cost.toFixed(4)}` : '\u2014' }}</q-td>
+                        <q-td />
+                        <q-td />
+                      </q-tr>
+                    </template>
+                  </q-table>
+                </q-card-section>
+              </q-card>
+            </q-tab-panel>
+          </q-tab-panels>
         </q-tab-panel>
 
         <!-- Spam Tab -->
@@ -990,7 +1134,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar, copyToClipboard } from 'quasar';
-import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type CircuitStatus, type TokenUsageStats, type GroupKey, type Model, type SpamResult } from 'stores/groups';
+import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type CircuitStatus, type TokenUsageStats, type GroupKey, type Model, type SpamResult, type KeyTokenUsage } from 'stores/groups';
 import { useServersStore } from 'stores/servers';
 import { useModelsStore } from 'stores/models';
 import { api } from 'boot/axios';
@@ -1010,7 +1154,7 @@ const modelsStore = useModelsStore();
 const group = ref<GroupWithServers | null>(null);
 const servers = ref<GroupServerDetail[]>([]);
 const failoverCodesStr = ref('');
-const validTabs = ['properties', 'servers', 'keys', 'allowed-models', 'ttft', 'token-usage', 'spam'];
+const validTabs = ['properties', 'servers', 'keys', 'allowed-models', 'ttft', 'token-usage', 'spam', 'user-agents'];
 const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'properties';
 const activeTab = ref(initialTab);
 
@@ -1125,6 +1269,19 @@ const tokenUsageServerFilter = ref<string | null>(null);
 const tokenUsageDynamicKeyFilter = ref(false);
 const tokenUsageKeyHashFilter = ref('');
 
+// Token usage child tabs
+const tokenUsageChildTab = ref('by-server');
+
+// By Sub-Key usage state
+const subKeyUsageData = ref<KeyTokenUsage[]>([]);
+const subKeyUsageLoading = ref(false);
+const subKeyUsageError = ref('');
+const subKeyDateStart = ref(
+  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+);
+const subKeyDateEnd = ref(new Date().toISOString().slice(0, 10));
+const subKeyUsageExpanded = ref<string[]>([]);
+
 // Spam detection state
 const spamRows = ref<SpamResult[]>([]);
 const spamLoading = ref(false);
@@ -1181,6 +1338,7 @@ interface SubscriptionPlan {
   is_active: boolean;
 }
 const keySubscriptions = ref<Record<string, { data: KeySubscription[]; total: number }>>({});
+const keySubsLoading = ref<Record<string, boolean>>({});
 const subPagination = ref<Record<string, { page: number; rowsPerPage: number; rowsNumber: number }>>({});
 const activePlans = ref<SubscriptionPlan[]>([]);
 
@@ -1281,6 +1439,45 @@ const tokenUsageColumns = [
   { name: 'requests', label: 'Requests', field: 'request_count', align: 'right' as const, format: formatCompact },
   { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
 ];
+
+const subKeyUsageColumns = [
+  { name: 'index', label: '#', field: () => '', align: 'center' as const },
+  {
+    name: 'key_name',
+    label: 'Key Name',
+    field: 'key_name',
+    align: 'left' as const,
+    sortable: true,
+    format: (v: string | null, row: KeyTokenUsage) =>
+      v != null ? v : (row.group_key_id == null ? 'Master / Dynamic Keys' : 'Deleted Key'),
+  },
+  { name: 'input', label: 'Input Tokens', field: 'total_input_tokens', align: 'right' as const, sortable: true, format: formatCompact },
+  { name: 'output', label: 'Output Tokens', field: 'total_output_tokens', align: 'right' as const, sortable: true, format: formatCompact },
+  { name: 'cache_creation', label: 'Cache Write', field: 'total_cache_creation_tokens', align: 'right' as const, sortable: true, format: formatCompact },
+  { name: 'cache_read', label: 'Cache Read', field: 'total_cache_read_tokens', align: 'right' as const, sortable: true, format: formatCompact },
+  { name: 'requests', label: 'Requests', field: 'request_count', align: 'right' as const, sortable: true, format: formatCompact },
+  { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, sortable: true, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
+  {
+    name: 'created_at',
+    label: 'Created At',
+    field: 'created_at',
+    align: 'left' as const,
+    format: (v: string | null) => v != null ? v.slice(0, 10) : '\u2014',
+  },
+  { name: 'actions', label: '', field: 'group_key_id', align: 'right' as const },
+];
+
+const totalSubKeyUsage = computed(() => {
+  const rows = subKeyUsageData.value;
+  const input = rows.reduce((s, r) => s + r.total_input_tokens, 0);
+  const output = rows.reduce((s, r) => s + r.total_output_tokens, 0);
+  const cacheCreation = rows.reduce((s, r) => s + r.total_cache_creation_tokens, 0);
+  const cacheRead = rows.reduce((s, r) => s + r.total_cache_read_tokens, 0);
+  const requests = rows.reduce((s, r) => s + r.request_count, 0);
+  const costRows = rows.filter((r) => r.cost_usd != null);
+  const cost = costRows.length > 0 ? costRows.reduce((s, r) => s + (r.cost_usd ?? 0), 0) : null;
+  return { input, output, cacheCreation, cacheRead, requests, cost };
+});
 
 const spamColumns = [
   { name: 'api_key', label: 'Key', field: 'api_key', align: 'left' as const },
@@ -1451,6 +1648,23 @@ async function loadTokenUsage() {
 watch(tokenUsagePeriod, () => loadTokenUsage());
 watch(tokenUsageDynamicKeyFilter, () => loadTokenUsage());
 watch(tokenUsageKeyHashFilter, () => loadTokenUsage());
+watch([subKeyDateStart, subKeyDateEnd], () => loadSubKeyUsage());
+
+async function loadSubKeyUsage() {
+  if (!group.value) return;
+  subKeyUsageLoading.value = true;
+  subKeyUsageError.value = '';
+  try {
+    const start = new Date(subKeyDateStart.value).toISOString();
+    const end = new Date(`${subKeyDateEnd.value}T23:59:59.999Z`).toISOString();
+    const result = await groupsStore.fetchTokenUsageByKey(group.value.id, { start, end });
+    subKeyUsageData.value = result.keys;
+  } catch {
+    subKeyUsageError.value = 'Failed to load sub-key usage data';
+  } finally {
+    subKeyUsageLoading.value = false;
+  }
+}
 
 async function loadSpam() {
   if (!group.value) return;
@@ -1663,9 +1877,20 @@ watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } });
   if (tab === 'keys' && subKeys.value.length === 0) loadSubKeys();
   if (tab === 'allowed-models') loadAllowedModels();
-  if (tab === 'token-usage') loadTokenUsage();
+  if (tab === 'token-usage') {
+    loadTokenUsage();
+    if (tokenUsageChildTab.value === 'by-sub-key' && subKeyUsageData.value.length === 0) {
+      loadSubKeyUsage();
+    }
+  }
   if (tab === 'spam') loadSpam();
   if (tab === 'user-agents') loadUserAgents();
+});
+
+watch(tokenUsageChildTab, (childTab) => {
+  if (childTab === 'by-sub-key' && subKeyUsageData.value.length === 0) {
+    loadSubKeyUsage();
+  }
 });
 
 function onCbFieldClear(field: 'cb_max_failures' | 'cb_window_seconds' | 'cb_cooldown_seconds') {
@@ -2098,11 +2323,14 @@ async function loadKeySubscriptions(keyId: string, page?: number, limit?: number
   const pg = subPagination.value[keyId] || { page: 1, rowsPerPage: 10, rowsNumber: 0 };
   const p = page ?? pg.page;
   const l = limit ?? pg.rowsPerPage;
+  keySubsLoading.value[keyId] = true;
   try {
     const { data } = await api.get<{ data: KeySubscription[]; total: number; page: number; total_pages: number }>(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions`, { params: { page: p, limit: l } });
     keySubscriptions.value[keyId] = { data: data.data, total: data.total };
     subPagination.value[keyId] = { page: data.page, rowsPerPage: l, rowsNumber: data.total };
-  } catch { /* ignore */ }
+  } catch { /* ignore */ } finally {
+    keySubsLoading.value[keyId] = false;
+  }
 }
 
 function onSubPaginationRequest(keyId: string, req: { pagination: { page: number; rowsPerPage: number } }) {
@@ -2372,6 +2600,19 @@ async function onSaveRates() {
     $q.notify({ type: 'negative', message: msg });
   } finally {
     savingRate.value = false;
+  }
+}
+
+function subKeyRowKey(row: KeyTokenUsage) {
+  return row.group_key_id ?? '__null__';
+}
+
+function onExpandSubKeyUsageRow(props: { expand: boolean; row: KeyTokenUsage }) {
+  if (props.row.group_key_id == null) return;
+  props.expand = !props.expand;
+  if (props.expand) {
+    loadKeySubscriptions(props.row.group_key_id);
+    loadActivePlans();
   }
 }
 

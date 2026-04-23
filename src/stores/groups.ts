@@ -111,6 +111,23 @@ export interface TokenUsageStats {
   servers: ServerTokenUsage[];
 }
 
+export interface KeyTokenUsage {
+  group_key_id: string | null;
+  key_name: string | null;
+  api_key: string | null;
+  created_at: string | null;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
+  request_count: number;
+  cost_usd: number | null;
+}
+
+export interface KeyUsageResponse {
+  keys: KeyTokenUsage[];
+}
+
 export interface SpamResult {
   group_key_id: string;
   api_key: string;
@@ -281,6 +298,18 @@ export const useGroupsStore = defineStore('groups', () => {
     return data;
   }
 
+  async function fetchTokenUsageByKey(
+    groupId: string,
+    params?: { start?: string; end?: string; period?: string },
+  ) {
+    const qp: Record<string, string> = { group_id: groupId };
+    if (params?.start) qp.start = params.start;
+    if (params?.end) qp.end = params.end;
+    if (params?.period) qp.period = params.period;
+    const { data } = await api.get<KeyUsageResponse>('/api/admin/token-usage/by-key', { params: qp });
+    return data;
+  }
+
   async function fetchGroupKeys(
     groupId: string,
     params?: { page?: number; limit?: number; search?: string },
@@ -405,7 +434,7 @@ export const useGroupsStore = defineStore('groups', () => {
     fetchGroups, getGroup, createGroup, updateGroup, deleteGroup, regenerateKey,
     bulkActivate, bulkDeactivate, bulkDelete, bulkAssignServer,
     assignServer, updateAssignment, removeServer, reorderServers,
-    fetchTtftStats, fetchCircuitStatus, fetchTokenUsageStats,
+    fetchTtftStats, fetchCircuitStatus, fetchTokenUsageStats, fetchTokenUsageByKey,
     fetchGroupKeys, createGroupKey, updateGroupKey, regenerateGroupKey, bulkCreateGroupKeys, fetchKeyUsage,
     fetchGroupAllowedModels, addGroupAllowedModel, removeGroupAllowedModel,
     fetchKeyAllowedModels, addKeyAllowedModel, removeKeyAllowedModel,
