@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Subscriptions section in expanded sub-key row
 The expanded sub-key row in GroupDetailPage Keys tab SHALL display a "Subscriptions" section positioned before the SubKeyUsage component. It SHALL show a table of all subscriptions for that key.
@@ -69,4 +69,3 @@ Each subscription status SHALL be displayed with a colored badge: active (green)
 #### Scenario: Status display
 - **WHEN** a subscription has status "active"
 - **THEN** the status SHALL be displayed as a green badge with text "active"
-

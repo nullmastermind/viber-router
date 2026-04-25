@@ -45,10 +45,50 @@ async fn assign_subscription(
     Path((_group_id, key_id)): Path<(Uuid, Uuid)>,
     Json(input): Json<AssignSubscription>,
 ) -> Result<(StatusCode, Json<KeySubscription>), ApiError> {
+    // Detect bonus creation path: has bonus fields, no plan_id
+    if input.bonus_name.is_some() || input.bonus_base_url.is_some() || input.bonus_api_key.is_some() {
+        // Validate required bonus fields
+        let bonus_name = input.bonus_name.as_deref().filter(|s| !s.is_empty())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_name is required"))?;
+        let bonus_base_url = input.bonus_base_url.as_deref().filter(|s| !s.is_empty())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_base_url is required"))?;
+        let bonus_api_key = input.bonus_api_key.as_deref().filter(|s| !s.is_empty())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_api_key is required"))?;
+
+        let sub = sqlx::query_as::<_, KeySubscription>(
+            "INSERT INTO key_subscriptions \
+             (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, \
+              reset_hours, duration_days, rpm_limit, bonus_name, bonus_base_url, bonus_api_key, \
+              bonus_quota_url, bonus_quota_headers) \
+             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, $2, $3, $4, $5, $6) \
+             RETURNING *",
+        )
+        .bind(key_id)
+        .bind(bonus_name)
+        .bind(bonus_base_url)
+        .bind(bonus_api_key)
+        .bind(&input.bonus_quota_url)
+        .bind(&input.bonus_quota_headers)
+        .fetch_one(&state.db)
+        .await
+        .map_err(internal)?;
+
+        // Invalidate subscription list cache
+        if let Ok(mut conn) = state.redis.get().await {
+            let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+        }
+
+        return Ok((StatusCode::CREATED, Json(sub)));
+    }
+
+    // Standard plan-based creation
+    let plan_id = input.plan_id
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Either plan_id or bonus fields (bonus_name, bonus_base_url, bonus_api_key) are required"))?;
+
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
         "SELECT * FROM subscription_plans WHERE id = $1",
     )
-    .bind(input.plan_id)
+    .bind(plan_id)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

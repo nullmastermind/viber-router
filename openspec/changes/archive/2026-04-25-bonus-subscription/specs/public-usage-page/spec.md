@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Public usage page routes
 The system SHALL provide a public page at `/usage` (with key input form) and `/usage/:key` (direct link). Both routes MUST be accessible without admin login.

@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Public usage endpoint
 The system SHALL expose `GET /api/public/usage?key=<sub-key>` that accepts a sub-key and returns usage and subscription data without admin authentication. For bonus subscriptions, the response SHALL include `bonus_name`, `bonus_quotas` (fetched from `bonus_quota_url` if set, null otherwise), and `bonus_usage` (per-model request counts from the last 30 days).

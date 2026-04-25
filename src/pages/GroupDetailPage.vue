@@ -280,6 +280,7 @@
                         <div class="row items-center q-mb-xs">
                           <div class="text-subtitle2">Subscriptions</div>
                           <q-space />
+                          <q-btn flat dense icon="bolt" label="Add Bonus" color="secondary" class="q-mr-xs" @click.stop="onOpenAddBonus(props.row.id)" />
                           <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
                             <q-menu>
                               <q-list dense style="min-width: 200px">
@@ -314,7 +315,14 @@
                           </template>
                           <template #body-cell-cost_used="sProps">
                             <q-td :props="sProps">
-                              ${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}
+                              <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                              <template v-else>${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}</template>
+                            </q-td>
+                          </template>
+                          <template #body-cell-cost_limit_usd="sProps">
+                            <q-td :props="sProps">
+                              <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                              <template v-else>${{ sProps.row.cost_limit_usd.toFixed(2) }}</template>
                             </q-td>
                           </template>
                           <template #body-cell-actions="sProps">
@@ -600,6 +608,7 @@
                           <div class="row items-center q-mb-xs">
                             <div class="text-subtitle2">Subscriptions</div>
                             <q-space />
+                            <q-btn flat dense icon="bolt" label="Add Bonus" color="secondary" class="q-mr-xs" @click.stop="onOpenAddBonus(props.row.group_key_id ?? '')" />
                             <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
                               <q-menu>
                                 <q-list dense style="min-width: 200px">
@@ -634,7 +643,14 @@
                             </template>
                             <template #body-cell-cost_used="sProps">
                               <q-td :props="sProps">
-                                ${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}
+                                <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                                <template v-else>${{ sProps.row.cost_used.toFixed(2) }} / ${{ sProps.row.cost_limit_usd.toFixed(2) }}{{ sProps.row.sub_type === 'hourly_reset' ? ' (window)' : '' }}</template>
+                              </q-td>
+                            </template>
+                            <template #body-cell-cost_limit_usd="sProps">
+                              <q-td :props="sProps">
+                                <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                                <template v-else>${{ sProps.row.cost_limit_usd.toFixed(2) }}</template>
                               </q-td>
                             </template>
                             <template #body-cell-actions="sProps">
@@ -1123,6 +1139,59 @@
           </q-card-actions>
         </q-card>
       </q-dialog>
+
+      <!-- Add Bonus Subscription Dialog -->
+      <q-dialog v-model="showAddBonusDialog" persistent>
+        <q-card style="width: 480px">
+          <q-card-section>
+            <div class="text-h6">Add Bonus Subscription</div>
+          </q-card-section>
+          <q-card-section class="q-gutter-sm">
+            <q-input
+              v-model="addBonusForm.bonus_name"
+              label="Name *"
+              outlined
+              dense
+              placeholder="My Bonus Server"
+            />
+            <q-input
+              v-model="addBonusForm.bonus_base_url"
+              label="Base URL *"
+              outlined
+              dense
+              placeholder="https://api.anthropic.com"
+            />
+            <q-input
+              v-model="addBonusForm.bonus_api_key"
+              label="API Key *"
+              outlined
+              dense
+              type="password"
+              placeholder="sk-ant-..."
+            />
+            <q-input
+              v-model="addBonusForm.bonus_quota_url"
+              label="Quota Check URL (optional)"
+              outlined
+              dense
+              placeholder="https://example.com/quota"
+            />
+            <q-input
+              v-model="addBonusForm.bonus_quota_headers"
+              label="Quota Headers (optional JSON, e.g. {&quot;Authorization&quot;: &quot;Bearer token&quot;})"
+              outlined
+              dense
+              type="textarea"
+              placeholder="{}"
+              :rows="3"
+            />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" label="Add Bonus" :loading="addBonusLoading" @click="onSubmitAddBonus" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
     </div>
     <div v-else class="flex flex-center" style="min-height: 200px">
       <q-spinner size="lg" />
@@ -1329,6 +1398,11 @@ interface KeySubscription {
   expires_at: string | null;
   created_at: string;
   cost_used: number;
+  bonus_name: string | null;
+  bonus_base_url: string | null;
+  bonus_api_key: string | null;
+  bonus_quota_url: string | null;
+  bonus_quota_headers: Record<string, string> | null;
 }
 interface SubscriptionPlan {
   id: string;
@@ -1342,7 +1416,20 @@ const keySubsLoading = ref<Record<string, boolean>>({});
 const subPagination = ref<Record<string, { page: number; rowsPerPage: number; rowsNumber: number }>>({});
 const activePlans = ref<SubscriptionPlan[]>([]);
 
+// Add Bonus dialog state
+const showAddBonusDialog = ref(false);
+const addBonusKeyId = ref('');
+const addBonusForm = ref({
+  bonus_name: '',
+  bonus_base_url: 'https://api.anthropic.com',
+  bonus_api_key: '',
+  bonus_quota_url: '',
+  bonus_quota_headers: '',
+});
+const addBonusLoading = ref(false);
+
 const subColumns = [
+  { name: 'plan_name', label: 'Plan', field: (row: KeySubscription) => row.bonus_name ?? (row.plan_id ? 'Plan' : '—'), align: 'left' as const },
   { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Budget', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
   { name: 'cost_used', label: 'Used', field: 'cost_used', align: 'right' as const },
@@ -2354,6 +2441,64 @@ async function onAssignSubscription(keyId: string, planId: string) {
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to assign';
     $q.notify({ type: 'negative', message: msg });
+  }
+}
+
+function onOpenAddBonus(keyId: string) {
+  addBonusKeyId.value = keyId;
+  addBonusForm.value = {
+    bonus_name: '',
+    bonus_base_url: 'https://api.anthropic.com',
+    bonus_api_key: '',
+    bonus_quota_url: '',
+    bonus_quota_headers: '',
+  };
+  showAddBonusDialog.value = true;
+}
+
+async function onSubmitAddBonus() {
+  if (!group.value) return;
+  if (!addBonusForm.value.bonus_name.trim()) {
+    $q.notify({ type: 'negative', message: 'Name is required' });
+    return;
+  }
+  if (!addBonusForm.value.bonus_base_url.trim()) {
+    $q.notify({ type: 'negative', message: 'Base URL is required' });
+    return;
+  }
+  if (!addBonusForm.value.bonus_api_key.trim()) {
+    $q.notify({ type: 'negative', message: 'API Key is required' });
+    return;
+  }
+
+  // Parse quota headers JSON if provided
+  let bonus_quota_headers: Record<string, string> | null = null;
+  if (addBonusForm.value.bonus_quota_headers.trim()) {
+    try {
+      bonus_quota_headers = JSON.parse(addBonusForm.value.bonus_quota_headers.trim());
+    } catch {
+      $q.notify({ type: 'negative', message: 'Quota Headers must be valid JSON' });
+      return;
+    }
+  }
+
+  addBonusLoading.value = true;
+  try {
+    await api.post(`/api/admin/groups/${group.value.id}/keys/${addBonusKeyId.value}/subscriptions`, {
+      bonus_name: addBonusForm.value.bonus_name.trim(),
+      bonus_base_url: addBonusForm.value.bonus_base_url.trim(),
+      bonus_api_key: addBonusForm.value.bonus_api_key.trim(),
+      bonus_quota_url: addBonusForm.value.bonus_quota_url.trim() || null,
+      bonus_quota_headers,
+    });
+    showAddBonusDialog.value = false;
+    loadKeySubscriptions(addBonusKeyId.value);
+    $q.notify({ type: 'positive', message: 'Bonus subscription added' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to add bonus';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    addBonusLoading.value = false;
   }
 }
 

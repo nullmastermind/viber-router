@@ -141,8 +141,67 @@
         <div class="text-subtitle1 q-mb-sm">Subscriptions</div>
         <div v-if="!data.subscriptions.length" class="text-caption q-mb-lg" style="color: var(--vr-text-secondary)">No subscriptions</div>
         <div v-else class="q-mb-lg">
+          <!-- Bonus subscription cards -->
           <q-card
-            v-for="sub in sortedSubscriptions"
+            v-for="sub in bonusSubscriptions"
+            :key="sub.id"
+            bordered flat
+            class="q-mb-sm"
+            :style="sub.status !== 'active' ? 'opacity: 0.6' : ''"
+          >
+            <q-card-section>
+              <div class="row items-center q-mb-sm">
+                <q-icon name="bolt" color="secondary" size="sm" class="q-mr-xs" />
+                <span class="text-weight-medium q-mr-sm">{{ sub.bonus_name || 'Bonus' }}</span>
+                <q-badge :color="subStatusColor(sub.status)" :label="sub.status" />
+                <q-space />
+                <span class="text-caption" style="color: var(--vr-text-secondary)">Bonus</span>
+              </div>
+
+              <!-- Quota section -->
+              <template v-if="sub.bonus_quotas !== null">
+                <div v-if="sub.bonus_quotas.length === 0" class="text-caption q-mb-sm" style="color: var(--vr-text-secondary)">
+                  Quota info unavailable
+                </div>
+                <div v-else class="q-mb-sm">
+                  <div v-for="quota in sub.bonus_quotas" :key="quota.name" class="q-mb-sm">
+                    <div class="row items-center q-mb-xs">
+                      <span class="text-caption text-weight-medium q-mr-sm">{{ quota.name }}</span>
+                      <span class="text-caption" style="color: var(--vr-text-secondary)">{{ Math.round(quota.utilization * 100) }}%</span>
+                      <q-space />
+                      <span v-if="quota.reset_at" class="text-caption" style="color: var(--vr-text-secondary)">
+                        Resets in {{ formatCountdown(quota.reset_at) }}
+                      </span>
+                    </div>
+                    <q-linear-progress
+                      :value="quota.utilization"
+                      :color="quota.utilization > 0.9 ? 'negative' : 'primary'"
+                      rounded
+                      size="8px"
+                      :aria-label="`${quota.name} quota usage`"
+                      :aria-valuenow="Math.round(quota.utilization * 100)"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                    />
+                    <div v-if="quota.description" class="text-caption q-mt-xs" style="color: var(--vr-text-secondary)">{{ quota.description }}</div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Bonus usage by model -->
+              <div v-if="sub.bonus_usage && sub.bonus_usage.length > 0" class="text-caption">
+                <div class="text-weight-medium q-mb-xs">Usage (last 30 days)</div>
+                <div v-for="usage in sub.bonus_usage" :key="usage.model" class="row">
+                  <span class="q-mr-sm" style="color: var(--vr-text-secondary)">{{ usage.model }}</span>
+                  <span>{{ usage.request_count }} requests</span>
+                </div>
+              </div>
+            </q-card-section>
+          </q-card>
+
+          <!-- Non-bonus subscription cards -->
+          <q-card
+            v-for="sub in nonBonusSubscriptions"
             :key="sub.id"
             bordered flat
             class="q-mb-sm"
@@ -428,6 +487,18 @@ interface ModelUsage {
   cost_usd: number | null;
 }
 
+interface QuotaInfo {
+  name: string;
+  utilization: number;
+  reset_at: string | null;
+  description: string | null;
+}
+
+interface BonusModelUsage {
+  model: string;
+  request_count: number;
+}
+
 interface Subscription {
   id: string;
   sub_type: string;
@@ -438,6 +509,9 @@ interface Subscription {
   window_reset_at: string | null;
   activated_at: string | null;
   expires_at: string | null;
+  bonus_name: string | null;
+  bonus_quotas: QuotaInfo[] | null;
+  bonus_usage: BonusModelUsage[] | null;
 }
 
 interface UsageData {
@@ -655,6 +729,14 @@ const sortedSubscriptions = computed(() => {
     return 0;
   });
 });
+
+const bonusSubscriptions = computed(() =>
+  sortedSubscriptions.value.filter((s) => s.sub_type === 'bonus'),
+);
+
+const nonBonusSubscriptions = computed(() =>
+  sortedSubscriptions.value.filter((s) => s.sub_type !== 'bonus'),
+);
 
 const formatCompact = (v: number) =>
   new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(v);

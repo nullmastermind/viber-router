@@ -790,6 +790,7 @@ async fn proxy_handler(
 
     // Subscription budget check (only for sub-keys on billing endpoints)
     let mut selected_subscription_id: Option<uuid::Uuid> = None;
+    let mut bonus_servers_to_try: Vec<crate::subscription::BonusServer> = Vec::new();
     if is_billing_endpoint(&request_path)
         && let Some(group_key_id) = config.group_key_id
     {
@@ -815,6 +816,16 @@ async fn proxy_handler(
                     "Subscription limit exceeded",
                 );
             }
+            crate::subscription::SubCheckResult::BonusServers { servers, fallback_subscription } => {
+                bonus_servers_to_try = servers;
+                // If there is a fallback non-bonus subscription, pre-select it and increment RPM
+                if let Some((sub_id, rpm_limit)) = fallback_subscription {
+                    selected_subscription_id = Some(sub_id);
+                    if let Some(rpm) = rpm_limit {
+                        crate::subscription::increment_rpm(&state, sub_id, rpm).await;
+                    }
+                }
+            }
         }
     }
 
@@ -833,6 +844,127 @@ async fn proxy_handler(
     let mut failover_chain: Vec<FailoverAttempt> = Vec::new();
     let mut last_server_id = uuid::Uuid::nil();
     let mut last_server_name = String::new();
+
+    // Bonus server waterfall: try each bonus server in FIFO order before group servers
+    for bonus_server in &bonus_servers_to_try {
+        let upstream_url = format!(
+            "{}/v1/messages",
+            bonus_server.base_url.trim_end_matches('/')
+        );
+
+        let mut bonus_req = client.post(&upstream_url);
+        // Forward original headers except auth/host/content-length
+        for (name, value) in headers.iter() {
+            if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                continue;
+            }
+            if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+            {
+                bonus_req = bonus_req.header(reqwest_name, reqwest_value);
+            }
+        }
+        bonus_req = bonus_req.header("x-api-key", &bonus_server.api_key);
+        bonus_req = bonus_req.header("authorization", format!("Bearer {}", bonus_server.api_key));
+        bonus_req = bonus_req.body(body_bytes.clone());
+
+        let bonus_start = std::time::Instant::now();
+        match bonus_req.send().await {
+            Ok(resp) => {
+                let bonus_status = resp.status().as_u16();
+                if resp.status().is_success() {
+                    // 2xx from bonus server — log usage and return immediately
+                    let bonus_sub_id = bonus_server.subscription_id;
+                    let is_sse = resp
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|ct| ct.contains("text/event-stream"));
+
+                    let resp_status_code = StatusCode::from_u16(bonus_status)
+                        .unwrap_or(StatusCode::OK);
+                    let mut response_headers = HeaderMap::new();
+                    for (name, value) in resp.headers().iter() {
+                        if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                            && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
+                        {
+                            response_headers.insert(axum_name, axum_value);
+                        }
+                    }
+
+                    if is_sse {
+                        let stream = resp.bytes_stream();
+                        let first_chunk_stream = stream.map(|chunk| chunk.map_err(std::io::Error::other));
+                        let parser = AnyParser::Anthropic(SseUsageParser::new());
+                        let body = Body::from_stream(wrap_stream_with_usage_tracking(
+                            first_chunk_stream, state.clone(),
+                            config.group_id, uuid::Uuid::nil(),
+                            request_model.clone(), false, None, config.group_key_id,
+                            Some(bonus_sub_id),
+                            1.0, 1.0, 1.0, 1.0, false,
+                            parser,
+                        ));
+                        let mut resp_builder = Response::builder().status(resp_status_code);
+                        *resp_builder.headers_mut().unwrap() = response_headers;
+                        return resp_builder.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    } else {
+                        let body_bytes_resp = resp.bytes().await.unwrap_or_default();
+                        // Extract token usage for logging
+                        if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes_resp)
+                            && let Some(usage) = json.get("usage")
+                        {
+                            let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                            let out = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                            let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                            let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                            if let (Some(inp), Some(out)) = (inp, out) {
+                                let entry = crate::usage_buffer::TokenUsageEntry {
+                                    group_id: config.group_id,
+                                    server_id: uuid::Uuid::nil(),
+                                    model: request_model.clone(),
+                                    input_tokens: inp,
+                                    output_tokens: out,
+                                    cache_creation_tokens: cc,
+                                    cache_read_tokens: cr,
+                                    is_dynamic_key: false,
+                                    key_hash: None,
+                                    group_key_id: config.group_key_id,
+                                    cost_usd: None,
+                                    subscription_id: Some(bonus_sub_id),
+                                    created_at: Utc::now(),
+                                    content_hash: content_hash.clone(),
+                                };
+                                if state.usage_tx.try_send(entry).is_err() {
+                                    tracing::warn!("Usage buffer full, dropping bonus token usage entry");
+                                }
+                            }
+                        }
+                        let mut resp_builder = Response::builder().status(resp_status_code);
+                        *resp_builder.headers_mut().unwrap() = response_headers;
+                        return resp_builder.body(axum::body::Body::from(body_bytes_resp))
+                            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    }
+                } else {
+                    // Non-2xx from bonus server — log and continue to next bonus server
+                    tracing::warn!(
+                        bonus_name = %bonus_server.name,
+                        status = bonus_status,
+                        latency_ms = bonus_start.elapsed().as_millis() as i32,
+                        "Bonus server returned non-2xx, trying next"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    bonus_name = %bonus_server.name,
+                    error = %e,
+                    "Bonus server connection error, trying next"
+                );
+            }
+        }
+    }
+    // After all bonus servers exhausted: selected_subscription_id is already set to fallback (or None)
+    // Proceed to group server waterfall below
 
     // Count-tokens default server: try before the failover waterfall
     let is_count_tokens = request_path == "/v1/messages/count_tokens";
@@ -1977,39 +2109,44 @@ where
                                 .fetch_one(&state.db)
                                 .await
                                 {
-                                    let cost = if sub.sub_type == "pay_per_request" {
-                                        sub.model_request_costs
-                                            .as_object()
-                                            .and_then(|m| m.get(model_name.as_str()))
-                                            .and_then(|v| v.as_f64())
-                                            .unwrap_or(0.0)
+                                    // Bonus subscriptions: no cost tracking, no activation
+                                    if sub.sub_type == "bonus" {
+                                        None
                                     } else {
-                                        let pricing_cache = state.pricing_cache.read().await;
-                                        if let Some(pricing) = pricing_cache.get(model_name) {
-                                            let c = crate::subscription::calculate_cost(
-                                                pricing,
-                                                rate_input, rate_output,
-                                                rate_cache_write, rate_cache_read,
-                                                input_tokens, output_tokens,
-                                                cache_creation_tokens, cache_read_tokens,
-                                                normalize_cache_read,
-                                            );
-                                            drop(pricing_cache);
-                                            c
+                                        let cost = if sub.sub_type == "pay_per_request" {
+                                            sub.model_request_costs
+                                                .as_object()
+                                                .and_then(|m| m.get(model_name.as_str()))
+                                                .and_then(|v| v.as_f64())
+                                                .unwrap_or(0.0)
                                         } else {
-                                            drop(pricing_cache);
-                                            0.0
-                                        }
-                                    };
+                                            let pricing_cache = state.pricing_cache.read().await;
+                                            if let Some(pricing) = pricing_cache.get(model_name) {
+                                                let c = crate::subscription::calculate_cost(
+                                                    pricing,
+                                                    rate_input, rate_output,
+                                                    rate_cache_write, rate_cache_read,
+                                                    input_tokens, output_tokens,
+                                                    cache_creation_tokens, cache_read_tokens,
+                                                    normalize_cache_read,
+                                                );
+                                                drop(pricing_cache);
+                                                c
+                                            } else {
+                                                drop(pricing_cache);
+                                                0.0
+                                            }
+                                        };
 
-                                    crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
+                                        crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
 
-                                    crate::subscription::update_cost_counters(
-                                        &state, sub_id, model_name, cost,
-                                        sub.reset_hours,
-                                    ).await;
+                                        crate::subscription::update_cost_counters(
+                                            &state, sub_id, model_name, cost,
+                                            sub.reset_hours,
+                                        ).await;
 
-                                    Some(cost)
+                                        Some(cost)
+                                    }
                                 } else {
                                     None
                                 }

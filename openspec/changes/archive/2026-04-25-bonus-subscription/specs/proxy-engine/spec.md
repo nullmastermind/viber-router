@@ -155,6 +155,18 @@ The system SHALL support streaming responses. When the upstream server returns a
 - **WHEN** a server has `retry_status_codes=[503], retry_count=3` and the second retry returns a status NOT in `retry_status_codes` (e.g., 200)
 - **THEN** the system SHALL stop retrying and use that response immediately
 
+#### Scenario: Bonus server succeeds — group waterfall skipped
+- **WHEN** subscription check returns `BonusServers` and the first bonus server returns HTTP 200
+- **THEN** the proxy SHALL return the response immediately without entering the group server waterfall
+
+#### Scenario: All bonus servers fail — proceed to group waterfall with fallback
+- **WHEN** subscription check returns `BonusServers` with `fallback_subscription: Some(sub_id, rpm_limit)` and all bonus servers return non-2xx
+- **THEN** the proxy SHALL enter the group server waterfall with `selected_subscription_id = sub_id`
+
+#### Scenario: All bonus servers fail — no fallback, group waterfall without subscription
+- **WHEN** subscription check returns `BonusServers` with `fallback_subscription: None` and all bonus servers return non-2xx
+- **THEN** the proxy SHALL enter the group server waterfall without subscription tracking
+
 ### Requirement: Active hours skip condition in proxy failover
 Before attempting each server in the failover waterfall, after existing skip conditions (circuit breaker, rate limit, token thresholds, per-server model filter), the proxy SHALL evaluate the server's active hours configuration. If all three fields (`active_hours_start`, `active_hours_end`, `active_hours_timezone`) are present (non-null), the proxy SHALL parse the timezone using the `chrono-tz` crate, obtain the current local time in that timezone, and determine whether the current time falls within the configured window. If the current time is outside the window, the proxy SHALL skip the server and continue to the next one. If any of the three fields is absent, or if the timezone string cannot be parsed, the proxy SHALL skip the active hours check and treat the server as always active (fail-open), emitting a `warn!` log if the timezone is unparseable.
 

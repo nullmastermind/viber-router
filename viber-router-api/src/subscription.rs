@@ -51,6 +51,14 @@ async fn ensure_window_start(state: &AppState, sub_id: Uuid, reset_hours: i32) -
     val?.parse::<i64>().ok()
 }
 
+/// A bonus server extracted from a bonus subscription.
+pub struct BonusServer {
+    pub subscription_id: Uuid,
+    pub base_url: String,
+    pub api_key: String,
+    pub name: String,
+}
+
 /// Result of the pre-request subscription check.
 pub enum SubCheckResult {
     /// A subscription was selected for charging.
@@ -60,6 +68,12 @@ pub enum SubCheckResult {
     },
     /// All subscriptions are blocked (exhausted/expired/cancelled or per-model limit hit).
     Blocked,
+    /// One or more bonus subscriptions are active. Try bonus servers first, then fall back.
+    BonusServers {
+        servers: Vec<BonusServer>,
+        /// The non-bonus subscription to charge if all bonus servers fail (sub_id, rpm_limit).
+        fallback_subscription: Option<(Uuid, Option<f64>)>,
+    },
 }
 
 /// Load active subscriptions for a key, using Redis cache with DB fallback.
@@ -263,8 +277,13 @@ pub async fn check_subscriptions(
         return SubCheckResult::Blocked;
     }
 
+    // Separate bonus subs from non-bonus subs
+    let (bonus_subs, non_bonus_subs): (Vec<_>, Vec<_>) =
+        active.into_iter().partition(|s| s.sub_type == "bonus");
+
+    // Run existing non-bonus logic on non-bonus subs to derive fallback_subscription
     // Sort: hourly_reset first, then pay_per_request, then fixed, FIFO within same type
-    let mut sorted = active;
+    let mut sorted = non_bonus_subs;
     sorted.sort_by(|a, b| {
         let type_order = |t: &str| -> u8 {
             match t {
@@ -280,6 +299,7 @@ pub async fn check_subscriptions(
 
     let now = Utc::now();
 
+    let mut fallback_subscription: Option<(Uuid, Option<f64>)> = None;
     for sub in &sorted {
         // Check expiration
         if let Some(expires_at) = sub.expires_at
@@ -355,14 +375,42 @@ pub async fn check_subscriptions(
             continue;
         }
 
-        // This subscription has budget — select it
-        return SubCheckResult::Allowed {
-            subscription_id: sub.id,
-            rpm_limit: sub.rpm_limit,
+        // This non-bonus subscription has budget — it's the fallback
+        fallback_subscription = Some((sub.id, sub.rpm_limit));
+        break;
+    }
+
+    // Collect active bonus subs sorted by created_at ASC
+    let bonus_servers: Vec<BonusServer> = bonus_subs
+        .into_iter()
+        .filter_map(|sub| {
+            let base_url = sub.bonus_base_url?;
+            let api_key = sub.bonus_api_key?;
+            let name = sub.bonus_name.unwrap_or_default();
+            Some(BonusServer {
+                subscription_id: sub.id,
+                base_url,
+                api_key,
+                name,
+            })
+        })
+        .collect();
+    // bonus_servers already ordered by created_at ASC from load_subscriptions (FIFO)
+
+    // If non-empty bonus subs — return BonusServers
+    if !bonus_servers.is_empty() {
+        return SubCheckResult::BonusServers {
+            servers: bonus_servers,
+            fallback_subscription,
         };
     }
 
-    SubCheckResult::Blocked
+    // No bonus subs — return existing result based on fallback_subscription
+    if let Some((sub_id, rpm_limit)) = fallback_subscription {
+        SubCheckResult::Allowed { subscription_id: sub_id, rpm_limit }
+    } else {
+        SubCheckResult::Blocked
+    }
 }
 
 /// Handle lazy activation for a subscription.
@@ -519,6 +567,200 @@ pub fn compute_rpm_window(rpm: f64) -> (i64, i64) {
         (window, 1)
     } else {
         (60, rpm.floor() as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routes::ModelPricing;
+
+    #[test]
+    fn test_compute_rpm_window_above_one() {
+        assert_eq!(compute_rpm_window(5.0), (60, 5));
+        assert_eq!(compute_rpm_window(1.0), (60, 1));
+        assert_eq!(compute_rpm_window(10.5), (60, 10));
+    }
+
+    #[test]
+    fn test_compute_rpm_window_below_one() {
+        assert_eq!(compute_rpm_window(0.5), (120, 1));
+        assert_eq!(compute_rpm_window(0.1), (600, 1));
+    }
+
+    #[test]
+    fn test_calculate_cost_basic() {
+        let pricing = ModelPricing {
+            input_1m_usd: 3.0,
+            output_1m_usd: 15.0,
+            cache_write_1m_usd: 3.75,
+            cache_read_1m_usd: 0.30,
+        };
+        let cost = calculate_cost(
+            &pricing,
+            1.0, 1.0, 1.0, 1.0, // rates = 1x
+            1000, 500, None, None, false,
+        );
+        // input: 1000 * 3.0 / 1M = 0.003
+        // output: 500 * 15.0 / 1M = 0.0075
+        let expected = (1000.0 * 3.0 + 500.0 * 15.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_cost_with_cache_tokens() {
+        let pricing = ModelPricing {
+            input_1m_usd: 3.0,
+            output_1m_usd: 15.0,
+            cache_write_1m_usd: 3.75,
+            cache_read_1m_usd: 0.30,
+        };
+        let cost = calculate_cost(
+            &pricing,
+            1.0, 1.0, 1.0, 1.0,
+            1000, 500, Some(200), Some(300), false,
+        );
+        let expected = (1000.0 * 3.0 + 500.0 * 15.0 + 200.0 * 3.75 + 300.0 * 0.30) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_cost_with_rates() {
+        let pricing = ModelPricing {
+            input_1m_usd: 3.0,
+            output_1m_usd: 15.0,
+            cache_write_1m_usd: 3.75,
+            cache_read_1m_usd: 0.30,
+        };
+        let cost = calculate_cost(
+            &pricing,
+            0.5, 2.0, 1.0, 1.0, // input at 50%, output at 200%
+            1000, 500, None, None, false,
+        );
+        let expected = (1000.0 * 3.0 * 0.5 + 500.0 * 15.0 * 2.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_cost_normalize_cache_read() {
+        let pricing = ModelPricing {
+            input_1m_usd: 3.0,
+            output_1m_usd: 15.0,
+            cache_write_1m_usd: 3.75,
+            cache_read_1m_usd: 0.30,
+        };
+        // With normalize_cache_read=true, cache_read uses input price instead
+        let cost = calculate_cost(
+            &pricing,
+            1.0, 1.0, 1.0, 1.0,
+            1000, 500, None, Some(300), true,
+        );
+        // cache_read: 300 * input_1m_usd(3.0) * rate_input(1.0) instead of cache_read_1m_usd
+        let expected = (1000.0 * 3.0 + 500.0 * 15.0 + 300.0 * 3.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_bonus_server_from_key_subscription() {
+        let sub = KeySubscription {
+            id: Uuid::new_v4(),
+            group_key_id: Uuid::new_v4(),
+            plan_id: None,
+            sub_type: "bonus".to_string(),
+            cost_limit_usd: 0.0,
+            model_limits: serde_json::json!({}),
+            model_request_costs: serde_json::json!({}),
+            reset_hours: None,
+            duration_days: 36500,
+            rpm_limit: None,
+            status: "active".to_string(),
+            activated_at: None,
+            expires_at: None,
+            created_at: chrono::Utc::now(),
+            bonus_base_url: Some("https://api.anthropic.com".to_string()),
+            bonus_api_key: Some("sk-ant-test123".to_string()),
+            bonus_name: Some("Claude Code Max".to_string()),
+            bonus_quota_url: None,
+            bonus_quota_headers: None,
+        };
+
+        // Simulate the filter_map logic from check_subscriptions
+        let server = BonusServer {
+            subscription_id: sub.id,
+            base_url: sub.bonus_base_url.clone().unwrap(),
+            api_key: sub.bonus_api_key.clone().unwrap(),
+            name: sub.bonus_name.clone().unwrap_or_default(),
+        };
+
+        assert_eq!(server.base_url, "https://api.anthropic.com");
+        assert_eq!(server.api_key, "sk-ant-test123");
+        assert_eq!(server.name, "Claude Code Max");
+        assert_eq!(server.subscription_id, sub.id);
+    }
+
+    #[test]
+    fn test_bonus_server_skipped_when_missing_fields() {
+        let sub = KeySubscription {
+            id: Uuid::new_v4(),
+            group_key_id: Uuid::new_v4(),
+            plan_id: None,
+            sub_type: "bonus".to_string(),
+            cost_limit_usd: 0.0,
+            model_limits: serde_json::json!({}),
+            model_request_costs: serde_json::json!({}),
+            reset_hours: None,
+            duration_days: 36500,
+            rpm_limit: None,
+            status: "active".to_string(),
+            activated_at: None,
+            expires_at: None,
+            created_at: chrono::Utc::now(),
+            bonus_base_url: None,  // Missing!
+            bonus_api_key: Some("sk-ant-test123".to_string()),
+            bonus_name: Some("Broken Bonus".to_string()),
+            bonus_quota_url: None,
+            bonus_quota_headers: None,
+        };
+
+        // Simulate the filter_map — should return None due to missing base_url
+        let result = sub.bonus_base_url.as_ref().and_then(|base_url| {
+            sub.bonus_api_key.as_ref().map(|api_key| BonusServer {
+                subscription_id: sub.id,
+                base_url: base_url.clone(),
+                api_key: api_key.clone(),
+                name: sub.bonus_name.clone().unwrap_or_default(),
+            })
+        });
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_bonus_default_name_when_missing() {
+        let sub = KeySubscription {
+            id: Uuid::new_v4(),
+            group_key_id: Uuid::new_v4(),
+            plan_id: None,
+            sub_type: "bonus".to_string(),
+            cost_limit_usd: 0.0,
+            model_limits: serde_json::json!({}),
+            model_request_costs: serde_json::json!({}),
+            reset_hours: None,
+            duration_days: 36500,
+            rpm_limit: None,
+            status: "active".to_string(),
+            activated_at: None,
+            expires_at: None,
+            created_at: chrono::Utc::now(),
+            bonus_base_url: Some("https://api.example.com".to_string()),
+            bonus_api_key: Some("key-123".to_string()),
+            bonus_name: None, // Name is None
+            bonus_quota_url: None,
+            bonus_quota_headers: None,
+        };
+
+        let name = sub.bonus_name.unwrap_or_default();
+        assert_eq!(name, "");
     }
 }
 

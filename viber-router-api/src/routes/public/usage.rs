@@ -39,6 +39,20 @@ pub struct ModelUsage {
 }
 
 #[derive(Debug, Serialize)]
+pub struct QuotaInfo {
+    name: String,
+    utilization: f64,
+    reset_at: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BonusModelUsage {
+    model: String,
+    request_count: i64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct PublicSubscription {
     id: Uuid,
     sub_type: String,
@@ -49,6 +63,9 @@ pub struct PublicSubscription {
     window_reset_at: Option<String>,
     activated_at: Option<chrono::DateTime<chrono::Utc>>,
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    bonus_name: Option<String>,
+    bonus_quotas: Option<Vec<QuotaInfo>>,
+    bonus_usage: Option<Vec<BonusModelUsage>>,
 }
 
 fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -156,12 +173,54 @@ pub async fn public_usage(
 
     let mut subscriptions = Vec::with_capacity(subs.len());
     for sub in &subs {
-        let cost_used = if sub.status == "active" {
+        let is_bonus = sub.sub_type == "bonus";
+
+        let cost_used = if sub.status == "active" && !is_bonus {
             subscription::get_total_cost(&state, sub).await
         } else {
             0.0
         };
-        let window_reset_at = compute_window_reset_at(&state, sub).await;
+        let window_reset_at = if !is_bonus {
+            compute_window_reset_at(&state, sub).await
+        } else {
+            None
+        };
+
+        let (bonus_quotas, bonus_usage) = if is_bonus {
+            // Fetch per-model request counts for last 30 days
+            let usage_rows: Vec<(Option<String>, i64)> = sqlx::query_as(
+                "SELECT model, COUNT(*)::bigint as request_count \
+                 FROM token_usage_logs \
+                 WHERE subscription_id = $1 AND created_at >= now() - interval '30 days' \
+                 GROUP BY model ORDER BY model",
+            )
+            .bind(sub.id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+            let bonus_usage_data: Vec<BonusModelUsage> = usage_rows
+                .into_iter()
+                .filter_map(|(model, count)| {
+                    model.map(|m| BonusModelUsage { model: m, request_count: count })
+                })
+                .collect();
+
+            // Fetch quota data if bonus_quota_url is set
+            // None → null in JSON (no URL configured)
+            // Some([]) → empty array (fetch failed)
+            // Some([...]) → populated (fetch succeeded)
+            let quotas: Option<Vec<QuotaInfo>> = if let Some(ref quota_url) = sub.bonus_quota_url {
+                fetch_bonus_quotas(&state, quota_url, sub.bonus_quota_headers.as_ref()).await
+            } else {
+                None
+            };
+
+            (quotas, Some(bonus_usage_data))
+        } else {
+            (None, None)
+        };
+
         subscriptions.push(PublicSubscription {
             id: sub.id,
             sub_type: sub.sub_type.clone(),
@@ -172,6 +231,9 @@ pub async fn public_usage(
             window_reset_at,
             activated_at: sub.activated_at,
             expires_at: sub.expires_at,
+            bonus_name: sub.bonus_name.clone(),
+            bonus_quotas,
+            bonus_usage,
         });
     }
 
@@ -228,4 +290,62 @@ async fn compute_window_reset_at(
     let ws_dt = chrono::Utc.timestamp_opt(ws, 0).single()?;
     let reset_at = ws_dt + chrono::Duration::seconds((reset_hours as i64) * 3600);
     Some(reset_at.to_rfc3339())
+}
+
+/// Fetch quota data from a bonus_quota_url with a 5-second timeout.
+/// Returns None only if the quota URL was not set or request fails.
+/// Returns Some(vec) — empty vec on error, populated vec on success.
+async fn fetch_bonus_quotas(
+    state: &AppState,
+    quota_url: &str,
+    quota_headers: Option<&serde_json::Value>,
+) -> Option<Vec<QuotaInfo>> {
+    let mut req = state.http_client
+        .get(quota_url)
+        .timeout(std::time::Duration::from_secs(5));
+
+    // Apply custom headers if provided
+    if let Some(headers_val) = quota_headers
+        && let Some(obj) = headers_val.as_object()
+    {
+        for (key, val) in obj {
+            if let Some(val_str) = val.as_str()
+                && let (Ok(header_name), Ok(header_val)) = (
+                    reqwest::header::HeaderName::from_bytes(key.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(val_str),
+                )
+            {
+                req = req.header(header_name, header_val);
+            }
+        }
+    }
+
+    let resp = match req.send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(_) => return Some(vec![]),
+        Err(_) => return Some(vec![]),
+    };
+
+    let body: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return Some(vec![]),
+    };
+
+    let quotas_arr = match body.get("quotas").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return Some(vec![]),
+    };
+
+    let quotas: Vec<QuotaInfo> = quotas_arr
+        .iter()
+        .filter_map(|item| {
+            let name = item.get("name")?.as_str()?.to_string();
+            let utilization = item.get("utilization")?.as_f64()?;
+            let reset_at = item.get("reset_at").and_then(|v| v.as_str()).map(String::from);
+            let description = item.get("description").and_then(|v| v.as_str()).map(String::from);
+            Some(QuotaInfo { name, utilization, reset_at, description })
+        })
+        .collect();
+
+    Some(quotas)
 }

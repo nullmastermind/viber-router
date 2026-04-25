@@ -18,11 +18,21 @@ pub struct KeySubscription {
     pub activated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub bonus_base_url: Option<String>,
+    pub bonus_api_key: Option<String>,
+    pub bonus_name: Option<String>,
+    pub bonus_quota_url: Option<String>,
+    pub bonus_quota_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AssignSubscription {
-    pub plan_id: Uuid,
+    pub plan_id: Option<Uuid>,
+    pub bonus_name: Option<String>,
+    pub bonus_base_url: Option<String>,
+    pub bonus_api_key: Option<String>,
+    pub bonus_quota_url: Option<String>,
+    pub bonus_quota_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

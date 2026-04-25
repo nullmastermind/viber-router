@@ -19,6 +19,8 @@ export function getSubTypeLabel(subType: string): string {
       return 'Hourly Reset';
     case 'pay_per_request':
       return 'Pay Per Request';
+    case 'bonus':
+      return 'Bonus';
     default:
       return subType; // Fallback to raw value for unknown types
   }
@@ -35,6 +37,8 @@ export function getSubTypeTooltip(subType: string): string {
       return 'Budget resets every X hours. Usage counter resets at the start of each window.';
     case 'pay_per_request':
       return 'Each request costs a flat rate based on the model. Budget can optionally reset.';
+    case 'bonus':
+      return 'External API subscription with its own server. Tried before group servers.';
     default:
       return '';
   }
@@ -59,6 +63,11 @@ export function getSubTypeOptions(): SubTypeOption[] {
       label: 'Pay Per Request',
       value: 'pay_per_request',
       tooltip: 'Each request costs a flat rate based on the model. Budget can optionally reset.',
+    },
+    {
+      value: 'bonus',
+      label: 'Bonus',
+      tooltip: 'External API subscription with its own server. Tried before group servers.',
     },
   ];
 }
