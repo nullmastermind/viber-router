@@ -918,6 +918,16 @@ async fn proxy_handler(
                             let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
                             let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
                             if let (Some(inp), Some(out)) = (inp, out) {
+                                let cost_usd = if let Some(ref model_name) = request_model {
+                                    let pricing_cache = state.pricing_cache.read().await;
+                                    pricing_cache.get(model_name).map(|pricing| crate::subscription::calculate_cost(
+                                        pricing,
+                                        1.0, 1.0, 1.0, 1.0,
+                                        inp, out, cc, cr, false,
+                                    ))
+                                } else {
+                                    None
+                                };
                                 let entry = crate::usage_buffer::TokenUsageEntry {
                                     group_id: config.group_id,
                                     server_id: uuid::Uuid::nil(),
@@ -929,7 +939,7 @@ async fn proxy_handler(
                                     is_dynamic_key: false,
                                     key_hash: None,
                                     group_key_id: config.group_key_id,
-                                    cost_usd: None,
+                                    cost_usd,
                                     subscription_id: Some(bonus_sub_id),
                                     created_at: Utc::now(),
                                     content_hash: content_hash.clone(),
@@ -2109,9 +2119,24 @@ where
                                 .fetch_one(&state.db)
                                 .await
                                 {
-                                    // Bonus subscriptions: no cost tracking, no activation
+                                    // Bonus subscriptions: calculate cost for tracking, but no activation or counters
                                     if sub.sub_type == "bonus" {
-                                        None
+                                        let pricing_cache = state.pricing_cache.read().await;
+                                        if let Some(pricing) = pricing_cache.get(model_name) {
+                                            let c = crate::subscription::calculate_cost(
+                                                pricing,
+                                                rate_input, rate_output,
+                                                rate_cache_write, rate_cache_read,
+                                                input_tokens, output_tokens,
+                                                cache_creation_tokens, cache_read_tokens,
+                                                normalize_cache_read,
+                                            );
+                                            drop(pricing_cache);
+                                            Some(c)
+                                        } else {
+                                            drop(pricing_cache);
+                                            None
+                                        }
                                     } else {
                                         let cost = if sub.sub_type == "pay_per_request" {
                                             sub.model_request_costs

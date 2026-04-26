@@ -221,12 +221,14 @@
                     <tr>
                       <th class="text-left">Model</th>
                       <th class="text-right">Requests</th>
+                      <th class="text-right">Cost (USD)</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="usage in sub.bonus_usage" :key="usage.model">
                       <td>{{ usage.model }}</td>
                       <td class="text-right">{{ usage.request_count }}</td>
+                      <td class="text-right">{{ usage.cost_usd > 0 ? `$${usage.cost_usd.toFixed(4)}` : '—' }}</td>
                     </tr>
                   </tbody>
                 </q-markup-table>
@@ -532,6 +534,7 @@ interface QuotaInfo {
 interface BonusModelUsage {
   model: string;
   request_count: number;
+  cost_usd: number;
 }
 
 interface Subscription {

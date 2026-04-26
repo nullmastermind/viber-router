@@ -48,6 +48,7 @@ pub struct QuotaInfo {
 pub struct BonusModelUsage {
     model: String,
     request_count: i64,
+    cost_usd: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,8 +161,8 @@ pub async fn public_usage(
 
         let (bonus_quotas, bonus_usage) = if is_bonus {
             // Fetch per-model request counts for last 30 days
-            let usage_rows: Vec<(Option<String>, i64)> = sqlx::query_as(
-                "SELECT model, COUNT(*)::bigint as request_count \
+            let usage_rows: Vec<(Option<String>, i64, f64)> = sqlx::query_as(
+                "SELECT model, COUNT(*)::bigint as request_count, COALESCE(SUM(cost_usd), 0)::float8 as cost_usd \
                  FROM token_usage_logs \
                  WHERE subscription_id = $1 AND created_at >= now() - interval '30 days' \
                  GROUP BY model ORDER BY model",
@@ -173,8 +174,8 @@ pub async fn public_usage(
 
             let bonus_usage_data: Vec<BonusModelUsage> = usage_rows
                 .into_iter()
-                .filter_map(|(model, count)| {
-                    model.map(|m| BonusModelUsage { model: m, request_count: count })
+                .filter_map(|(model, count, cost)| {
+                    model.map(|m| BonusModelUsage { model: m, request_count: count, cost_usd: cost })
                 })
                 .collect();
 
