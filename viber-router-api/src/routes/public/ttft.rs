@@ -1,14 +1,12 @@
 use axum::{
     Json,
-    extract::{ConnectInfo, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{Query, State},
+    http::StatusCode,
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use uuid::Uuid;
 
-use crate::rate_limiter;
 use crate::routes::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -62,15 +60,6 @@ fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({"error": msg})))
 }
 
-fn extract_client_ip(headers: &HeaderMap, addr: SocketAddr) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| addr.ip().to_string())
-}
-
 fn resolve_interval(period: &str) -> &'static str {
     match period {
         "1h" => "1 hour",
@@ -82,26 +71,11 @@ fn resolve_interval(period: &str) -> &'static str {
 
 pub async fn public_ttft(
     State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Query(params): Query<TtftParams>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, addr);
-
-    if rate_limiter::is_ip_rate_limited(&state.redis, &client_ip).await {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::RETRY_AFTER, "60")],
-            Json(serde_json::json!({"error": "Too many requests"})),
-        )
-            .into_response();
-    }
-
     let Some(key) = params.key.filter(|k| !k.is_empty()) else {
         return err(StatusCode::BAD_REQUEST, "key parameter is required").into_response();
     };
-
-    rate_limiter::increment_ip_rate_limit(&state.redis, &client_ip).await;
 
     // Lookup sub-key
     let key_id: Option<Uuid> = sqlx::query_scalar(

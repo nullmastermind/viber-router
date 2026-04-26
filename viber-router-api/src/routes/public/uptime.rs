@@ -1,14 +1,12 @@
 use axum::{
     Json,
-    extract::{ConnectInfo, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{Query, State},
+    http::StatusCode,
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
 
-use crate::rate_limiter;
 use crate::routes::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -43,15 +41,6 @@ fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({"error": msg})))
 }
 
-fn extract_client_ip(headers: &HeaderMap, addr: SocketAddr) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| addr.ip().to_string())
-}
-
 fn derive_status(total: i64, successful: i64) -> (String, f64) {
     if total == 0 {
         ("no_data".to_string(), 0.0)
@@ -72,27 +61,11 @@ fn derive_status(total: i64, successful: i64) -> (String, f64) {
 
 pub async fn public_uptime(
     State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Query(params): Query<UptimeParams>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, addr);
-
-    // Rate limit check
-    if rate_limiter::is_ip_rate_limited(&state.redis, &client_ip).await {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::RETRY_AFTER, "60")],
-            Json(serde_json::json!({"error": "Too many requests"})),
-        )
-            .into_response();
-    }
-
     let Some(key) = params.key.filter(|k| !k.is_empty()) else {
         return err(StatusCode::BAD_REQUEST, "key parameter is required").into_response();
     };
-
-    rate_limiter::increment_ip_rate_limit(&state.redis, &client_ip).await;
 
     // Lookup sub-key + group
     #[derive(sqlx::FromRow)]
