@@ -155,7 +155,8 @@
                 <span class="text-weight-medium q-mr-sm">{{ sub.bonus_name || 'Bonus' }}</span>
                 <q-badge :color="subStatusColor(sub.status)" :label="sub.status" />
                 <q-space />
-                <span class="text-caption" style="color: var(--vr-text-secondary)">Bonus</span>
+                <span class="text-caption q-mr-xs" style="color: var(--vr-text-secondary)">Bonus</span>
+                <q-btn flat dense round size="sm" icon="refresh" aria-label="Reload bonus data" @click="refreshAll" />
               </div>
 
               <!-- Quota section -->
@@ -164,37 +165,71 @@
                   Quota info unavailable
                 </div>
                 <div v-else class="q-mb-sm">
-                  <div v-for="quota in sub.bonus_quotas" :key="quota.name" class="q-mb-sm">
-                    <div class="row items-center q-mb-xs">
-                      <span class="text-caption text-weight-medium q-mr-sm">{{ quota.name }}</span>
-                      <span class="text-caption" style="color: var(--vr-text-secondary)">{{ Math.round(quota.utilization * 100) }}%</span>
-                      <q-space />
-                      <span v-if="quota.reset_at" class="text-caption" style="color: var(--vr-text-secondary)">
-                        Resets in {{ formatCountdown(quota.reset_at) }}
-                      </span>
+                  <div
+                    v-for="[accountName, quotas] in groupedQuotas(sub.bonus_quotas)"
+                    :key="accountName"
+                    class="q-mb-sm"
+                  >
+                    <div v-if="accountName" class="text-caption text-weight-medium q-mb-xs" style="color: var(--vr-text-secondary)">
+                      {{ accountName }}
                     </div>
-                    <q-linear-progress
-                      :value="quota.utilization"
-                      :color="quota.utilization > 0.9 ? 'negative' : 'primary'"
-                      rounded
-                      size="8px"
-                      :aria-label="`${quota.name} quota usage`"
-                      :aria-valuenow="Math.round(quota.utilization * 100)"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                    />
-                    <div v-if="quota.description" class="text-caption q-mt-xs" style="color: var(--vr-text-secondary)">{{ quota.description }}</div>
+                    <q-markup-table flat bordered dense>
+                      <thead>
+                        <tr>
+                          <th class="text-left">Model</th>
+                          <th class="text-right">Usage</th>
+                          <th class="text-right">Reset</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="quota in quotas" :key="quota.name">
+                          <td>{{ quota.name }}</td>
+                          <td class="text-right" style="min-width: 120px">
+                            <div class="row items-center justify-end q-gutter-x-sm no-wrap">
+                              <span class="text-caption">{{ Math.round(quota.utilization * 100) }}%</span>
+                              <q-linear-progress
+                                :value="quota.utilization"
+                                :color="quota.utilization > 0.9 ? 'negative' : 'primary'"
+                                rounded
+                                size="6px"
+                                style="width: 60px; flex-shrink: 0"
+                                :aria-label="`${quota.name} quota usage`"
+                                :aria-valuenow="Math.round(quota.utilization * 100)"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                              />
+                            </div>
+                          </td>
+                          <td class="text-right">
+                            <span v-if="quota.reset_at" class="text-caption" style="color: var(--vr-text-secondary)">
+                              {{ formatCountdown(quota.reset_at) }}
+                            </span>
+                            <span v-else class="text-caption" style="color: var(--vr-text-secondary)">—</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </q-markup-table>
                   </div>
                 </div>
               </template>
 
               <!-- Bonus usage by model -->
-              <div v-if="sub.bonus_usage && sub.bonus_usage.length > 0" class="text-caption">
-                <div class="text-weight-medium q-mb-xs">Usage (last 30 days)</div>
-                <div v-for="usage in sub.bonus_usage" :key="usage.model" class="row">
-                  <span class="q-mr-sm" style="color: var(--vr-text-secondary)">{{ usage.model }}</span>
-                  <span>{{ usage.request_count }} requests</span>
-                </div>
+              <div v-if="sub.bonus_usage && sub.bonus_usage.length > 0">
+                <div class="text-caption text-weight-medium q-mb-xs">Usage (last 30 days)</div>
+                <q-markup-table flat bordered dense>
+                  <thead>
+                    <tr>
+                      <th class="text-left">Model</th>
+                      <th class="text-right">Requests</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="usage in sub.bonus_usage" :key="usage.model">
+                      <td>{{ usage.model }}</td>
+                      <td class="text-right">{{ usage.request_count }}</td>
+                    </tr>
+                  </tbody>
+                </q-markup-table>
               </div>
             </q-card-section>
           </q-card>
@@ -738,6 +773,20 @@ const nonBonusSubscriptions = computed(() =>
   sortedSubscriptions.value.filter((s) => s.sub_type !== 'bonus'),
 );
 
+function groupedQuotas(quotas: QuotaInfo[]): Map<string, QuotaInfo[]> {
+  const map = new Map<string, QuotaInfo[]>();
+  for (const quota of quotas) {
+    const key = quota.description ?? '';
+    const existing = map.get(key);
+    if (existing) {
+      existing.push(quota);
+    } else {
+      map.set(key, [quota]);
+    }
+  }
+  return map;
+}
+
 const formatCompact = (v: number) =>
   new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(v);
 
@@ -800,11 +849,15 @@ function formatDate(iso: string) {
 }
 
 function formatCountdown(iso: string) {
-  const diff = new Date(iso).getTime() - now.value;
+  const target = new Date(iso);
+  const diff = target.getTime() - now.value;
   if (diff <= 0) return 'now';
   const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  const hh = String(target.getHours()).padStart(2, '0');
+  const mm = String(target.getMinutes()).padStart(2, '0');
+  const countdown = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  return `${countdown} (${hh}:${mm})`;
 }
 
 const CHART_COLORS = ['#1976D2', '#26A69A', '#FF6F00', '#AB47BC', '#EF5350', '#66BB6A', '#42A5F5', '#FFA726'];
