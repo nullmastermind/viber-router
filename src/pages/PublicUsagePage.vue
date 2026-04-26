@@ -156,7 +156,7 @@
                 <q-badge :color="subStatusColor(sub.status)" :label="sub.status" />
                 <q-space />
                 <span class="text-caption q-mr-xs" style="color: var(--vr-text-secondary)">Bonus</span>
-                <q-btn flat dense round size="sm" icon="refresh" aria-label="Reload bonus data" @click="refreshAll" />
+                <q-btn flat dense round size="sm" icon="refresh" :loading="refreshing" aria-label="Reload bonus data" @click="refreshAll" />
               </div>
 
               <!-- Quota section -->
@@ -591,6 +591,7 @@ const router = useRouter();
 const keyInput = ref('');
 const storedKey = ref(localStorage.getItem('usage-key') ?? '');
 const loading = ref(false);
+const refreshing = ref(false);
 const error = ref('');
 const data = ref<UsageData | null>(null);
 const setupTab = ref('claude-code');
@@ -1010,11 +1011,15 @@ async function fetchUsage(key: string, silent = false) {
   }
 }
 
-function refreshAll() {
+async function refreshAll() {
   const key = routeKey.value;
   if (key && data.value) {
-    fetchUsage(key, true);
-    fetchUptime(key);
+    refreshing.value = true;
+    try {
+      await Promise.all([fetchUsage(key, true), fetchUptime(key)]);
+    } finally {
+      refreshing.value = false;
+    }
   }
 }
 
