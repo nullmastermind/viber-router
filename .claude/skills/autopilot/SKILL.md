@@ -222,8 +222,8 @@ Pipeline completed 3 verify-fix rounds but these CRITICALs remain:
 - [issue 2]
 
 Options:
-→ Fix manually and run `/verify` again
-→ Use `/apply <name>` to continue with guidance
+→ Fix manually and run `/osf verify` again
+→ Use `/osf apply <name>` to continue with guidance
 ```
 
 ---
