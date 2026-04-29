@@ -19,7 +19,7 @@
       :rows="models"
       :columns="columns"
       row-key="id"
-      :pagination="pagination"
+      v-model:pagination="pagination"
       @request="onRequest"
     >
       <template #body-cell-actions="props">

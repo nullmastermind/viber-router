@@ -222,7 +222,7 @@
                 :rows="subKeys"
                 :columns="subKeyColumns"
                 row-key="id"
-                :pagination="subKeyPagination"
+                v-model:pagination="subKeyPagination"
                 @request="onSubKeyRequest"
               >
                 <template #body="props">
@@ -305,7 +305,7 @@
                           :rows="keySubscriptions[props.row.id]?.data ?? []"
                           :columns="subColumns"
                           row-key="id"
-                          :pagination="subPagination[props.row.id]"
+                          v-model:pagination="subPagination[props.row.id]"
                           @request="(p: { pagination: { page: number; rowsPerPage: number } }) => onSubPaginationRequest(props.row.id, p)"
                         >
                           <template #body-cell-status="sProps">
@@ -633,7 +633,7 @@
                             :rows="keySubscriptions[props.row.group_key_id ?? '']?.data ?? []"
                             :columns="subColumns"
                             row-key="id"
-                            :pagination="subPagination[props.row.group_key_id ?? '']"
+                            v-model:pagination="subPagination[props.row.group_key_id ?? '']"
                             @request="(p: { pagination: { page: number; rowsPerPage: number } }) => onSubPaginationRequest(props.row.group_key_id ?? '', p)"
                           >
                             <template #body-cell-status="sProps">
@@ -707,7 +707,7 @@
                 :rows="spamRows"
                 :columns="spamColumns"
                 :row-key="(row) => `${row.group_key_id}-${row.spam_type}`"
-                :pagination="spamPagination"
+                v-model:pagination="spamPagination"
                 :loading="spamLoading"
                 @request="onSpamRequest"
               >
