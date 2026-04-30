@@ -327,16 +327,39 @@
                           </template>
                           <template #body-cell-bonus_allowed_models="sProps">
                             <q-td :props="sProps">
-                              <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
-                                <q-badge
-                                  v-for="modelName in sProps.row.bonus_allowed_models"
-                                  :key="modelName"
-                                  color="secondary"
+                              <template v-if="sProps.row.sub_type === 'bonus'">
+                                <button
+                                  v-if="canEditBonusAllowedModels(sProps.row)"
+                                  type="button"
+                                  class="bonus-models-cell"
+                                  @click.stop="onOpenEditBonusModels(props.row.id, sProps.row)"
                                 >
-                                  {{ modelName }}
-                                </q-badge>
-                              </div>
-                              <span v-else class="text-grey">All models</span>
+                                  <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
+                                    <q-badge
+                                      v-for="modelName in sProps.row.bonus_allowed_models"
+                                      :key="modelName"
+                                      color="secondary"
+                                    >
+                                      {{ modelName }}
+                                    </q-badge>
+                                  </div>
+                                  <span v-else class="text-grey">All models</span>
+                                  <q-icon name="edit" size="xs" class="q-ml-xs text-grey" />
+                                </button>
+                                <template v-else>
+                                  <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
+                                    <q-badge
+                                      v-for="modelName in sProps.row.bonus_allowed_models"
+                                      :key="modelName"
+                                      color="secondary"
+                                    >
+                                      {{ modelName }}
+                                    </q-badge>
+                                  </div>
+                                  <span v-else class="text-grey">All models</span>
+                                </template>
+                              </template>
+                              <span v-else>—</span>
                             </q-td>
                           </template>
                           <template #body-cell-actions="sProps">
@@ -670,19 +693,42 @@
                             <template #body-cell-bonus_allowed_models="sProps">
                               <q-td :props="sProps">
                                 <template v-if="sProps.row.sub_type === 'bonus'">
-                                  <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
-                                    <q-chip
-                                      v-for="modelName in sProps.row.bonus_allowed_models"
-                                      :key="modelName"
-                                      dense
-                                      square
-                                      color="secondary"
-                                      text-color="white"
-                                    >
-                                      {{ modelName }}
-                                    </q-chip>
-                                  </div>
-                                  <span v-else>All models</span>
+                                  <button
+                                    v-if="canEditBonusAllowedModels(sProps.row)"
+                                    type="button"
+                                    class="bonus-models-cell"
+                                    @click.stop="onOpenEditBonusModels(props.row.group_key_id ?? '', sProps.row)"
+                                  >
+                                    <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
+                                      <q-chip
+                                        v-for="modelName in sProps.row.bonus_allowed_models"
+                                        :key="modelName"
+                                        dense
+                                        square
+                                        color="secondary"
+                                        text-color="white"
+                                      >
+                                        {{ modelName }}
+                                      </q-chip>
+                                    </div>
+                                    <span v-else>All models</span>
+                                    <q-icon name="edit" size="xs" class="q-ml-xs text-grey" />
+                                  </button>
+                                  <template v-else>
+                                    <div v-if="sProps.row.bonus_allowed_models?.length" class="row q-gutter-xs">
+                                      <q-chip
+                                        v-for="modelName in sProps.row.bonus_allowed_models"
+                                        :key="modelName"
+                                        dense
+                                        square
+                                        color="secondary"
+                                        text-color="white"
+                                      >
+                                        {{ modelName }}
+                                      </q-chip>
+                                    </div>
+                                    <span v-else>All models</span>
+                                  </template>
                                 </template>
                                 <span v-else>—</span>
                               </q-td>
@@ -1174,6 +1220,38 @@
         </q-card>
       </q-dialog>
 
+      <!-- Edit Bonus Allowed Models Dialog -->
+      <q-dialog v-model="showEditBonusModelsDialog" persistent>
+        <q-card style="width: 480px">
+          <q-card-section>
+            <div class="text-h6">Edit Allowed Models</div>
+            <div class="text-caption text-grey">Leave empty to allow all models.</div>
+          </q-card-section>
+          <q-card-section>
+            <q-select
+              v-model="editBonusModelsForm.bonus_allowed_models"
+              label="Allowed Models"
+              outlined
+              dense
+              multiple
+              use-chips
+              emit-value
+              map-options
+              :options="bonusAllowedModelOptions"
+            />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn
+              color="primary"
+              label="Save"
+              :loading="editBonusModelsLoading"
+              @click="onSaveBonusAllowedModels"
+            />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
       <!-- Add Bonus Subscription Dialog -->
       <q-dialog v-model="showAddBonusDialog" persistent>
         <q-card style="width: 480px">
@@ -1475,6 +1553,16 @@ const addBonusForm = ref({
   bonus_allowed_models: [] as string[],
 });
 const addBonusLoading = ref(false);
+
+// Edit Bonus allowed models dialog state
+const showEditBonusModelsDialog = ref(false);
+const editBonusModelsKeyId = ref('');
+const editBonusModelsSubId = ref('');
+const editBonusModelsForm = ref({
+  bonus_allowed_models: [] as string[],
+});
+const editBonusModelsLoading = ref(false);
+
 const bonusAllowedModelOptions = computed(() =>
   allowedModels.value.map((model) => ({ label: model.name, value: model.name })),
 );
@@ -2569,6 +2657,42 @@ async function onCancelSubscription(keyId: string, subId: string) {
   }
 }
 
+function canEditBonusAllowedModels(sub: KeySubscription): boolean {
+  return sub.sub_type === 'bonus' && sub.status === 'active';
+}
+
+function onOpenEditBonusModels(keyId: string, sub: KeySubscription) {
+  if (!keyId || !canEditBonusAllowedModels(sub)) return;
+  editBonusModelsKeyId.value = keyId;
+  editBonusModelsSubId.value = sub.id;
+  editBonusModelsForm.value = {
+    bonus_allowed_models: [...(sub.bonus_allowed_models ?? [])],
+  };
+  showEditBonusModelsDialog.value = true;
+}
+
+async function onSaveBonusAllowedModels() {
+  if (!group.value || !editBonusModelsKeyId.value || !editBonusModelsSubId.value) return;
+  editBonusModelsLoading.value = true;
+  try {
+    await api.put(
+      `/api/admin/groups/${group.value.id}/keys/${editBonusModelsKeyId.value}/subscriptions/${editBonusModelsSubId.value}/bonus-allowed-models`,
+      { bonus_allowed_models: editBonusModelsForm.value.bonus_allowed_models },
+    );
+    const keyId = editBonusModelsKeyId.value;
+    showEditBonusModelsDialog.value = false;
+    editBonusModelsKeyId.value = '';
+    editBonusModelsSubId.value = '';
+    loadKeySubscriptions(keyId);
+    $q.notify({ type: 'positive', message: 'Allowed models updated' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to update allowed models';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    editBonusModelsLoading.value = false;
+  }
+}
+
 function getKeyAllowedModels(keyId: string): Model[] {
   return keyAllowedModelsMap.value[keyId] || [];
 }
@@ -2832,5 +2956,17 @@ async function loadTtftKeys() {
 <style scoped>
 .disabled-server {
   opacity: 0.5;
+}
+
+.bonus-models-cell {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  padding: 0;
+  text-align: left;
 }
 </style>

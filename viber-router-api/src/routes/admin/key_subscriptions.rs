@@ -2,13 +2,16 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, put},
 };
 use deadpool_redis::redis::AsyncCommands;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::models::{AssignSubscription, CancelSubscription, KeySubscription, PaginatedResponse, SubscriptionPlan};
+use crate::models::{
+    AssignSubscription, CancelSubscription, KeySubscription, PaginatedResponse, SubscriptionPlan,
+    UpdateBonusSubscription,
+};
 use crate::routes::AppState;
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
@@ -38,6 +41,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_subscriptions).post(assign_subscription))
         .route("/{sub_id}", axum::routing::patch(cancel_subscription))
+        .route("/{sub_id}/bonus-allowed-models", put(update_bonus_allowed_models))
 }
 
 async fn assign_subscription(
@@ -122,6 +126,52 @@ async fn assign_subscription(
     }
 
     Ok((StatusCode::CREATED, Json(sub)))
+}
+
+async fn update_bonus_allowed_models(
+    State(state): State<AppState>,
+    Path((_group_id, key_id, sub_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<UpdateBonusSubscription>,
+) -> Result<Json<KeySubscription>, ApiError> {
+    let current = sqlx::query_as::<_, KeySubscription>(
+        "SELECT * FROM key_subscriptions WHERE id = $1 AND group_key_id = $2",
+    )
+    .bind(sub_id)
+    .bind(key_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(internal)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Subscription not found"))?;
+
+    if current.sub_type != "bonus" {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only bonus subscriptions can update allowed models",
+        ));
+    }
+
+    if current.status != "active" {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only active bonus subscriptions can update allowed models",
+        ));
+    }
+
+    let sub = sqlx::query_as::<_, KeySubscription>(
+        "UPDATE key_subscriptions SET bonus_allowed_models = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(&input.bonus_allowed_models)
+    .bind(sub_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(internal)?;
+
+    // Invalidate subscription list cache
+    if let Ok(mut conn) = state.redis.get().await {
+        let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+    }
+
+    Ok(Json(sub))
 }
 
 async fn list_subscriptions(

@@ -41,3 +41,8 @@ pub struct AssignSubscription {
 pub struct CancelSubscription {
     pub status: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateBonusSubscription {
+    pub bonus_allowed_models: Option<Vec<String>>,
+}
