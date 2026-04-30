@@ -256,7 +256,34 @@ Check the command's domain-specific Zero-Fog Checklist items too. If any item is
 
 ### Ready to Implement
 
-When all items pass:
+When all items pass, prepare a locked requirement summary and an implementation review plan.
+
+Do NOT ask how to implement yet if the user has not confirmed the teach-back.
+
+Before asking Small/direct, Spec-first, or Autopilot, draft this internally:
+
+**Implementation review plan**
+- **Files/areas**: [specific files if known; otherwise exact areas and how osf-apply should locate them]
+- **Behavior changes to make**:
+  - [plain-language behavior/result change, not code]
+- **Out of scope**:
+  - [what will not change]
+- **Checks**:
+  - [commands/checks required by project instructions]
+- **OpenSpec follow-up** (if a change exists):
+  - [tasks to complete/verify]
+
+Self-review the plan before showing it:
+- Can a developer implement from this without guessing?
+- Are all affected areas named?
+- Are behavior changes specific and objectively checkable?
+- Are checks explicit?
+- Are OpenSpec tasks/follow-ups clear?
+- Is there any hidden "etc", "probably", or "fix UI stuff" language?
+
+If any answer fails, revise the plan or explore more. Only show the final review plan to the user when it is zero fog.
+
+Then present:
 
 ```
 ## ✅ Ready to Implement
@@ -270,17 +297,30 @@ When all items pass:
 - [key decision 2]
 - [...]
 
-**Next step: Assess scope**
+**Implementation review plan**
+- **Files/areas**: [specific files or exact areas]
+- **Behavior changes to make**:
+  - [plain-language behavior/result change]
+- **Out of scope**:
+  - [what will not change]
+- **Checks**:
+  - [checks to run]
+- **OpenSpec follow-up**:
+  - [tasks to complete/verify, or "None"]
+
+**Requirement status**: Zero fog — ready to choose implementation path.
+
+Now ask the final implementation-path question:
 
 Is this work:
-A. Small (1-3 tasks, single component, straightforward)
-   → Can implement directly without spec
-B. Large (4+ tasks, multi-component, complex, needs design)
-   → Choose spec-first or direct implementation
+A. Small/direct (1-3 tasks, single component, straightforward)
+   → Implement directly without spec
+B. Spec-first (larger or design-sensitive work)
+   → Create OpenSpec change, then implement
 C. ★ Autopilot (spec → implement → verify, no stops)
    → Full pipeline runs automatically after you confirm
-D. Unsure
-   → Let me help you decide
+D. Discuss more before implementation
+   → Go back to planning or clarify remaining concerns
 
 What's your call?
 ```
@@ -445,6 +485,9 @@ The command may list additional subagents in its "Extra Subagents" section.
 - **Don't accept fog** - When user says "probably", "etc", "something like", "should work", "we'll figure it out" — STOP and clarify. These words mean the requirement is not defined. Undefined requirements become CRITICAL issues at verification.
 - **Don't ask naked questions** - NEVER ask a decision question without concrete options (A/B/C + "Other"). Place recommended option last (before "Other"), marked with ★.
 - **Don't end discovery with fog** - The Zero-Fog Checklist is mandatory. If any item fails, you are NOT ready.
+- **Don't ask implementation path early** - Never ask Small/direct, Spec-first, or Autopilot while requirement questions remain unresolved. Ask it only after Feynman teach-back is confirmed and Zero-Fog Checklist passes.
+- **Don't show code in planning** - The review plan describes behavior changes and affected areas only. Do not include code snippets, diffs, or implementation details that belong to osf-apply.
+- **Don't ask implementation path without a reviewed plan** - Before asking Small/direct, Spec-first, or Autopilot, create a reviewable implementation plan, self-review it for zero fog, revise if needed, then show it to the user.
 - **Don't create files unsolicited** - NEVER create any markdown file (notes, summaries, plans, docs) unless the user explicitly asks you to. Thinking happens in conversation, not in files.
 - **Do verify or offer verification** - After substantive responses, either auto-verify (if uncertain) or ask user if they want verification
 - **Do visualize** - A good diagram is worth many paragraphs
