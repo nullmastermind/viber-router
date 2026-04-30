@@ -59,8 +59,8 @@ async fn assign_subscription(
             "INSERT INTO key_subscriptions \
              (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, \
               reset_hours, duration_days, rpm_limit, bonus_name, bonus_base_url, bonus_api_key, \
-              bonus_quota_url, bonus_quota_headers) \
-             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, $2, $3, $4, $5, $6) \
+              bonus_quota_url, bonus_quota_headers, bonus_allowed_models) \
+             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, $2, $3, $4, $5, $6, $7) \
              RETURNING *",
         )
         .bind(key_id)
@@ -69,6 +69,7 @@ async fn assign_subscription(
         .bind(bonus_api_key)
         .bind(&input.bonus_quota_url)
         .bind(&input.bonus_quota_headers)
+        .bind(&input.bonus_allowed_models)
         .fetch_one(&state.db)
         .await
         .map_err(internal)?;

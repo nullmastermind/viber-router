@@ -958,6 +958,7 @@ async fn proxy_handler(
                     // Non-2xx from bonus server — log and continue to next bonus server
                     tracing::warn!(
                         bonus_name = %bonus_server.name,
+                        allowed_models = ?bonus_server.allowed_models,
                         status = bonus_status,
                         latency_ms = bonus_start.elapsed().as_millis() as i32,
                         "Bonus server returned non-2xx, trying next"
@@ -967,6 +968,7 @@ async fn proxy_handler(
             Err(e) => {
                 tracing::warn!(
                     bonus_name = %bonus_server.name,
+                    allowed_models = ?bonus_server.allowed_models,
                     error = %e,
                     "Bonus server connection error, trying next"
                 );

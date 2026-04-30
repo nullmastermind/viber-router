@@ -57,6 +57,7 @@ pub struct BonusServer {
     pub base_url: String,
     pub api_key: String,
     pub name: String,
+    pub allowed_models: Vec<String>,
 }
 
 /// Result of the pre-request subscription check.
@@ -384,6 +385,14 @@ pub async fn check_subscriptions(
     let bonus_servers: Vec<BonusServer> = bonus_subs
         .into_iter()
         .filter_map(|sub| {
+            let allowed_models = sub.bonus_allowed_models.unwrap_or_default();
+            if !allowed_models.is_empty() {
+                match model {
+                    Some(model_name) if allowed_models.iter().any(|allowed| allowed == model_name) => {}
+                    Some(_) | None => return None,
+                }
+            }
+
             let base_url = sub.bonus_base_url?;
             let api_key = sub.bonus_api_key?;
             let name = sub.bonus_name.unwrap_or_default();
@@ -392,6 +401,7 @@ pub async fn check_subscriptions(
                 base_url,
                 api_key,
                 name,
+                allowed_models,
             })
         })
         .collect();
@@ -682,6 +692,7 @@ mod tests {
             bonus_name: Some("Claude Code Max".to_string()),
             bonus_quota_url: None,
             bonus_quota_headers: None,
+            bonus_allowed_models: None,
         };
 
         // Simulate the filter_map logic from check_subscriptions
@@ -690,6 +701,7 @@ mod tests {
             base_url: sub.bonus_base_url.clone().unwrap(),
             api_key: sub.bonus_api_key.clone().unwrap(),
             name: sub.bonus_name.clone().unwrap_or_default(),
+            allowed_models: sub.bonus_allowed_models.clone().unwrap_or_default(),
         };
 
         assert_eq!(server.base_url, "https://api.anthropic.com");
@@ -720,6 +732,7 @@ mod tests {
             bonus_name: Some("Broken Bonus".to_string()),
             bonus_quota_url: None,
             bonus_quota_headers: None,
+            bonus_allowed_models: None,
         };
 
         // Simulate the filter_map — should return None due to missing base_url
@@ -729,6 +742,7 @@ mod tests {
                 base_url: base_url.clone(),
                 api_key: api_key.clone(),
                 name: sub.bonus_name.clone().unwrap_or_default(),
+                allowed_models: sub.bonus_allowed_models.clone().unwrap_or_default(),
             })
         });
 
@@ -757,6 +771,7 @@ mod tests {
             bonus_name: None, // Name is None
             bonus_quota_url: None,
             bonus_quota_headers: None,
+            bonus_allowed_models: None,
         };
 
         let name = sub.bonus_name.unwrap_or_default();
