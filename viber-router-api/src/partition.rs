@@ -38,7 +38,7 @@ pub async fn drop_expired_partitions(pool: &PgPool, table: &str, retention_days:
         "SELECT tablename FROM pg_tables \
          WHERE schemaname = 'public' AND tablename LIKE $1 \
          AND tablename != $2 \
-         ORDER BY tablename"
+         ORDER BY tablename",
     )
     .bind(&pattern)
     .bind(table)
@@ -112,6 +112,9 @@ mod tests {
             parse_partition_end_date("ttft_logs_2026_12", "ttft_logs"),
             NaiveDate::from_ymd_opt(2027, 1, 1)
         );
-        assert_eq!(parse_partition_end_date("proxy_logs_2026_03", "ttft_logs"), None);
+        assert_eq!(
+            parse_partition_end_date("proxy_logs_2026_03", "ttft_logs"),
+            None
+        );
     }
 }

@@ -81,11 +81,17 @@ async fn put_settings(
         None => current.telegram_bot_token,
     };
     let new_chat_ids = input.telegram_chat_ids.unwrap_or(current.telegram_chat_ids);
-    let new_status_codes = input.alert_status_codes.unwrap_or(current.alert_status_codes);
-    let new_cooldown = input.alert_cooldown_mins.unwrap_or(current.alert_cooldown_mins);
+    let new_status_codes = input
+        .alert_status_codes
+        .unwrap_or(current.alert_status_codes);
+    let new_cooldown = input
+        .alert_cooldown_mins
+        .unwrap_or(current.alert_cooldown_mins);
     let blocked_paths_changed = input.blocked_paths.is_some();
     let new_blocked_paths = input.blocked_paths.unwrap_or(current.blocked_paths);
-    let new_ct_always_estimate = input.ct_always_estimate.unwrap_or(current.ct_always_estimate);
+    let new_ct_always_estimate = input
+        .ct_always_estimate
+        .unwrap_or(current.ct_always_estimate);
     let new_ct_anthropic_base_url = match input.ct_anthropic_base_url {
         Some(v) => v,
         None => current.ct_anthropic_base_url,
@@ -232,22 +238,14 @@ async fn get_telegram_chats(
         )
     })?;
 
-    let url = format!(
-        "https://api.telegram.org/bot{}/getUpdates?limit=100",
-        token
-    );
+    let url = format!("https://api.telegram.org/bot{}/getUpdates?limit=100", token);
 
-    let resp = state
-        .http_client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-        })?;
+    let resp = state.http_client.get(&url).send().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
     if !resp.status().is_success() {
         let err_text = resp.text().await.unwrap_or_default();

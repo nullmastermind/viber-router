@@ -58,14 +58,13 @@ async fn assign_key_servers(
     }
 
     // Look up the sub-key's api_key for cache invalidation
-    let sub_key: Option<GroupKey> = sqlx::query_as::<_, GroupKey>(
-        "SELECT * FROM group_keys WHERE id = $1 AND group_id = $2",
-    )
-    .bind(key_id)
-    .bind(group_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?;
+    let sub_key: Option<GroupKey> =
+        sqlx::query_as::<_, GroupKey>("SELECT * FROM group_keys WHERE id = $1 AND group_id = $2")
+            .bind(key_id)
+            .bind(group_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?;
 
     let sub_key = sub_key.ok_or_else(|| err(StatusCode::NOT_FOUND, "Key not found"))?;
 
@@ -94,17 +93,18 @@ async fn assign_key_servers(
     // Insert all assignments, collecting results
     let mut assigned_servers: Vec<GroupServerDetail> = Vec::new();
     for server_id in &input.server_ids {
-        let result = sqlx::query(
-            "INSERT INTO group_key_servers (group_key_id, server_id) VALUES ($1, $2)",
-        )
-        .bind(key_id)
-        .bind(server_id)
-        .execute(&state.db)
-        .await;
+        let result =
+            sqlx::query("INSERT INTO group_key_servers (group_key_id, server_id) VALUES ($1, $2)")
+                .bind(key_id)
+                .bind(server_id)
+                .execute(&state.db)
+                .await;
 
         match result {
             Ok(_) => {}
-            Err(e) if e.to_string().contains("duplicate key") || e.to_string().contains("unique") => {
+            Err(e)
+                if e.to_string().contains("duplicate key") || e.to_string().contains("unique") =>
+            {
                 // Silently skip duplicates
             }
             Err(e) => return Err(internal(e)),
@@ -141,28 +141,29 @@ async fn remove_key_server(
     Path((group_id, key_id, server_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     // Look up the sub-key's api_key for cache invalidation
-    let sub_key: Option<GroupKey> = sqlx::query_as::<_, GroupKey>(
-        "SELECT * FROM group_keys WHERE id = $1 AND group_id = $2",
-    )
-    .bind(key_id)
-    .bind(group_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?;
+    let sub_key: Option<GroupKey> =
+        sqlx::query_as::<_, GroupKey>("SELECT * FROM group_keys WHERE id = $1 AND group_id = $2")
+            .bind(key_id)
+            .bind(group_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?;
 
     let sub_key = sub_key.ok_or_else(|| err(StatusCode::NOT_FOUND, "Key not found"))?;
 
-    let result = sqlx::query(
-        "DELETE FROM group_key_servers WHERE group_key_id = $1 AND server_id = $2",
-    )
-    .bind(key_id)
-    .bind(server_id)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    let result =
+        sqlx::query("DELETE FROM group_key_servers WHERE group_key_id = $1 AND server_id = $2")
+            .bind(key_id)
+            .bind(server_id)
+            .execute(&state.db)
+            .await
+            .map_err(internal)?;
 
     if result.rows_affected() == 0 {
-        return Err(err(StatusCode::NOT_FOUND, "Server not assigned to this key"));
+        return Err(err(
+            StatusCode::NOT_FOUND,
+            "Server not assigned to this key",
+        ));
     }
 
     // Invalidate only the sub-key's config cache

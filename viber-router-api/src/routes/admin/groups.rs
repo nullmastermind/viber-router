@@ -8,8 +8,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::models::{
-    AdminGroupServerDetail, CreateGroup, Group, GroupListItem, GroupWithServers, Model, PaginatedResponse, UpdateGroup,
-    generate_api_key,
+    AdminGroupServerDetail, CreateGroup, Group, GroupListItem, GroupWithServers, Model,
+    PaginatedResponse, UpdateGroup, generate_api_key,
 };
 use crate::routes::AppState;
 
@@ -49,7 +49,10 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_groups).post(create_group))
-        .route("/{id}", get(get_group).put(update_group).delete(delete_group))
+        .route(
+            "/{id}",
+            get(get_group).put(update_group).delete(delete_group),
+        )
         .route("/{id}/regenerate-key", post(regenerate_key))
         .route("/{id}/circuit-status", get(circuit_status))
         .route("/bulk/activate", post(bulk_activate))
@@ -58,9 +61,15 @@ pub fn router() -> Router<AppState> {
         .route("/bulk/assign-server", post(bulk_assign_server))
         .nest("/{group_id}/servers", super::group_servers::router())
         .nest("/{group_id}/keys", super::group_keys::router())
-        .nest("/{group_id}/allowed-models", super::group_allowed_models::router())
+        .nest(
+            "/{group_id}/allowed-models",
+            super::group_allowed_models::router(),
+        )
         .nest("/{group_id}/uptime", super::uptime::router())
-        .nest("/{group_id}/user-agents", super::group_user_agents::router())
+        .nest(
+            "/{group_id}/user-agents",
+            super::group_user_agents::router(),
+        )
 }
 
 async fn create_group(
@@ -93,7 +102,11 @@ async fn list_groups(
     let page = params.page.unwrap_or(1).max(1);
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * limit;
-    let order = if params.order.as_deref() == Some("asc") { "ASC" } else { "DESC" };
+    let order = if params.order.as_deref() == Some("asc") {
+        "ASC"
+    } else {
+        "DESC"
+    };
 
     let mut conditions = vec!["1=1".to_string()];
     let mut bind_idx = 0u32;
@@ -147,7 +160,12 @@ async fn list_groups(
     let groups = data_query.fetch_all(&state.db).await.map_err(internal)?;
     let total_pages = (total as f64 / limit as f64).ceil() as i64;
 
-    Ok(Json(PaginatedResponse { data: groups, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data: groups,
+        total,
+        page,
+        total_pages,
+    }))
 }
 
 async fn get_group(
@@ -201,7 +219,11 @@ async fn get_group(
     .await
     .map_err(internal)?;
 
-    Ok(Json(GroupWithServers { group, servers, allowed_models }))
+    Ok(Json(GroupWithServers {
+        group,
+        servers,
+        allowed_models,
+    }))
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -397,13 +419,11 @@ async fn bulk_delete(
     State(state): State<AppState>,
     Json(input): Json<BulkIds>,
 ) -> Result<StatusCode, ApiError> {
-    let groups = sqlx::query_as::<_, Group>(
-        "SELECT * FROM groups WHERE id = ANY($1)",
-    )
-    .bind(&input.ids)
-    .fetch_all(&state.db)
-    .await
-    .map_err(internal)?;
+    let groups = sqlx::query_as::<_, Group>("SELECT * FROM groups WHERE id = ANY($1)")
+        .bind(&input.ids)
+        .fetch_all(&state.db)
+        .await
+        .map_err(internal)?;
 
     // Invalidate before delete
     for g in &groups {

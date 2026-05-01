@@ -22,8 +22,14 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/", get(list_key_allowed_models).post(add_key_allowed_model))
-        .route("/{model_id}", axum::routing::delete(remove_key_allowed_model))
+        .route(
+            "/",
+            get(list_key_allowed_models).post(add_key_allowed_model),
+        )
+        .route(
+            "/{model_id}",
+            axum::routing::delete(remove_key_allowed_model),
+        )
 }
 
 async fn list_key_allowed_models(
@@ -54,13 +60,12 @@ async fn add_key_allowed_model(
     Json(input): Json<AddKeyModelInput>,
 ) -> Result<(StatusCode, Json<Model>), ApiError> {
     // Check that the group has allowed models configured
-    let group_model_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM group_allowed_models WHERE group_id = $1",
-    )
-    .bind(group_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(internal)?;
+    let group_model_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM group_allowed_models WHERE group_id = $1")
+            .bind(group_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(internal)?;
 
     if group_model_count.0 == 0 {
         return Err(err(
@@ -87,20 +92,18 @@ async fn add_key_allowed_model(
     }
 
     // Insert into junction table
-    sqlx::query(
-        "INSERT INTO group_key_allowed_models (group_key_id, model_id) VALUES ($1, $2)",
-    )
-    .bind(key_id)
-    .bind(input.model_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
-            err(StatusCode::CONFLICT, "Model already assigned to this key")
-        } else {
-            internal(e)
-        }
-    })?;
+    sqlx::query("INSERT INTO group_key_allowed_models (group_key_id, model_id) VALUES ($1, $2)")
+        .bind(key_id)
+        .bind(input.model_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
+                err(StatusCode::CONFLICT, "Model already assigned to this key")
+            } else {
+                internal(e)
+            }
+        })?;
 
     // Invalidate cache
     crate::cache::invalidate_group_all_keys(&state.redis, &state.db, group_id).await;
@@ -128,7 +131,10 @@ async fn remove_key_allowed_model(
     .map_err(internal)?;
 
     if result.rows_affected() == 0 {
-        return Err(err(StatusCode::NOT_FOUND, "Model not in key's allowed list"));
+        return Err(err(
+            StatusCode::NOT_FOUND,
+            "Model not in key's allowed list",
+        ));
     }
 
     // Invalidate cache

@@ -8,10 +8,7 @@ pub async fn is_circuit_open(redis: &Pool, group_id: Uuid, server_id: Uuid) -> b
     let Ok(mut conn) = redis.get().await else {
         return false; // fail open
     };
-    let result: Result<bool, _> = cmd("EXISTS")
-        .arg(&key)
-        .query_async(&mut conn)
-        .await;
+    let result: Result<bool, _> = cmd("EXISTS").arg(&key).query_async(&mut conn).await;
     result.unwrap_or(false)
 }
 
@@ -62,10 +59,7 @@ pub async fn record_error(
             .unwrap_or(None);
 
         // Delete error counter
-        let _: Result<(), _> = cmd("DEL")
-            .arg(&err_key)
-            .query_async(&mut conn)
-            .await;
+        let _: Result<(), _> = cmd("DEL").arg(&err_key).query_async(&mut conn).await;
 
         // Set the realerted marker when circuit opens, so check_re_enabled
         // knows the circuit was previously open (prevents phantom alerts)

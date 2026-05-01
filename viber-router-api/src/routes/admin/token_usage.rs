@@ -100,16 +100,18 @@ async fn get_token_usage(
 
     // If the caller passed a raw API key (longer than the 16-char hash we store),
     // hash it so the query matches what's in the database.
-    let key_hash = params.key_hash.map(|kh| {
-        if kh.len() > 16 { hash_key(&kh) } else { kh }
-    });
+    let key_hash = params
+        .key_hash
+        .map(|kh| if kh.len() > 16 { hash_key(&kh) } else { kh });
 
     // group_key_id filter: "null" means master key (IS NULL), UUID means specific sub-key
     let group_key_id_filter: Option<GroupKeyIdFilter> = match params.group_key_id {
         None => None,
         Some(ref v) if v == "null" => Some(GroupKeyIdFilter::IsNull),
         Some(ref v) => {
-            let id = v.parse::<Uuid>().map_err(|_| err(StatusCode::BAD_REQUEST, "Invalid group_key_id"))?;
+            let id = v
+                .parse::<Uuid>()
+                .map_err(|_| err(StatusCode::BAD_REQUEST, "Invalid group_key_id"))?;
             Some(GroupKeyIdFilter::Equals(id))
         }
     };
@@ -220,8 +222,7 @@ async fn get_token_usage(
              ORDER BY s.name, t.model",
         );
 
-        let mut query =
-            sqlx::query_as::<_, ServerTokenUsage>(&qb).bind(group_id);
+        let mut query = sqlx::query_as::<_, ServerTokenUsage>(&qb).bind(group_id);
         if let Some(is_dk) = params.is_dynamic_key {
             query = query.bind(is_dk);
         }

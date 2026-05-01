@@ -35,14 +35,20 @@ fn validate_cb_fields(
     }
 
     if provided.len() != 3 {
-        return Err(err(StatusCode::BAD_REQUEST, "Circuit breaker fields must be all set or all null"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Circuit breaker fields must be all set or all null",
+        ));
     }
 
     let all_null = provided.iter().all(|v| v.is_none());
     let all_some = provided.iter().all(|v| v.is_some());
 
     if !all_null && !all_some {
-        return Err(err(StatusCode::BAD_REQUEST, "Circuit breaker fields must be all set or all null"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Circuit breaker fields must be all set or all null",
+        ));
     }
 
     if all_some {
@@ -50,7 +56,10 @@ fn validate_cb_fields(
             if let Some(val) = v
                 && *val < 1
             {
-                return Err(err(StatusCode::BAD_REQUEST, "Circuit breaker values must be >= 1"));
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "Circuit breaker values must be >= 1",
+                ));
             }
         }
     }
@@ -73,14 +82,20 @@ fn validate_rate_limit_fields(
     }
 
     if provided.len() != 2 {
-        return Err(err(StatusCode::BAD_REQUEST, "Rate limit fields must be all set or all null"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Rate limit fields must be all set or all null",
+        ));
     }
 
     let all_null = provided.iter().all(|v| v.is_none());
     let all_some = provided.iter().all(|v| v.is_some());
 
     if !all_null && !all_some {
-        return Err(err(StatusCode::BAD_REQUEST, "Rate limit fields must be all set or all null"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Rate limit fields must be all set or all null",
+        ));
     }
 
     if all_some {
@@ -88,7 +103,10 @@ fn validate_rate_limit_fields(
             if let Some(val) = v
                 && *val < 1
             {
-                return Err(err(StatusCode::BAD_REQUEST, "Rate limit values must be >= 1"));
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "Rate limit values must be >= 1",
+                ));
             }
         }
     }
@@ -103,7 +121,10 @@ fn validate_active_hours_fields(
     timezone: &Option<Option<String>>,
 ) -> Result<(), ApiError> {
     // Count how many of the three outer Options are Some (i.e., provided by caller)
-    let provided_count = [start, end, timezone].iter().filter(|f| f.is_some()).count();
+    let provided_count = [start, end, timezone]
+        .iter()
+        .filter(|f| f.is_some())
+        .count();
 
     if provided_count == 0 {
         return Ok(()); // Not provided — leave unchanged
@@ -170,8 +191,12 @@ fn is_valid_hhmm(s: &str) -> bool {
     }
     let hh = &s[0..2];
     let mm = &s[3..5];
-    let Ok(h) = hh.parse::<u8>() else { return false };
-    let Ok(m) = mm.parse::<u8>() else { return false };
+    let Ok(h) = hh.parse::<u8>() else {
+        return false;
+    };
+    let Ok(m) = mm.parse::<u8>() else {
+        return false;
+    };
     h <= 23 && m <= 59
 }
 
@@ -205,9 +230,15 @@ fn validate_retry_fields(
 
     // All three provided. Check if they are all null (clearing) or all non-null (setting).
     let inner_count = [
-        retry_status_codes.as_ref().and_then(|v| v.as_ref()).is_some(),
+        retry_status_codes
+            .as_ref()
+            .and_then(|v| v.as_ref())
+            .is_some(),
         retry_count.as_ref().and_then(|v| v.as_ref()).is_some(),
-        retry_delay_seconds.as_ref().and_then(|v| v.as_ref()).is_some(),
+        retry_delay_seconds
+            .as_ref()
+            .and_then(|v| v.as_ref())
+            .is_some(),
     ]
     .iter()
     .filter(|&&b| b)
@@ -230,12 +261,18 @@ fn validate_retry_fields(
     let delay = retry_delay_seconds.as_ref().unwrap().as_ref().unwrap();
 
     if codes.is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "retry_status_codes must be non-empty"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "retry_status_codes must be non-empty",
+        ));
     }
 
     for &code in codes {
         if !(400..=599).contains(&code) {
-            return Err(err(StatusCode::BAD_REQUEST, "retry_status_codes values must be in range 400-599"));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "retry_status_codes values must be in range 400-599",
+            ));
         }
     }
 
@@ -244,7 +281,10 @@ fn validate_retry_fields(
     }
 
     if *delay <= 0.0 {
-        return Err(err(StatusCode::BAD_REQUEST, "retry_delay_seconds must be > 0"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "retry_delay_seconds must be > 0",
+        ));
     }
 
     Ok(())
@@ -295,7 +335,11 @@ async fn update_assignment(
     Json(input): Json<UpdateAssignment>,
 ) -> Result<Json<GroupServer>, ApiError> {
     // Validate circuit breaker fields
-    validate_cb_fields(input.cb_max_failures, input.cb_window_seconds, input.cb_cooldown_seconds)?;
+    validate_cb_fields(
+        input.cb_max_failures,
+        input.cb_window_seconds,
+        input.cb_cooldown_seconds,
+    )?;
 
     // Validate rate limit fields
     validate_rate_limit_fields(input.max_requests, input.rate_window_seconds)?;
@@ -310,7 +354,10 @@ async fn update_assignment(
         if let Some(Some(v)) = val
             && *v < 0.0
         {
-            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                &format!("{field} must be non-negative"),
+            ));
         }
     }
 
@@ -397,10 +444,11 @@ async fn update_assignment(
         Some(v) => (true, v),
         None => (false, None),
     };
-    let (update_active_hours_timezone, active_hours_timezone_val) = match input.active_hours_timezone {
-        Some(v) => (true, v),
-        None => (false, None),
-    };
+    let (update_active_hours_timezone, active_hours_timezone_val) =
+        match input.active_hours_timezone {
+            Some(v) => (true, v),
+            None => (false, None),
+        };
 
     // Determine whether to update retry fields
     let (update_retry_status_codes, retry_status_codes_val) = match input.retry_status_codes {
@@ -497,14 +545,12 @@ async fn remove_server(
     State(state): State<AppState>,
     Path((group_id, server_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
-    let result = sqlx::query(
-        "DELETE FROM group_servers WHERE group_id = $1 AND server_id = $2",
-    )
-    .bind(group_id)
-    .bind(server_id)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    let result = sqlx::query("DELETE FROM group_servers WHERE group_id = $1 AND server_id = $2")
+        .bind(group_id)
+        .bind(server_id)
+        .execute(&state.db)
+        .await
+        .map_err(internal)?;
 
     if result.rows_affected() == 0 {
         return Err(err(StatusCode::NOT_FOUND, "Assignment not found"));

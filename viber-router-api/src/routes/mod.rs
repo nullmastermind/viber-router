@@ -2,7 +2,7 @@ use axum::Router;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -54,12 +54,15 @@ pub async fn refresh_pricing_cache(db: &PgPool, cache: &PricingCache) {
             let mut map = HashMap::new();
             for (name, input, output, cache_write, cache_read) in models {
                 if let (Some(i), Some(o)) = (input, output) {
-                    map.insert(name, ModelPricing {
-                        input_1m_usd: i,
-                        output_1m_usd: o,
-                        cache_write_1m_usd: cache_write.unwrap_or(0.0),
-                        cache_read_1m_usd: cache_read.unwrap_or(0.0),
-                    });
+                    map.insert(
+                        name,
+                        ModelPricing {
+                            input_1m_usd: i,
+                            output_1m_usd: o,
+                            cache_write_1m_usd: cache_write.unwrap_or(0.0),
+                            cache_read_1m_usd: cache_read.unwrap_or(0.0),
+                        },
+                    );
                 }
             }
             *cache.write().await = map;

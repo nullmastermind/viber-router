@@ -112,10 +112,18 @@ async fn get_spam_detection(
     }
 
     let total = flagged.len() as i64;
-    let total_pages = if limit > 0 { (total as f64 / limit as f64).ceil() as i64 } else { 0 };
+    let total_pages = if limit > 0 {
+        (total as f64 / limit as f64).ceil() as i64
+    } else {
+        0
+    };
 
     // Apply pagination
-    let page_items: Vec<&FlaggedKey> = flagged.iter().skip(offset as usize).take(limit as usize).collect();
+    let page_items: Vec<&FlaggedKey> = flagged
+        .iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .collect();
 
     let detected_at = Utc::now();
     let mut results: Vec<SpamResult> = Vec::with_capacity(page_items.len());
@@ -136,7 +144,11 @@ async fn get_spam_detection(
         };
 
         // Compute peak_rpm using date_trunc('minute', created_at) within the detection window
-        let window_interval = if item.spam_type == "low_token" { "20 minutes" } else { "10 minutes" };
+        let window_interval = if item.spam_type == "low_token" {
+            "20 minutes"
+        } else {
+            "10 minutes"
+        };
         let peak_rpm: i64 = sqlx::query_scalar::<_, i64>(&format!(
             "SELECT COALESCE(MAX(cnt), 0)::bigint FROM ( \
                SELECT COUNT(*)::bigint as cnt \
@@ -162,5 +174,10 @@ async fn get_spam_detection(
         });
     }
 
-    Ok(Json(PaginatedResponse { data: results, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data: results,
+        total,
+        page,
+        total_pages,
+    }))
 }

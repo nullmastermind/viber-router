@@ -1,27 +1,22 @@
-pub mod servers;
-pub mod groups;
-pub mod group_servers;
-pub mod group_keys;
-pub mod logs;
-pub mod ttft;
-pub mod token_usage;
-pub mod settings;
-pub mod models;
 pub mod group_allowed_models;
 pub mod group_key_allowed_models;
 pub mod group_key_servers;
-pub mod subscription_plans;
-pub mod key_subscriptions;
-pub mod uptime;
-pub mod spam_detection;
+pub mod group_keys;
+pub mod group_servers;
 pub mod group_user_agents;
+pub mod groups;
+pub mod key_subscriptions;
+pub mod logs;
+pub mod models;
+pub mod servers;
+pub mod settings;
+pub mod spam_detection;
+pub mod subscription_plans;
+pub mod token_usage;
+pub mod ttft;
+pub mod uptime;
 
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::post,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use serde::Deserialize;
 
 use crate::routes::AppState;
@@ -61,7 +56,5 @@ pub fn router(state: AppState) -> Router<AppState> {
             crate::middleware::admin_auth::admin_auth,
         ));
 
-    Router::new()
-        .route("/login", post(login))
-        .merge(protected)
+    Router::new().route("/login", post(login)).merge(protected)
 }

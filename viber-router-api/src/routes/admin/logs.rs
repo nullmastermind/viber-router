@@ -1,4 +1,9 @@
-use axum::{Json, Router, extract::{Query, State}, http::StatusCode, routing::{get, post}};
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    http::StatusCode,
+    routing::{get, post},
+};
 use chrono::{DateTime, NaiveTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -174,7 +179,10 @@ async fn list_logs(
         count_query.fetch_one(&state.db),
     )
     .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
     })?;
 
     Ok(Json(LogListResponse { data: rows, total }))
@@ -185,7 +193,9 @@ async fn log_stats(
     Query(params): Query<LogQueryParams>,
 ) -> Result<Json<LogStatsResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Default to last 24 hours if no date range specified
-    let from = params.from.unwrap_or_else(|| Utc::now() - chrono::Duration::hours(24));
+    let from = params
+        .from
+        .unwrap_or_else(|| Utc::now() - chrono::Duration::hours(24));
 
     let mut count_sql = String::from("SELECT COUNT(*) FROM proxy_logs WHERE created_at >= $1");
     let mut status_sql = String::from(
@@ -257,19 +267,19 @@ async fn log_stats(
         status_query = status_query.bind(v);
     }
 
-    let total = count_query
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
-        })?;
+    let total = count_query.fetch_one(&state.db).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
-    let status_rows = status_query
-        .fetch_all(&state.db)
-        .await
-        .map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
-        })?;
+    let status_rows = status_query.fetch_all(&state.db).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
     let by_status = status_rows
         .into_iter()
@@ -323,15 +333,17 @@ async fn purge_preview(
     let cutoff_naive = Utc::now().naive_utc().date() - chrono::Duration::days(params.keep_days);
     let cutoff = Utc.from_utc_datetime(&cutoff_naive.and_time(NaiveTime::MIN));
 
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM proxy_logs WHERE created_at < $1",
-    )
-    .bind(cutoff)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
-    })?;
+    let count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM proxy_logs WHERE created_at < $1")
+            .bind(cutoff)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+            })?;
 
     Ok(Json(PurgePreviewResponse { count, cutoff }))
 }
@@ -360,7 +372,10 @@ async fn purge_logs(
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
     })?;
 
     let mut total_deleted: i64 = 0;
@@ -388,9 +403,12 @@ async fn purge_logs(
             }
             Some(_) => {
                 // Partition overlaps cutoff — delete rows older than cutoff
-                let delete_sql =
-                    format!("DELETE FROM \"{partition_name}\" WHERE created_at < $1");
-                match sqlx::query(&delete_sql).bind(cutoff).execute(&state.db).await {
+                let delete_sql = format!("DELETE FROM \"{partition_name}\" WHERE created_at < $1");
+                match sqlx::query(&delete_sql)
+                    .bind(cutoff)
+                    .execute(&state.db)
+                    .await
+                {
                     Ok(result) => {
                         total_deleted += result.rows_affected() as i64;
                     }
@@ -406,5 +424,7 @@ async fn purge_logs(
         }
     }
 
-    Ok(Json(PurgeResponse { deleted: total_deleted }))
+    Ok(Json(PurgeResponse {
+        deleted: total_deleted,
+    }))
 }

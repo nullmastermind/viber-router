@@ -1,18 +1,14 @@
 use axum::{
+    Json,
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 
 use crate::routes::AppState;
 
-pub async fn admin_auth(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn admin_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let auth_header = req
         .headers()
         .get("authorization")

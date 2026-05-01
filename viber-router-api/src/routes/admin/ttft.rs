@@ -90,7 +90,8 @@ async fn get_ttft_stats(
     State(state): State<AppState>,
     Query(params): Query<TtftStatsParams>,
 ) -> Result<Json<TtftStatsResponse>, ApiError> {
-    let group_id = params.group_id
+    let group_id = params
+        .group_id
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "group_id is required"))?;
 
     let key_filter = if params.group_key_id.is_some() {
@@ -179,11 +180,14 @@ async fn get_ttft_stats(
     let mut points_by_server: std::collections::HashMap<Uuid, Vec<TtftDataPointOut>> =
         std::collections::HashMap::new();
     for p in all_points {
-        points_by_server.entry(p.server_id).or_default().push(TtftDataPointOut {
-            created_at: p.created_at,
-            ttft_ms: p.ttft_ms,
-            timed_out: p.timed_out,
-        });
+        points_by_server
+            .entry(p.server_id)
+            .or_default()
+            .push(TtftDataPointOut {
+                created_at: p.created_at,
+                ttft_ms: p.ttft_ms,
+                timed_out: p.timed_out,
+            });
     }
 
     let servers = agg_rows

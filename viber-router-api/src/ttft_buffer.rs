@@ -20,9 +20,7 @@ const FLUSH_INTERVAL_SECS: u64 = 5;
 
 pub async fn flush_task(mut rx: mpsc::Receiver<TtftLogEntry>, pool: PgPool) {
     let mut buffer: Vec<TtftLogEntry> = Vec::with_capacity(BATCH_SIZE);
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_secs(FLUSH_INTERVAL_SECS),
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(FLUSH_INTERVAL_SECS));
 
     loop {
         tokio::select! {

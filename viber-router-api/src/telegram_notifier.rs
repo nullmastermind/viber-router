@@ -19,7 +19,9 @@ fn default_settings() -> Settings {
 
 /// Escape special characters for Telegram MarkdownV2.
 fn escape_md(s: &str) -> String {
-    let special = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
+    let special = [
+        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
+    ];
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
         if special.contains(&c) {
@@ -54,7 +56,10 @@ pub async fn maybe_alert(ctx: AlertContext) {
     };
 
     // Skip if status code not in alert list
-    if !settings.alert_status_codes.contains(&(ctx.status_code as i32)) {
+    if !settings
+        .alert_status_codes
+        .contains(&(ctx.status_code as i32))
+    {
         return;
     }
 
@@ -65,7 +70,10 @@ pub async fn maybe_alert(ctx: AlertContext) {
     let should_send = match check_and_set_cooldown(&ctx.redis, &cooldown_key, ttl_secs).await {
         Ok(acquired) => acquired,
         Err(e) => {
-            tracing::warn!("telegram_notifier: Redis cooldown check failed (fail open): {}", e);
+            tracing::warn!(
+                "telegram_notifier: Redis cooldown check failed (fail open): {}",
+                e
+            );
             true // fail open
         }
     };
@@ -138,7 +146,10 @@ pub async fn send_circuit_breaker_alert(ctx: CircuitBreakerAlertContext) {
     let should_send = match check_and_set_cooldown(&ctx.redis, &cooldown_key, ttl_secs).await {
         Ok(acquired) => acquired,
         Err(e) => {
-            tracing::warn!("telegram_notifier: CB cooldown check failed (fail open): {}", e);
+            tracing::warn!(
+                "telegram_notifier: CB cooldown check failed (fail open): {}",
+                e
+            );
             true
         }
     };
@@ -207,7 +218,12 @@ async fn load_settings(db: &PgPool) -> Option<Settings> {
     }
 }
 
-async fn send_to_chats(http_client: &reqwest::Client, token: &str, chat_ids: &[String], text: &str) {
+async fn send_to_chats(
+    http_client: &reqwest::Client,
+    token: &str,
+    chat_ids: &[String],
+    text: &str,
+) {
     let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
 
     let futures: Vec<_> = chat_ids

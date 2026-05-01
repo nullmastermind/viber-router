@@ -38,14 +38,12 @@ struct UserAgentBody {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/", get(list_group_user_agents))
-        .route(
-            "/blocked",
-            get(list_group_blocked_user_agents)
-                .post(add_group_blocked_user_agent)
-                .delete(remove_group_blocked_user_agent),
-        )
+    Router::new().route("/", get(list_group_user_agents)).route(
+        "/blocked",
+        get(list_group_blocked_user_agents)
+            .post(add_group_blocked_user_agent)
+            .delete(remove_group_blocked_user_agent),
+    )
 }
 
 async fn list_group_user_agents(
@@ -105,14 +103,12 @@ async fn remove_group_blocked_user_agent(
     Path(group_id): Path<Uuid>,
     Json(body): Json<UserAgentBody>,
 ) -> Result<StatusCode, ApiError> {
-    sqlx::query(
-        "DELETE FROM group_blocked_user_agents WHERE group_id = $1 AND user_agent = $2",
-    )
-    .bind(group_id)
-    .bind(&body.user_agent)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    sqlx::query("DELETE FROM group_blocked_user_agents WHERE group_id = $1 AND user_agent = $2")
+        .bind(group_id)
+        .bind(&body.user_agent)
+        .execute(&state.db)
+        .await
+        .map_err(internal)?;
 
     crate::cache::invalidate_group_all_keys(&state.redis, &state.db, group_id).await;
 

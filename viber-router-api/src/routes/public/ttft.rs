@@ -78,13 +78,12 @@ pub async fn public_ttft(
     };
 
     // Lookup sub-key
-    let key_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM group_keys WHERE api_key = $1 AND is_active = true",
-    )
-    .bind(&key)
-    .fetch_optional(&state.db)
-    .await
-    .unwrap_or(None);
+    let key_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM group_keys WHERE api_key = $1 AND is_active = true")
+            .bind(&key)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
 
     let Some(key_id) = key_id else {
         return err(StatusCode::FORBIDDEN, "Invalid or inactive key").into_response();

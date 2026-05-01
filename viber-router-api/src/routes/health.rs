@@ -1,15 +1,12 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::AppState;
 
 pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
-    let db_ok = sqlx::query("SELECT 1")
-        .execute(&state.db)
-        .await
-        .is_ok();
+    let db_ok = sqlx::query("SELECT 1").execute(&state.db).await.is_ok();
 
     let redis_ok = async {
         let mut conn = state.redis.get().await?;
@@ -31,5 +28,8 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Va
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    (code, Json(json!({ "status": status, "db": db_status, "redis": redis_status })))
+    (
+        code,
+        Json(json!({ "status": status, "db": db_status, "redis": redis_status })),
+    )
 }

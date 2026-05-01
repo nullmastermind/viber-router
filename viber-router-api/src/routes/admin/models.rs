@@ -30,7 +30,10 @@ pub struct ListParams {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_models).post(create_model))
-        .route("/{id}", axum::routing::put(update_model).delete(delete_model))
+        .route(
+            "/{id}",
+            axum::routing::put(update_model).delete(delete_model),
+        )
 }
 
 async fn list_models(
@@ -43,13 +46,11 @@ async fn list_models(
     let search_pattern = params.search.as_ref().map(|s| format!("%{s}%"));
 
     let (total, data) = if let Some(ref pattern) = search_pattern {
-        let (count,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM models WHERE name ILIKE $1",
-        )
-        .bind(pattern)
-        .fetch_one(&state.db)
-        .await
-        .map_err(internal)?;
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM models WHERE name ILIKE $1")
+            .bind(pattern)
+            .fetch_one(&state.db)
+            .await
+            .map_err(internal)?;
 
         let rows = sqlx::query_as::<_, Model>(
             "SELECT id, name, input_1m_usd, output_1m_usd, cache_write_1m_usd, cache_read_1m_usd, created_at \
@@ -83,7 +84,12 @@ async fn list_models(
     };
 
     let total_pages = (total as f64 / limit as f64).ceil() as i64;
-    Ok(Json(PaginatedResponse { data, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data,
+        total,
+        page,
+        total_pages,
+    }))
 }
 
 async fn create_model(
@@ -105,7 +111,10 @@ async fn create_model(
         if let Some(v) = val
             && v < 0.0
         {
-            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                &format!("{field} must be non-negative"),
+            ));
         }
     }
 
@@ -146,7 +155,10 @@ async fn update_model(
         if let Some(Some(v)) = val
             && *v < 0.0
         {
-            return Err(err(StatusCode::BAD_REQUEST, &format!("{field} must be non-negative")));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                &format!("{field} must be non-negative"),
+            ));
         }
     }
 

@@ -44,9 +44,7 @@ const FLUSH_INTERVAL_SECS: u64 = 5;
 
 pub async fn flush_task(mut rx: mpsc::Receiver<ProxyLogEntry>, pool: PgPool) {
     let mut buffer: Vec<ProxyLogEntry> = Vec::with_capacity(BATCH_SIZE);
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_secs(FLUSH_INTERVAL_SECS),
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(FLUSH_INTERVAL_SECS));
 
     loop {
         tokio::select! {
@@ -108,9 +106,7 @@ async fn flush_batch(pool: &PgPool, entries: &[ProxyLogEntry]) {
         status_codes.push(e.status_code);
         error_types.push(e.error_type.clone());
         latency_mss.push(e.latency_ms);
-        failover_chains.push(
-            serde_json::to_value(&e.failover_chain).unwrap_or_default(),
-        );
+        failover_chains.push(serde_json::to_value(&e.failover_chain).unwrap_or_default());
         request_models.push(e.request_model.clone());
         request_bodies.push(e.request_body.clone());
         request_headers_list.push(e.request_headers.clone());

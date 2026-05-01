@@ -46,7 +46,11 @@ impl ServerResponse {
             id: server.id,
             short_id: server.short_id,
             name: server.name,
-            base_url: if is_locked { None } else { Some(server.base_url) },
+            base_url: if is_locked {
+                None
+            } else {
+                Some(server.base_url)
+            },
             api_key: if is_locked { None } else { server.api_key },
             password_hash: server.password_hash,
             system_prompt: server.system_prompt,
@@ -59,7 +63,10 @@ impl ServerResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_servers).post(create_server))
-        .route("/{id}", get(get_server).put(update_server).delete(delete_server))
+        .route(
+            "/{id}",
+            get(get_server).put(update_server).delete(delete_server),
+        )
         .route("/{id}/verify-password", post(verify_password))
 }
 
@@ -88,7 +95,10 @@ async fn create_server(
     })?;
 
     let unlocked = state.unlocked_servers.read().await;
-    Ok((StatusCode::CREATED, Json(ServerResponse::from_server(server, &unlocked))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ServerResponse::from_server(server, &unlocked)),
+    ))
 }
 
 async fn list_servers(
@@ -110,13 +120,23 @@ async fn list_servers(
         .bind(offset)
         .fetch_all(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
 
         let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM servers WHERE name ILIKE $1")
             .bind(&pattern)
             .fetch_one(&state.db)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+            })?;
 
         (servers, total.0)
     } else {
@@ -127,20 +147,38 @@ async fn list_servers(
         .bind(offset)
         .fetch_all(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
 
         let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM servers")
             .fetch_one(&state.db)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+            })?;
 
         (servers, total.0)
     };
 
     let total_pages = (total as f64 / limit as f64).ceil() as i64;
-    let data: Vec<ServerResponse> = servers.into_iter().map(|s| ServerResponse::from_server(s, &unlocked)).collect();
+    let data: Vec<ServerResponse> = servers
+        .into_iter()
+        .map(|s| ServerResponse::from_server(s, &unlocked))
+        .collect();
 
-    Ok(Json(PaginatedResponse { data, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data,
+        total,
+        page,
+        total_pages,
+    }))
 }
 
 async fn get_server(
@@ -151,8 +189,18 @@ async fn get_server(
         .bind(id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Server not found"})),
+            )
+        })?;
 
     let unlocked = state.unlocked_servers.read().await;
     Ok(Json(ServerResponse::from_server(server, &unlocked)))
@@ -340,8 +388,18 @@ async fn update_server(
             .await
         }
     }
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?
-    .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Server not found"})),
+        )
+    })?;
 
     // Invalidate cache for all groups using this server
     crate::cache::invalidate_groups_by_server(&state.redis, &state.db, id).await;
@@ -370,8 +428,18 @@ async fn verify_password(
         .bind(id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Server not found"})),
+            )
+        })?;
 
     // If no password is set on the server, treat as unlocked
     if let Some(expected_hash) = &server.password_hash {
@@ -379,7 +447,10 @@ async fn verify_password(
         hasher.update(input.password.as_bytes());
         let input_hash = format!("{:x}", hasher.finalize());
         if input_hash != *expected_hash {
-            return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Incorrect password"}))));
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "Incorrect password"})),
+            ));
         }
     }
 
@@ -405,7 +476,12 @@ async fn delete_server(
     .bind(id)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
     if !groups.is_empty() {
         let group_names: Vec<String> = groups.iter().map(|(_, name)| name.clone()).collect();
@@ -422,10 +498,18 @@ async fn delete_server(
         .bind(id)
         .execute(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
 
     if result.rows_affected() == 0 {
-        return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Server not found"}))));
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Server not found"})),
+        ));
     }
 
     // Remove from unlocked set if present

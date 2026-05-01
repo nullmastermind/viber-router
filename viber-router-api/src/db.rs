@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 
 use crate::config::Config;
 

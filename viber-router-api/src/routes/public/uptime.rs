@@ -96,10 +96,12 @@ pub async fn public_uptime(
     let now_epoch = chrono::Utc::now().timestamp();
     let bucket_size: i64 = 1800;
     let current_bucket = (now_epoch / bucket_size) * bucket_size;
-    let bucket_timestamps: Vec<i64> = (0..90).rev().map(|i| current_bucket - i * bucket_size).collect();
+    let bucket_timestamps: Vec<i64> = (0..90)
+        .rev()
+        .map(|i| current_bucket - i * bucket_size)
+        .collect();
 
-    let cutoff = chrono::DateTime::from_timestamp(bucket_timestamps[0], 0)
-        .unwrap_or_default();
+    let cutoff = chrono::DateTime::from_timestamp(bucket_timestamps[0], 0).unwrap_or_default();
 
     // --- All uptime data (overall + per-model) from proxy_logs ---
 

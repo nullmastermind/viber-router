@@ -31,8 +31,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&config.rust_log)),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.rust_log)),
         )
         .init();
 
@@ -41,9 +40,7 @@ async fn main() -> Result<()> {
     let db_pool = db::create_pool(&config).await?;
     tracing::info!("Connected to PostgreSQL");
 
-    sqlx::migrate!("./migrations")
-        .run(&db_pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(&db_pool).await?;
     tracing::info!("Migrations applied");
 
     // Ensure partitions exist for current and next month
@@ -125,8 +122,10 @@ async fn main() -> Result<()> {
             partition::ensure_partitions(&partition_pool, "uptime_checks").await;
             partition::drop_expired_partitions(&partition_pool, "proxy_logs", retention_days).await;
             partition::drop_expired_partitions(&partition_pool, "ttft_logs", retention_days).await;
-            partition::drop_expired_partitions(&partition_pool, "token_usage_logs", retention_days).await;
-            partition::drop_expired_partitions(&partition_pool, "uptime_checks", retention_days).await;
+            partition::drop_expired_partitions(&partition_pool, "token_usage_logs", retention_days)
+                .await;
+            partition::drop_expired_partitions(&partition_pool, "uptime_checks", retention_days)
+                .await;
             tracing::info!("Daily partition maintenance complete");
         }
     });
@@ -147,9 +146,12 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Listening on {}", addr);
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     // Drop state to close the log channel sender, then drain the flush tasks
     drop(state);

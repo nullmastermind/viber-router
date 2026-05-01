@@ -22,8 +22,14 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/", get(list_group_allowed_models).post(add_group_allowed_model))
-        .route("/{model_id}", axum::routing::delete(remove_group_allowed_model))
+        .route(
+            "/",
+            get(list_group_allowed_models).post(add_group_allowed_model),
+        )
+        .route(
+            "/{model_id}",
+            axum::routing::delete(remove_group_allowed_model),
+        )
 }
 
 async fn list_group_allowed_models(
@@ -74,24 +80,25 @@ async fn add_group_allowed_model(
         .map_err(internal)?;
         m.id
     } else {
-        return Err(err(StatusCode::BAD_REQUEST, "Either model_id or name is required"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Either model_id or name is required",
+        ));
     };
 
     // Insert into junction table
-    sqlx::query(
-        "INSERT INTO group_allowed_models (group_id, model_id) VALUES ($1, $2)",
-    )
-    .bind(group_id)
-    .bind(model_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
-            err(StatusCode::CONFLICT, "Model already assigned to this group")
-        } else {
-            internal(e)
-        }
-    })?;
+    sqlx::query("INSERT INTO group_allowed_models (group_id, model_id) VALUES ($1, $2)")
+        .bind(group_id)
+        .bind(model_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("duplicate key") || e.to_string().contains("unique") {
+                err(StatusCode::CONFLICT, "Model already assigned to this group")
+            } else {
+                internal(e)
+            }
+        })?;
 
     // Invalidate cache
     crate::cache::invalidate_group_all_keys(&state.redis, &state.db, group_id).await;
@@ -110,17 +117,19 @@ async fn remove_group_allowed_model(
     Path((group_id, model_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     // Delete from group_allowed_models (cascade to sub-keys handled manually)
-    let result = sqlx::query(
-        "DELETE FROM group_allowed_models WHERE group_id = $1 AND model_id = $2",
-    )
-    .bind(group_id)
-    .bind(model_id)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    let result =
+        sqlx::query("DELETE FROM group_allowed_models WHERE group_id = $1 AND model_id = $2")
+            .bind(group_id)
+            .bind(model_id)
+            .execute(&state.db)
+            .await
+            .map_err(internal)?;
 
     if result.rows_affected() == 0 {
-        return Err(err(StatusCode::NOT_FOUND, "Model not in group's allowed list"));
+        return Err(err(
+            StatusCode::NOT_FOUND,
+            "Model not in group's allowed list",
+        ));
     }
 
     // Cascade-delete from all sub-keys of this group

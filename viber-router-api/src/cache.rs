@@ -18,7 +18,13 @@ pub async fn set_group_config(redis: &Pool, api_key: &str, config: &GroupConfig)
     if let Ok(mut conn) = redis.get().await
         && let Ok(data) = serde_json::to_string(config)
     {
-        let _: Result<(), _> = conn.set_ex(format!("{KEY_PREFIX}{api_key}"), data, CONFIG_TTL_SECS as u64).await;
+        let _: Result<(), _> = conn
+            .set_ex(
+                format!("{KEY_PREFIX}{api_key}"),
+                data,
+                CONFIG_TTL_SECS as u64,
+            )
+            .await;
     }
 }
 
@@ -31,27 +37,24 @@ pub async fn invalidate_group_config(redis: &Pool, api_key: &str) {
 /// Invalidate cache for a group's master key AND all its sub-keys.
 pub async fn invalidate_group_all_keys(redis: &Pool, db: &PgPool, group_id: Uuid) {
     // Get master key
-    let master: Option<(String,)> = sqlx::query_as(
-        "SELECT api_key FROM groups WHERE id = $1",
-    )
-    .bind(group_id)
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten();
+    let master: Option<(String,)> = sqlx::query_as("SELECT api_key FROM groups WHERE id = $1")
+        .bind(group_id)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
 
     if let Some((master_key,)) = master {
         invalidate_group_config(redis, &master_key).await;
     }
 
     // Get all sub-keys
-    let sub_keys: Vec<(String,)> = sqlx::query_as(
-        "SELECT api_key FROM group_keys WHERE group_id = $1",
-    )
-    .bind(group_id)
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let sub_keys: Vec<(String,)> =
+        sqlx::query_as("SELECT api_key FROM group_keys WHERE group_id = $1")
+            .bind(group_id)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default();
 
     for (api_key,) in sub_keys {
         invalidate_group_config(redis, &api_key).await;
@@ -103,7 +106,11 @@ pub async fn invalidate_blocked_paths(redis: &Pool) {
 
 /// Add a user-agent to the group's seen-UA set.
 /// Returns Ok(true) if the UA is new (SADD returned 1), Ok(false) if already present.
-pub async fn add_group_ua(redis: &Pool, group_id: Uuid, user_agent: &str) -> Result<bool, anyhow::Error> {
+pub async fn add_group_ua(
+    redis: &Pool,
+    group_id: Uuid,
+    user_agent: &str,
+) -> Result<bool, anyhow::Error> {
     let mut conn = redis.get().await?;
     let key = format!("group:{group_id}:user_agents");
     let added: i64 = conn.sadd(key, user_agent).await?;
