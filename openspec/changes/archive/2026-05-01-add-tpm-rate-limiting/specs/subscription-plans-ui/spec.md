@@ -1,11 +1,4 @@
-## ADDED Requirements
-
-### Requirement: Plans sidebar page
-The system SHALL display a "Plans" page accessible from the main sidebar navigation, at the same level as Groups and Models.
-
-#### Scenario: Sidebar navigation
-- **WHEN** the user views the sidebar
-- **THEN** a "Plans" link SHALL be visible and navigate to the Plans page
+## MODIFIED Requirements
 
 ### Requirement: Plans list view
 The Plans page SHALL display all subscription plans in a table with columns: Name, Type (fixed/hourly_reset/pay_per_request), Cost Limit, RPM Limit, TPM Limit, Model Limits, Model Request Costs, Reset Hours, Duration (days), Active status.
@@ -49,20 +42,7 @@ The system SHALL provide a dialog to create a new plan with fields: name (text),
 - **WHEN** the user selects type "pay_per_request" and submits without adding any model request costs
 - **THEN** the system SHALL show a validation error and not submit
 
-### Requirement: Model request costs editor
-The create/edit plan dialog SHALL include a model request costs editor (visible only when `sub_type` is `pay_per_request`) where the admin can add per-model flat costs by selecting a model from a dropdown and entering a dollar amount per request.
-
-#### Scenario: Add model request cost
-- **WHEN** the admin selects "claude-sonnet-4-6" from the dropdown and enters 0.10
-- **THEN** the model request cost SHALL be added to `model_request_costs` as `{"claude-sonnet-4-6": 0.10}`
-
-#### Scenario: Remove model request cost
-- **WHEN** the admin removes a model request cost entry
-- **THEN** the model SHALL be removed from `model_request_costs`
-
-#### Scenario: Editor hidden for non-pay_per_request types
-- **WHEN** the plan type is "fixed" or "hourly_reset"
-- **THEN** the model request costs editor SHALL NOT be visible
+## ADDED Requirements
 
 ### Requirement: Edit plan TPM limit
 The Plans page SHALL populate and submit `tpm_limit` when editing a plan.

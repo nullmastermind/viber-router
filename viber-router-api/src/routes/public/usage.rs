@@ -57,6 +57,7 @@ pub struct PublicSubscription {
     sub_type: String,
     cost_limit_usd: f64,
     rpm_limit: Option<f64>,
+    tpm_limit: Option<f64>,
     status: String,
     cost_used: f64,
     window_reset_at: Option<String>,
@@ -175,7 +176,11 @@ pub async fn public_usage(
             let bonus_usage_data: Vec<BonusModelUsage> = usage_rows
                 .into_iter()
                 .filter_map(|(model, count, cost)| {
-                    model.map(|m| BonusModelUsage { model: m, request_count: count, cost_usd: cost })
+                    model.map(|m| BonusModelUsage {
+                        model: m,
+                        request_count: count,
+                        cost_usd: cost,
+                    })
                 })
                 .collect();
 
@@ -199,6 +204,7 @@ pub async fn public_usage(
             sub_type: sub.sub_type.clone(),
             cost_limit_usd: sub.cost_limit_usd,
             rpm_limit: sub.rpm_limit,
+            tpm_limit: sub.tpm_limit,
             status: sub.status.clone(),
             cost_used,
             window_reset_at,
@@ -273,7 +279,8 @@ async fn fetch_bonus_quotas(
     quota_url: &str,
     quota_headers: Option<&serde_json::Value>,
 ) -> Option<Vec<QuotaInfo>> {
-    let mut req = state.http_client
+    let mut req = state
+        .http_client
         .get(quota_url)
         .timeout(std::time::Duration::from_secs(5));
 
@@ -314,9 +321,20 @@ async fn fetch_bonus_quotas(
         .filter_map(|item| {
             let name = item.get("name")?.as_str()?.to_string();
             let utilization = item.get("utilization")?.as_f64()?;
-            let reset_at = item.get("reset_at").and_then(|v| v.as_str()).map(String::from);
-            let description = item.get("description").and_then(|v| v.as_str()).map(String::from);
-            Some(QuotaInfo { name, utilization, reset_at, description })
+            let reset_at = item
+                .get("reset_at")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let description = item
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            Some(QuotaInfo {
+                name,
+                utilization,
+                reset_at,
+                description,
+            })
         })
         .collect();
 

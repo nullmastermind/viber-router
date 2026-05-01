@@ -49,14 +49,3 @@ The proxy SHALL select the charging subscription using this priority: hourly_res
 #### Scenario: Selected subscription waits instead of falling through on TPM
 - **WHEN** the selected non-bonus subscription is at its TPM limit and a lower-priority subscription has available budget
 - **THEN** the proxy SHALL wait for the selected subscription's TPM window rather than skipping to the lower-priority subscription
-
-### Requirement: Pay-per-request model blocking in subscription check
-The proxy SHALL skip a `pay_per_request` subscription during the budget check if the requested model is not present as a key in `model_request_costs`. The subscription SHALL NOT be marked exhausted or expired; it is simply ineligible for this model.
-
-#### Scenario: Model not in model_request_costs skips subscription
-- **WHEN** a proxy request uses model "claude-opus-4-6" and the candidate subscription is `pay_per_request` with `model_request_costs: {"claude-sonnet-4-6": 0.10}`
-- **THEN** the system SHALL skip this subscription and try the next one
-
-#### Scenario: Model in model_request_costs proceeds to budget check
-- **WHEN** a proxy request uses model "claude-sonnet-4-6" and the candidate subscription is `pay_per_request` with `model_request_costs: {"claude-sonnet-4-6": 0.10}` and remaining budget
-- **THEN** the system SHALL allow the request and charge this subscription

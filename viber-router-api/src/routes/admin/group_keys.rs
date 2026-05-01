@@ -7,7 +7,9 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::models::{CreateGroupKey, GroupKey, PaginatedResponse, SubscriptionPlan, UpdateGroupKey, generate_api_key};
+use crate::models::{
+    CreateGroupKey, GroupKey, PaginatedResponse, SubscriptionPlan, UpdateGroupKey, generate_api_key,
+};
 use crate::routes::AppState;
 
 type ApiError = (StatusCode, Json<serde_json::Value>);
@@ -40,8 +42,14 @@ pub fn router() -> Router<AppState> {
         .route("/bulk", post(bulk_create_keys))
         .route("/{key_id}", patch(update_key))
         .route("/{key_id}/regenerate", post(regenerate_key))
-        .nest("/{key_id}/allowed-models", super::group_key_allowed_models::router())
-        .nest("/{key_id}/subscriptions", super::key_subscriptions::router())
+        .nest(
+            "/{key_id}/allowed-models",
+            super::group_key_allowed_models::router(),
+        )
+        .nest(
+            "/{key_id}/subscriptions",
+            super::key_subscriptions::router(),
+        )
         .nest("/{key_id}/servers", super::group_key_servers::router())
 }
 
@@ -51,7 +59,10 @@ async fn create_key(
     Json(input): Json<CreateGroupKey>,
 ) -> Result<(StatusCode, Json<GroupKey>), ApiError> {
     if input.name.len() > 100 {
-        return Err(err(StatusCode::BAD_REQUEST, "Name must be 100 characters or less"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Name must be 100 characters or less",
+        ));
     }
 
     // Verify group exists
@@ -85,7 +96,10 @@ async fn bulk_create_keys(
     Json(input): Json<BulkCreateKeys>,
 ) -> Result<(StatusCode, Json<Vec<GroupKey>>), ApiError> {
     if input.count == 0 || input.count > 500 {
-        return Err(err(StatusCode::BAD_REQUEST, "Count must be between 1 and 500"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Count must be between 1 and 500",
+        ));
     }
 
     // Verify group exists
@@ -99,14 +113,13 @@ async fn bulk_create_keys(
     }
 
     // Fetch and validate plan
-    let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "SELECT * FROM subscription_plans WHERE id = $1",
-    )
-    .bind(input.plan_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
+    let plan =
+        sqlx::query_as::<_, SubscriptionPlan>("SELECT * FROM subscription_plans WHERE id = $1")
+            .bind(input.plan_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
     if !plan.is_active {
         return Err(err(StatusCode::BAD_REQUEST, "Plan is not active"));
@@ -122,7 +135,10 @@ async fn bulk_create_keys(
         };
 
         if name.len() > 100 {
-            return Err(err(StatusCode::BAD_REQUEST, "Generated key name exceeds 100 characters. Use a shorter prefix or plan name."));
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "Generated key name exceeds 100 characters. Use a shorter prefix or plan name.",
+            ));
         }
 
         let api_key = generate_api_key();
@@ -137,8 +153,8 @@ async fn bulk_create_keys(
         .map_err(internal)?;
 
         sqlx::query(
-            "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(key.id)
         .bind(plan.id)
@@ -149,6 +165,7 @@ async fn bulk_create_keys(
         .bind(plan.reset_hours)
         .bind(plan.duration_days)
         .bind(plan.rpm_limit)
+        .bind(plan.tpm_limit)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
@@ -195,13 +212,12 @@ async fn list_keys(
 
         (count, rows)
     } else {
-        let (count,) = sqlx::query_as::<_, (i64,)>(
-            "SELECT COUNT(*) FROM group_keys WHERE group_id = $1",
-        )
-        .bind(group_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(internal)?;
+        let (count,) =
+            sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM group_keys WHERE group_id = $1")
+                .bind(group_id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(internal)?;
 
         let rows = sqlx::query_as::<_, GroupKey>(
             "SELECT * FROM group_keys WHERE group_id = $1 \
@@ -218,9 +234,13 @@ async fn list_keys(
     };
 
     let total_pages = (total as f64 / limit as f64).ceil() as i64;
-    Ok(Json(PaginatedResponse { data: keys, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data: keys,
+        total,
+        page,
+        total_pages,
+    }))
 }
-
 
 async fn update_key(
     State(state): State<AppState>,
@@ -230,7 +250,10 @@ async fn update_key(
     if let Some(ref name) = input.name
         && name.len() > 100
     {
-        return Err(err(StatusCode::BAD_REQUEST, "Name must be 100 characters or less"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Name must be 100 characters or less",
+        ));
     }
 
     let key = sqlx::query_as::<_, GroupKey>(
@@ -258,15 +281,14 @@ async fn regenerate_key(
     State(state): State<AppState>,
     Path((group_id, key_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<GroupKey>, ApiError> {
-    let old_key = sqlx::query_as::<_, GroupKey>(
-        "SELECT * FROM group_keys WHERE id = $1 AND group_id = $2",
-    )
-    .bind(key_id)
-    .bind(group_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Key not found"))?;
+    let old_key =
+        sqlx::query_as::<_, GroupKey>("SELECT * FROM group_keys WHERE id = $1 AND group_id = $2")
+            .bind(key_id)
+            .bind(group_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Key not found"))?;
 
     let new_api_key = generate_api_key();
     let key = sqlx::query_as::<_, GroupKey>(

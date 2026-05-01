@@ -1516,6 +1516,7 @@ interface KeySubscription {
   model_limits: Record<string, number>;
   reset_hours: number | null;
   rpm_limit: number | null;
+  tpm_limit: number | null;
   duration_days: number;
   status: string;
   activated_at: string | null;
@@ -1574,6 +1575,7 @@ const subColumns = [
   { name: 'cost_used', label: 'Used', field: 'cost_used', align: 'right' as const },
   { name: 'bonus_allowed_models', label: 'Allowed Models', field: 'bonus_allowed_models', align: 'left' as const },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
+  { name: 'tpm_limit', label: 'TPM Limit', field: 'tpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'status', label: 'Status', field: 'status', align: 'center' as const },
   { name: 'duration_days', label: 'Duration', field: 'duration_days', align: 'right' as const, format: (v: number) => `${v}d` },
   { name: 'actions', label: '', field: 'id', align: 'right' as const },

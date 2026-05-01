@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Subscription plans table
 The system SHALL store subscription plan templates in a `subscription_plans` table with columns: `id` (UUID PK), `name` (TEXT NOT NULL), `sub_type` (TEXT NOT NULL, one of 'fixed', 'hourly_reset', or 'pay_per_request'), `cost_limit_usd` (FLOAT8 NOT NULL), `model_limits` (JSONB DEFAULT '{}'), `model_request_costs` (JSONB NOT NULL DEFAULT '{}'), `rpm_limit` (FLOAT8, nullable), `tpm_limit` (FLOAT8, nullable), `reset_hours` (INT, nullable), `duration_days` (INT NOT NULL), `is_active` (BOOLEAN DEFAULT true), `created_at` (TIMESTAMPTZ), `updated_at` (TIMESTAMPTZ).
@@ -41,6 +41,8 @@ The system SHALL allow creating a plan via POST `/api/admin/subscription-plans` 
 #### Scenario: Missing reset_hours for hourly_reset
 - **WHEN** an admin sends POST with `sub_type: "hourly_reset"` and `reset_hours` is null
 - **THEN** the system SHALL return 400 with error message
+
+## ADDED Requirements
 
 ### Requirement: Update subscription plan TPM
 The system SHALL allow PATCH `/api/admin/subscription-plans/{id}` to update `tpm_limit` independently of other plan fields. Updating a plan's `tpm_limit` SHALL auto-sync the value to active key subscriptions created from that plan, consistent with RPM auto-sync behavior.

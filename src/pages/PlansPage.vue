@@ -48,6 +48,9 @@
           <q-btn flat dense icon="sync" @click="onSyncRpm(props.row)">
             <q-tooltip>Sync RPM to active subscriptions</q-tooltip>
           </q-btn>
+          <q-btn flat dense icon="speed" @click="onSyncTpm(props.row)">
+            <q-tooltip>Sync TPM to active subscriptions</q-tooltip>
+          </q-btn>
           <q-btn flat dense icon="delete" color="negative" @click="onDelete(props.row)" />
         </q-td>
       </template>
@@ -72,6 +75,7 @@
           <q-input v-model.number="form.duration_days" label="Duration (days)" outlined dense type="number" :min="1" />
           <q-input v-if="form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request'" v-model.number="form.reset_hours" label="Reset Hours" outlined dense type="number" :min="1" />
           <q-input v-model.number="form.rpm_limit" label="RPM Limit" outlined dense type="number" :min="0" :step="0.1" hint="Requests per minute (empty = unlimited)" clearable @clear="form.rpm_limit = null" />
+          <q-input v-model.number="form.tpm_limit" label="TPM Limit" outlined dense type="number" :min="0" :step="1" hint="Tokens per minute (empty = unlimited)" clearable @clear="form.tpm_limit = null" />
           <div class="text-subtitle2 q-mt-sm">Model Limits</div>
           <div v-for="(entry, idx) in modelLimitEntries" :key="idx" class="row q-gutter-sm q-mb-xs">
             <q-select v-model="entry.model" :options="availableModels" label="Model" outlined dense emit-value map-options style="flex:2" />
@@ -114,6 +118,7 @@ interface Plan {
   model_request_costs: Record<string, number>;
   reset_hours: number | null;
   rpm_limit: number | null;
+  tpm_limit: number | null;
   duration_days: number;
   is_active: boolean;
   created_at: string;
@@ -139,6 +144,7 @@ const form = reactive({
   duration_days: 30,
   reset_hours: null as number | null,
   rpm_limit: null as number | null,
+  tpm_limit: null as number | null,
 });
 
 const columns = [
@@ -146,6 +152,7 @@ const columns = [
   { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Cost Limit', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
+  { name: 'tpm_limit', label: 'TPM Limit', field: 'tpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'model_limits', label: 'Model Limits', field: 'model_limits', align: 'left' as const },
   { name: 'model_request_costs', label: 'Request Costs', field: 'model_request_costs', align: 'left' as const },
   { name: 'reset_hours', label: 'Reset Hours', field: 'reset_hours', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
@@ -189,6 +196,7 @@ function openEdit(row: Plan) {
   form.duration_days = row.duration_days;
   form.reset_hours = row.reset_hours;
   form.rpm_limit = row.rpm_limit;
+  form.tpm_limit = row.tpm_limit;
   modelLimitEntries.value = Object.entries(row.model_limits || {}).map(([model, limit]) => ({ model, limit: limit as number }));
   modelRequestCostEntries.value = Object.entries(row.model_request_costs || {}).map(([model, cost]) => ({ model, cost: cost as number }));
   showDialog.value = true;
@@ -201,6 +209,7 @@ function resetForm() {
   form.duration_days = 30;
   form.reset_hours = null;
   form.rpm_limit = null;
+  form.tpm_limit = null;
   modelLimitEntries.value = [];
   modelRequestCostEntries.value = [];
 }
@@ -242,6 +251,7 @@ async function onSave() {
       duration_days: form.duration_days,
       reset_hours: (form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request') ? form.reset_hours : null,
       rpm_limit: form.rpm_limit && Number.isFinite(form.rpm_limit) ? form.rpm_limit : null,
+      tpm_limit: form.tpm_limit && Number.isFinite(form.tpm_limit) ? form.tpm_limit : null,
       model_limits: buildModelLimits(),
       model_request_costs: buildModelRequestCosts(),
     };
@@ -293,6 +303,23 @@ async function onSyncRpm(row: Plan) {
     try {
       const { data } = await api.post<{ updated: number }>(`/api/admin/subscription-plans/${row.id}/sync-rpm`);
       $q.notify({ type: 'positive', message: `RPM synced to ${data.updated} subscription(s)` });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to sync';
+      $q.notify({ type: 'negative', message: msg });
+    }
+  });
+}
+
+async function onSyncTpm(row: Plan) {
+  $q.dialog({
+    title: 'Sync TPM',
+    message: `Sync TPM limit (${row.tpm_limit != null ? `${row.tpm_limit} TPM` : 'unlimited'}) to all active subscriptions of "${row.name}"?`,
+    cancel: true,
+  }).onOk(async () => {
+    try {
+      const { data } = await api.post<{ updated: number }>(`/api/admin/subscription-plans/${row.id}/sync-tpm`);
+      await load();
+      $q.notify({ type: 'positive', message: `TPM synced to ${data.updated} subscription(s)` });
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to sync';
       $q.notify({ type: 'negative', message: msg });

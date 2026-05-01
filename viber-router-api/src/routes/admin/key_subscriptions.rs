@@ -41,7 +41,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_subscriptions).post(assign_subscription))
         .route("/{sub_id}", axum::routing::patch(cancel_subscription))
-        .route("/{sub_id}/bonus-allowed-models", put(update_bonus_allowed_models))
+        .route(
+            "/{sub_id}/bonus-allowed-models",
+            put(update_bonus_allowed_models),
+        )
 }
 
 async fn assign_subscription(
@@ -50,21 +53,31 @@ async fn assign_subscription(
     Json(input): Json<AssignSubscription>,
 ) -> Result<(StatusCode, Json<KeySubscription>), ApiError> {
     // Detect bonus creation path: has bonus fields, no plan_id
-    if input.bonus_name.is_some() || input.bonus_base_url.is_some() || input.bonus_api_key.is_some() {
+    if input.bonus_name.is_some() || input.bonus_base_url.is_some() || input.bonus_api_key.is_some()
+    {
         // Validate required bonus fields
-        let bonus_name = input.bonus_name.as_deref().filter(|s| !s.is_empty())
+        let bonus_name = input
+            .bonus_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_name is required"))?;
-        let bonus_base_url = input.bonus_base_url.as_deref().filter(|s| !s.is_empty())
+        let bonus_base_url = input
+            .bonus_base_url
+            .as_deref()
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_base_url is required"))?;
-        let bonus_api_key = input.bonus_api_key.as_deref().filter(|s| !s.is_empty())
+        let bonus_api_key = input
+            .bonus_api_key
+            .as_deref()
+            .filter(|s| !s.is_empty())
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bonus_api_key is required"))?;
 
         let sub = sqlx::query_as::<_, KeySubscription>(
             "INSERT INTO key_subscriptions \
              (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, \
-              reset_hours, duration_days, rpm_limit, bonus_name, bonus_base_url, bonus_api_key, \
+              reset_hours, duration_days, rpm_limit, tpm_limit, bonus_name, bonus_base_url, bonus_api_key, \
               bonus_quota_url, bonus_quota_headers, bonus_allowed_models) \
-             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, $2, $3, $4, $5, $6, $7) \
+             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, NULL, $2, $3, $4, $5, $6, $7) \
              RETURNING *",
         )
         .bind(key_id)
@@ -90,22 +103,21 @@ async fn assign_subscription(
     let plan_id = input.plan_id
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Either plan_id or bonus fields (bonus_name, bonus_base_url, bonus_api_key) are required"))?;
 
-    let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "SELECT * FROM subscription_plans WHERE id = $1",
-    )
-    .bind(plan_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
+    let plan =
+        sqlx::query_as::<_, SubscriptionPlan>("SELECT * FROM subscription_plans WHERE id = $1")
+            .bind(plan_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
     if !plan.is_active {
         return Err(err(StatusCode::BAD_REQUEST, "Plan is not active"));
     }
 
     let sub = sqlx::query_as::<_, KeySubscription>(
-        "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
+        "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
     )
     .bind(key_id)
     .bind(plan.id)
@@ -116,6 +128,7 @@ async fn assign_subscription(
     .bind(plan.reset_hours)
     .bind(plan.duration_days)
     .bind(plan.rpm_limit)
+    .bind(plan.tpm_limit)
     .fetch_one(&state.db)
     .await
     .map_err(internal)?;
@@ -208,7 +221,12 @@ async fn list_subscriptions(
     }
 
     let total_pages = (total as f64 / limit as f64).ceil() as i64;
-    Ok(Json(PaginatedResponse { data, total, page, total_pages }))
+    Ok(Json(PaginatedResponse {
+        data,
+        total,
+        page,
+        total_pages,
+    }))
 }
 
 async fn cancel_subscription(
@@ -217,7 +235,10 @@ async fn cancel_subscription(
     Json(input): Json<CancelSubscription>,
 ) -> Result<Json<KeySubscription>, ApiError> {
     if input.status != "cancelled" {
-        return Err(err(StatusCode::BAD_REQUEST, "Only 'cancelled' status is supported"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only 'cancelled' status is supported",
+        ));
     }
 
     let current = sqlx::query_as::<_, KeySubscription>(
@@ -231,7 +252,10 @@ async fn cancel_subscription(
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Subscription not found"))?;
 
     if current.status != "active" {
-        return Err(err(StatusCode::BAD_REQUEST, "Only active subscriptions can be cancelled"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only active subscriptions can be cancelled",
+        ));
     }
 
     let sub = sqlx::query_as::<_, KeySubscription>(

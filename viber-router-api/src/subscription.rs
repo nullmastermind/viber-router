@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{TimeZone, Utc};
 use deadpool_redis::redis::{AsyncCommands, cmd};
 use sqlx::PgPool;
@@ -66,14 +68,15 @@ pub enum SubCheckResult {
     Allowed {
         subscription_id: Uuid,
         rpm_limit: Option<f64>,
+        tpm_limit: Option<f64>,
     },
     /// All subscriptions are blocked (exhausted/expired/cancelled or per-model limit hit).
     Blocked,
     /// One or more bonus subscriptions are active. Try bonus servers first, then fall back.
     BonusServers {
         servers: Vec<BonusServer>,
-        /// The non-bonus subscription to charge if all bonus servers fail (sub_id, rpm_limit).
-        fallback_subscription: Option<(Uuid, Option<f64>)>,
+        /// The non-bonus subscription to charge if all bonus servers fail (sub_id, rpm_limit, tpm_limit).
+        fallback_subscription: Option<(Uuid, Option<f64>, Option<f64>)>,
     },
 }
 
@@ -273,7 +276,10 @@ pub async fn check_subscriptions(
     model: Option<&str>,
 ) -> SubCheckResult {
     let all_subs = load_subscriptions(state, group_key_id).await;
-    let active: Vec<_> = all_subs.into_iter().filter(|s| s.status == "active").collect();
+    let active: Vec<_> = all_subs
+        .into_iter()
+        .filter(|s| s.status == "active")
+        .collect();
     if active.is_empty() {
         return SubCheckResult::Blocked;
     }
@@ -300,7 +306,7 @@ pub async fn check_subscriptions(
 
     let now = Utc::now();
 
-    let mut fallback_subscription: Option<(Uuid, Option<f64>)> = None;
+    let mut fallback_subscription: Option<(Uuid, Option<f64>, Option<f64>)> = None;
     for sub in &sorted {
         // Check expiration
         if let Some(expires_at) = sub.expires_at
@@ -350,7 +356,9 @@ pub async fn check_subscriptions(
         // For pay_per_request: skip if model is not in model_request_costs
         if sub.sub_type == "pay_per_request"
             && let Some(model_name) = model
-            && sub.model_request_costs.as_object()
+            && sub
+                .model_request_costs
+                .as_object()
                 .map(|m| !m.contains_key(model_name))
                 .unwrap_or(true)
         {
@@ -377,7 +385,7 @@ pub async fn check_subscriptions(
         }
 
         // This non-bonus subscription has budget — it's the fallback
-        fallback_subscription = Some((sub.id, sub.rpm_limit));
+        fallback_subscription = Some((sub.id, sub.rpm_limit, sub.tpm_limit));
         break;
     }
 
@@ -388,7 +396,8 @@ pub async fn check_subscriptions(
             let allowed_models = sub.bonus_allowed_models.unwrap_or_default();
             if !allowed_models.is_empty() {
                 match model {
-                    Some(model_name) if allowed_models.iter().any(|allowed| allowed == model_name) => {}
+                    Some(model_name)
+                        if allowed_models.iter().any(|allowed| allowed == model_name) => {}
                     Some(_) | None => return None,
                 }
             }
@@ -416,8 +425,12 @@ pub async fn check_subscriptions(
     }
 
     // No bonus subs — return existing result based on fallback_subscription
-    if let Some((sub_id, rpm_limit)) = fallback_subscription {
-        SubCheckResult::Allowed { subscription_id: sub_id, rpm_limit }
+    if let Some((sub_id, rpm_limit, tpm_limit)) = fallback_subscription {
+        SubCheckResult::Allowed {
+            subscription_id: sub_id,
+            rpm_limit,
+            tpm_limit,
+        }
     } else {
         SubCheckResult::Blocked
     }
@@ -497,7 +510,8 @@ pub fn calculate_cost(
 ) -> f64 {
     let inp = (input_tokens as f64) * pricing.input_1m_usd * rate_input;
     let out = (output_tokens as f64) * pricing.output_1m_usd * rate_output;
-    let cw = (cache_creation_tokens.unwrap_or(0) as f64) * pricing.cache_write_1m_usd * rate_cache_write;
+    let cw =
+        (cache_creation_tokens.unwrap_or(0) as f64) * pricing.cache_write_1m_usd * rate_cache_write;
     let cr = if normalize_cache_read {
         (cache_read_tokens.unwrap_or(0) as f64) * pricing.input_1m_usd * rate_input
     } else {
@@ -599,6 +613,17 @@ mod tests {
     }
 
     #[test]
+    fn test_tpm_increment_amount_uses_actual_input_plus_output_tokens() {
+        assert_eq!(tpm_increment_amount(1000, 250), Some(1250));
+    }
+
+    #[test]
+    fn test_tpm_increment_amount_skips_missing_or_empty_usage() {
+        assert_eq!(tpm_increment_amount(0, 0), None);
+        assert_eq!(tpm_increment_amount(-10, 10), None);
+    }
+
+    #[test]
     fn test_calculate_cost_basic() {
         let pricing = ModelPricing {
             input_1m_usd: 3.0,
@@ -607,8 +632,7 @@ mod tests {
             cache_read_1m_usd: 0.30,
         };
         let cost = calculate_cost(
-            &pricing,
-            1.0, 1.0, 1.0, 1.0, // rates = 1x
+            &pricing, 1.0, 1.0, 1.0, 1.0, // rates = 1x
             1000, 500, None, None, false,
         );
         // input: 1000 * 3.0 / 1M = 0.003
@@ -627,8 +651,15 @@ mod tests {
         };
         let cost = calculate_cost(
             &pricing,
-            1.0, 1.0, 1.0, 1.0,
-            1000, 500, Some(200), Some(300), false,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1000,
+            500,
+            Some(200),
+            Some(300),
+            false,
         );
         let expected = (1000.0 * 3.0 + 500.0 * 15.0 + 200.0 * 3.75 + 300.0 * 0.30) / 1_000_000.0;
         assert!((cost - expected).abs() < 1e-10);
@@ -643,8 +674,7 @@ mod tests {
             cache_read_1m_usd: 0.30,
         };
         let cost = calculate_cost(
-            &pricing,
-            0.5, 2.0, 1.0, 1.0, // input at 50%, output at 200%
+            &pricing, 0.5, 2.0, 1.0, 1.0, // input at 50%, output at 200%
             1000, 500, None, None, false,
         );
         let expected = (1000.0 * 3.0 * 0.5 + 500.0 * 15.0 * 2.0) / 1_000_000.0;
@@ -662,8 +692,15 @@ mod tests {
         // With normalize_cache_read=true, cache_read uses input price instead
         let cost = calculate_cost(
             &pricing,
-            1.0, 1.0, 1.0, 1.0,
-            1000, 500, None, Some(300), true,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1000,
+            500,
+            None,
+            Some(300),
+            true,
         );
         // cache_read: 300 * input_1m_usd(3.0) * rate_input(1.0) instead of cache_read_1m_usd
         let expected = (1000.0 * 3.0 + 500.0 * 15.0 + 300.0 * 3.0) / 1_000_000.0;
@@ -683,6 +720,7 @@ mod tests {
             reset_hours: None,
             duration_days: 36500,
             rpm_limit: None,
+            tpm_limit: None,
             status: "active".to_string(),
             activated_at: None,
             expires_at: None,
@@ -723,11 +761,12 @@ mod tests {
             reset_hours: None,
             duration_days: 36500,
             rpm_limit: None,
+            tpm_limit: None,
             status: "active".to_string(),
             activated_at: None,
             expires_at: None,
             created_at: chrono::Utc::now(),
-            bonus_base_url: None,  // Missing!
+            bonus_base_url: None, // Missing!
             bonus_api_key: Some("sk-ant-test123".to_string()),
             bonus_name: Some("Broken Bonus".to_string()),
             bonus_quota_url: None,
@@ -762,6 +801,7 @@ mod tests {
             reset_hours: None,
             duration_days: 36500,
             rpm_limit: None,
+            tpm_limit: None,
             status: "active".to_string(),
             activated_at: None,
             expires_at: None,
@@ -776,6 +816,105 @@ mod tests {
 
         let name = sub.bonus_name.unwrap_or_default();
         assert_eq!(name, "");
+    }
+}
+
+/// Check if a subscription has exceeded its TPM limit.
+/// Returns Ok(Some(ttl_seconds)) when limited and Redis has a positive TTL.
+/// Returns Ok(None) when under limit, unlimited, or Redis errors require fail-open behavior.
+pub async fn is_tpm_limited(state: &AppState, sub_id: Uuid, tpm: f64) -> Result<Option<i64>, ()> {
+    if tpm <= 0.0 {
+        return Ok(None);
+    }
+
+    let key = format!("sub_tpm:{sub_id}");
+    let Ok(mut conn) = state.redis.get().await else {
+        tracing::warn!("Redis unavailable in is_tpm_limited, sub_id={sub_id}");
+        return Ok(None); // fail open
+    };
+
+    let count: Option<i64> = match cmd("GET").arg(&key).query_async(&mut *conn).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Redis GET failed in is_tpm_limited, sub_id={sub_id}: {e}");
+            return Ok(None); // fail open
+        }
+    };
+
+    if (count.unwrap_or(0) as f64) < tpm {
+        return Ok(None);
+    }
+
+    let ttl: i64 = match cmd("TTL").arg(&key).query_async(&mut *conn).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("Redis TTL failed in is_tpm_limited, sub_id={sub_id}: {e}");
+            return Ok(None); // fail open
+        }
+    };
+
+    if ttl > 0 { Ok(Some(ttl)) } else { Ok(None) }
+}
+
+/// Wait for a selected subscription's TPM fixed window to reset.
+/// Returns Err when the subscription remains limited after five wait retries.
+pub async fn wait_for_tpm(state: &AppState, sub_id: Uuid, tpm: Option<f64>) -> Result<(), ()> {
+    let Some(tpm) = tpm else {
+        return Ok(());
+    };
+
+    for attempt in 0..=5 {
+        let Some(ttl) = is_tpm_limited(state, sub_id, tpm).await? else {
+            return Ok(());
+        };
+
+        if attempt == 5 {
+            return Err(());
+        }
+
+        tokio::time::sleep(Duration::from_secs(ttl as u64)).await;
+    }
+
+    Err(())
+}
+
+fn tpm_increment_amount(input_tokens: i32, output_tokens: i32) -> Option<i64> {
+    let added = i64::from(input_tokens) + i64::from(output_tokens);
+    (added > 0).then_some(added)
+}
+
+/// Increment the TPM counter for a subscription after actual token usage is parsed.
+/// Sets the 60 second TTL only when this INCRBY created a fresh fixed window.
+pub async fn increment_tpm(state: &AppState, sub_id: Uuid, input_tokens: i32, output_tokens: i32) {
+    let Some(added) = tpm_increment_amount(input_tokens, output_tokens) else {
+        return;
+    };
+
+    let key = format!("sub_tpm:{sub_id}");
+    let Ok(mut conn) = state.redis.get().await else {
+        tracing::warn!("Redis unavailable for TPM counter update, sub_id={sub_id}, added={added}");
+        return;
+    };
+
+    let total: i64 = match cmd("INCRBY")
+        .arg(&key)
+        .arg(added)
+        .query_async(&mut *conn)
+        .await
+    {
+        Ok(total) => total,
+        Err(e) => {
+            tracing::warn!("Redis INCRBY failed for TPM counter, sub_id={sub_id}: {e}");
+            return;
+        }
+    };
+
+    if total == added {
+        let _: Result<(), _> = cmd("EXPIRE")
+            .arg(&key)
+            .arg(60)
+            .query_async(&mut *conn)
+            .await;
     }
 }
 

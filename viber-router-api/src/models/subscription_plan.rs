@@ -22,6 +22,7 @@ pub struct SubscriptionPlan {
     pub reset_hours: Option<i32>,
     pub duration_days: i32,
     pub rpm_limit: Option<f64>,
+    pub tpm_limit: Option<f64>,
     pub is_active: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -37,6 +38,7 @@ pub struct CreateSubscriptionPlan {
     pub reset_hours: Option<i32>,
     pub duration_days: i32,
     pub rpm_limit: Option<f64>,
+    pub tpm_limit: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,5 +53,58 @@ pub struct UpdateSubscriptionPlan {
     pub duration_days: Option<i32>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub rpm_limit: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub tpm_limit: Option<Option<f64>>,
     pub is_active: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_subscription_plan_deserializes_tpm_limit() {
+        let plan: CreateSubscriptionPlan = serde_json::from_value(serde_json::json!({
+            "name": "TPM Plan",
+            "sub_type": "fixed",
+            "cost_limit_usd": 10.0,
+            "duration_days": 30,
+            "tpm_limit": 100000.0
+        }))
+        .unwrap();
+
+        assert_eq!(plan.tpm_limit, Some(100000.0));
+    }
+
+    #[test]
+    fn create_subscription_plan_deserializes_missing_tpm_as_unlimited() {
+        let plan: CreateSubscriptionPlan = serde_json::from_value(serde_json::json!({
+            "name": "Unlimited Plan",
+            "sub_type": "fixed",
+            "cost_limit_usd": 10.0,
+            "duration_days": 30
+        }))
+        .unwrap();
+
+        assert_eq!(plan.tpm_limit, None);
+    }
+
+    #[test]
+    fn update_subscription_plan_distinguishes_missing_clear_and_set_tpm() {
+        let missing: UpdateSubscriptionPlan =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(missing.tpm_limit, None);
+
+        let clear: UpdateSubscriptionPlan = serde_json::from_value(serde_json::json!({
+            "tpm_limit": null
+        }))
+        .unwrap();
+        assert_eq!(clear.tpm_limit, Some(None));
+
+        let set: UpdateSubscriptionPlan = serde_json::from_value(serde_json::json!({
+            "tpm_limit": 120000.0
+        }))
+        .unwrap();
+        assert_eq!(set.tpm_limit, Some(Some(120000.0)));
+    }
 }

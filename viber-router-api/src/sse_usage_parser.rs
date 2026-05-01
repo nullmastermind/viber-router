@@ -85,10 +85,7 @@ impl SseUsageParser {
 
         match event_type {
             "message_start" => {
-                if let Some(usage) = json
-                    .get("message")
-                    .and_then(|m| m.get("usage"))
-                {
+                if let Some(usage) = json.get("message").and_then(|m| m.get("usage")) {
                     self.input_tokens = usage
                         .get("input_tokens")
                         .and_then(|v| v.as_i64())

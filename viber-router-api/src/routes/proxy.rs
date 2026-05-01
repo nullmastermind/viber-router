@@ -13,15 +13,15 @@ use serde_json::Value;
 
 use crate::cache;
 use crate::circuit_breaker;
-use crate::rate_limiter;
 use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
 use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail};
+use crate::rate_limiter;
 use crate::routes::AppState;
 use crate::routes::key_parser::parse_api_key;
 use crate::sse_usage_parser::{AnyParser, OpenAiSseUsageParser, SseUsageParser};
+use crate::telegram_notifier;
 use crate::ttft_buffer::TtftLogEntry;
 use crate::uptime_buffer::UptimeCheckEntry;
-use crate::telegram_notifier;
 use crate::usage_buffer::{TokenUsageEntry, hash_key};
 
 pub fn router() -> Router<AppState> {
@@ -99,9 +99,16 @@ fn spawn_cb_alert(state: &AppState, config: &GroupConfig, server: &GroupServerDe
     let cool = server.cb_cooldown_seconds.unwrap();
     tokio::spawn(telegram_notifier::send_circuit_breaker_alert(
         telegram_notifier::CircuitBreakerAlertContext {
-            db, redis, http_client, server_name, group_name,
-            group_id, server_id,
-            error_count: max_f, window_seconds: win, cooldown_seconds: cool,
+            db,
+            redis,
+            http_client,
+            server_name,
+            group_name,
+            group_id,
+            server_id,
+            error_count: max_f,
+            window_seconds: win,
+            cooldown_seconds: cool,
         },
     ));
 }
@@ -152,13 +159,12 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     }
 
     // Try master key lookup first
-    let (group, group_key_id) = if let Some(group) = sqlx::query_as::<_, crate::models::Group>(
-        "SELECT * FROM groups WHERE api_key = $1",
-    )
-    .bind(api_key)
-    .fetch_optional(&state.db)
-    .await
-    .ok()?
+    let (group, group_key_id) = if let Some(group) =
+        sqlx::query_as::<_, crate::models::Group>("SELECT * FROM groups WHERE api_key = $1")
+            .bind(api_key)
+            .fetch_optional(&state.db)
+            .await
+            .ok()?
     {
         (group, None)
     } else {
@@ -194,13 +200,11 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
             return Some(config);
         }
 
-        let group = sqlx::query_as::<_, crate::models::Group>(
-            "SELECT * FROM groups WHERE id = $1",
-        )
-        .bind(group_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()??;
+        let group = sqlx::query_as::<_, crate::models::Group>("SELECT * FROM groups WHERE id = $1")
+            .bind(group_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()??;
 
         (group, Some(sub_key_id))
     };
@@ -222,18 +226,20 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
 
     // Filter servers for sub-key if per-key server assignments exist
     let servers = if let Some(key_id) = group_key_id {
-        let assigned: Vec<(uuid::Uuid,)> = sqlx::query_as(
-            "SELECT server_id FROM group_key_servers WHERE group_key_id = $1",
-        )
-        .bind(key_id)
-        .fetch_all(&state.db)
-        .await
-        .ok()?;
+        let assigned: Vec<(uuid::Uuid,)> =
+            sqlx::query_as("SELECT server_id FROM group_key_servers WHERE group_key_id = $1")
+                .bind(key_id)
+                .fetch_all(&state.db)
+                .await
+                .ok()?;
         if assigned.is_empty() {
             servers // No assignments — use all group servers (backward compatible)
         } else {
             let assigned_ids: HashSet<uuid::Uuid> = assigned.into_iter().map(|(id,)| id).collect();
-            servers.into_iter().filter(|s| assigned_ids.contains(&s.server_id)).collect()
+            servers
+                .into_iter()
+                .filter(|s| assigned_ids.contains(&s.server_id))
+                .collect()
         }
     } else {
         servers
@@ -244,23 +250,37 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
 
     // Resolve count-tokens default server if configured
     let count_tokens_server = if let Some(ct_server_id) = group.count_tokens_server_id {
-        sqlx::query_as::<_, (uuid::Uuid, i32, String, String, Option<String>, Option<String>)>(
-            "SELECT id, short_id, name, base_url, api_key, system_prompt FROM servers WHERE id = $1",
+        sqlx::query_as::<
+            _,
+            (
+                uuid::Uuid,
+                i32,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT id, short_id, name, base_url, api_key, system_prompt FROM servers WHERE id = $1"
         )
         .bind(ct_server_id)
         .fetch_optional(&state.db)
         .await
         .ok()
         .flatten()
-        .map(|(server_id, short_id, server_name, base_url, api_key, system_prompt)| CountTokensServer {
-            server_id,
-            short_id,
-            server_name,
-            base_url,
-            api_key,
-            system_prompt,
-            model_mappings: group.count_tokens_model_mappings.clone(),
-        })
+        .map(
+            |(server_id, short_id, server_name, base_url, api_key, system_prompt)| {
+                CountTokensServer {
+                    server_id,
+                    short_id,
+                    server_name,
+                    base_url,
+                    api_key,
+                    system_prompt,
+                    model_mappings: group.count_tokens_model_mappings.clone(),
+                }
+            },
+        )
     } else {
         None
     };
@@ -294,13 +314,12 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     };
 
     // Query blocked user agents for this group
-    let blocked_ua_rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT user_agent FROM group_blocked_user_agents WHERE group_id = $1",
-    )
-    .bind(group.id)
-    .fetch_all(&state.db)
-    .await
-    .ok()?;
+    let blocked_ua_rows: Vec<(String,)> =
+        sqlx::query_as("SELECT user_agent FROM group_blocked_user_agents WHERE group_id = $1")
+            .bind(group.id)
+            .fetch_all(&state.db)
+            .await
+            .ok()?;
     let blocked_user_agents: Vec<String> = blocked_ua_rows.into_iter().map(|(ua,)| ua).collect();
 
     let config = GroupConfig {
@@ -369,9 +388,7 @@ fn strip_thinking_blocks(body: &[u8]) -> Option<Vec<u8>> {
         }
         if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
             let before_len = content.len();
-            content.retain(|block| {
-                block.get("type").and_then(|t| t.as_str()) != Some("thinking")
-            });
+            content.retain(|block| block.get("type").and_then(|t| t.as_str()) != Some("thinking"));
             if content.len() != before_len {
                 changed = true;
             }
@@ -402,9 +419,7 @@ fn estimate_input_tokens(body: &[u8]) -> Option<usize> {
     if let Some(messages) = json.get_mut("messages").and_then(|m| m.as_array_mut()) {
         for msg in messages.iter_mut() {
             if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
-                content.retain(|block| {
-                    block.get("type").and_then(|t| t.as_str()) != Some("image")
-                });
+                content.retain(|block| block.get("type").and_then(|t| t.as_str()) != Some("image"));
             }
         }
     }
@@ -548,7 +563,9 @@ fn transform_request_body(
 
     // Inject stream_options.include_usage for OpenAI streaming requests so
     // usage data is included in the SSE stream.
-    if is_openai_endpoint(request_path) && json.get("stream").and_then(|v| v.as_bool()) == Some(true) {
+    if is_openai_endpoint(request_path)
+        && json.get("stream").and_then(|v| v.as_bool()) == Some(true)
+    {
         match json.get_mut("stream_options") {
             Some(Value::Object(opts)) => {
                 opts.insert("include_usage".to_string(), Value::Bool(true));
@@ -593,7 +610,12 @@ async fn proxy_handler(
         Err(()) => vec![], // Redis failure: fail-open
     };
     if blocked.iter().any(|p| p == request_path) {
-        return api_error(request_path, StatusCode::NOT_FOUND, "not_found_error", "Not found");
+        return api_error(
+            request_path,
+            StatusCode::NOT_FOUND,
+            "not_found_error",
+            "Not found",
+        );
     }
 
     // Extract API key from x-api-key header, falling back to Authorization: Bearer <key>
@@ -670,7 +692,11 @@ async fn proxy_handler(
         .unwrap_or_else(|| "(empty)".to_string());
 
     // Block check: exact match against blocked_user_agents (after is_active, before servers check)
-    if config.blocked_user_agents.iter().any(|ua| ua == &user_agent) {
+    if config
+        .blocked_user_agents
+        .iter()
+        .any(|ua| ua == &user_agent)
+    {
         return api_error(
             original_uri.path(),
             StatusCode::FORBIDDEN,
@@ -738,7 +764,9 @@ async fn proxy_handler(
     let mut any_rate_limited = false;
 
     // Compute content_hash from raw request body bytes (used for duplicate-request spam detection)
-    let content_hash = Some(crate::usage_buffer::hash_key(&String::from_utf8_lossy(&body_bytes)));
+    let content_hash = Some(crate::usage_buffer::hash_key(&String::from_utf8_lossy(
+        &body_bytes,
+    )));
 
     // Generate a unique request_id for uptime tracking across all server attempts
     let request_id = uuid::Uuid::new_v4();
@@ -790,6 +818,8 @@ async fn proxy_handler(
 
     // Subscription budget check (only for sub-keys on billing endpoints)
     let mut selected_subscription_id: Option<uuid::Uuid> = None;
+    let mut selected_rpm_limit: Option<f64> = None;
+    let mut selected_tpm_limit: Option<f64> = None;
     let mut bonus_servers_to_try: Vec<crate::subscription::BonusServer> = Vec::new();
     if is_billing_endpoint(&request_path)
         && let Some(group_key_id) = config.group_key_id
@@ -801,8 +831,24 @@ async fn proxy_handler(
         )
         .await
         {
-            crate::subscription::SubCheckResult::Allowed { subscription_id, rpm_limit } => {
+            crate::subscription::SubCheckResult::Allowed {
+                subscription_id,
+                rpm_limit,
+                tpm_limit,
+            } => {
+                if crate::subscription::wait_for_tpm(&state, subscription_id, tpm_limit)
+                    .await
+                    .is_err()
+                {
+                    return api_error(
+                        &request_path,
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "rate_limit_error",
+                        "TPM limit exceeded, please retry later",
+                    );
+                }
                 selected_subscription_id = Some(subscription_id);
+                selected_tpm_limit = tpm_limit;
                 // Increment RPM counter (optimistic, pre-request)
                 if let Some(rpm) = rpm_limit {
                     crate::subscription::increment_rpm(&state, subscription_id, rpm).await;
@@ -816,14 +862,16 @@ async fn proxy_handler(
                     "Subscription limit exceeded",
                 );
             }
-            crate::subscription::SubCheckResult::BonusServers { servers, fallback_subscription } => {
+            crate::subscription::SubCheckResult::BonusServers {
+                servers,
+                fallback_subscription,
+            } => {
                 bonus_servers_to_try = servers;
-                // If there is a fallback non-bonus subscription, pre-select it and increment RPM
-                if let Some((sub_id, rpm_limit)) = fallback_subscription {
+                // Keep fallback limits pending until all bonus servers fail.
+                if let Some((sub_id, rpm_limit, tpm_limit)) = fallback_subscription {
                     selected_subscription_id = Some(sub_id);
-                    if let Some(rpm) = rpm_limit {
-                        crate::subscription::increment_rpm(&state, sub_id, rpm).await;
-                    }
+                    selected_rpm_limit = rpm_limit;
+                    selected_tpm_limit = tpm_limit;
                 }
             }
         }
@@ -832,11 +880,12 @@ async fn proxy_handler(
     // Build headers map (excluding host, content-length, x-api-key) for logging
     let log_headers: serde_json::Map<String, Value> = headers
         .iter()
-        .filter(|(name, _)| {
-            *name != "host" && *name != "content-length" && *name != "x-api-key"
-        })
+        .filter(|(name, _)| *name != "host" && *name != "content-length" && *name != "x-api-key")
         .filter_map(|(name, value)| {
-            value.to_str().ok().map(|v| (name.to_string(), Value::String(v.to_string())))
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), Value::String(v.to_string())))
         })
         .collect();
 
@@ -855,11 +904,17 @@ async fn proxy_handler(
         let mut bonus_req = client.post(&upstream_url);
         // Forward original headers except auth/host/content-length
         for (name, value) in headers.iter() {
-            if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+            if name == "x-api-key"
+                || name == "authorization"
+                || name == "host"
+                || name == "content-length"
+            {
                 continue;
             }
-            if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
-                && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+            if let Ok(reqwest_name) =
+                reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                && let Ok(reqwest_value) =
+                    reqwest::header::HeaderValue::from_bytes(value.as_bytes())
             {
                 bonus_req = bonus_req.header(reqwest_name, reqwest_value);
             }
@@ -881,11 +936,12 @@ async fn proxy_handler(
                         .and_then(|v| v.to_str().ok())
                         .is_some_and(|ct| ct.contains("text/event-stream"));
 
-                    let resp_status_code = StatusCode::from_u16(bonus_status)
-                        .unwrap_or(StatusCode::OK);
+                    let resp_status_code =
+                        StatusCode::from_u16(bonus_status).unwrap_or(StatusCode::OK);
                     let mut response_headers = HeaderMap::new();
                     for (name, value) in resp.headers().iter() {
-                        if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                        if let Ok(axum_name) =
+                            axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
                             && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
                         {
                             response_headers.insert(axum_name, axum_value);
@@ -894,37 +950,62 @@ async fn proxy_handler(
 
                     if is_sse {
                         let stream = resp.bytes_stream();
-                        let first_chunk_stream = stream.map(|chunk| chunk.map_err(std::io::Error::other));
+                        let first_chunk_stream =
+                            stream.map(|chunk| chunk.map_err(std::io::Error::other));
                         let parser = AnyParser::Anthropic(SseUsageParser::new());
                         let body = Body::from_stream(wrap_stream_with_usage_tracking(
-                            first_chunk_stream, state.clone(),
-                            config.group_id, uuid::Uuid::nil(),
-                            request_model.clone(), false, None, config.group_key_id,
+                            first_chunk_stream,
+                            state.clone(),
+                            config.group_id,
+                            uuid::Uuid::nil(),
+                            request_model.clone(),
+                            false,
+                            None,
+                            config.group_key_id,
                             Some(bonus_sub_id),
-                            1.0, 1.0, 1.0, 1.0, false,
+                            None,
+                            1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                            false,
                             parser,
                         ));
                         let mut resp_builder = Response::builder().status(resp_status_code);
                         *resp_builder.headers_mut().unwrap() = response_headers;
-                        return resp_builder.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                        return resp_builder
+                            .body(body)
+                            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
                     } else {
                         let body_bytes_resp = resp.bytes().await.unwrap_or_default();
                         // Extract token usage for logging
                         if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes_resp)
                             && let Some(usage) = json.get("usage")
                         {
-                            let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                            let out = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                            let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                            let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+                            let inp = usage
+                                .get("input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let out = usage
+                                .get("output_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let cc = usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let cr = usage
+                                .get("cache_read_input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
                             if let (Some(inp), Some(out)) = (inp, out) {
                                 let cost_usd = if let Some(ref model_name) = request_model {
                                     let pricing_cache = state.pricing_cache.read().await;
-                                    pricing_cache.get(model_name).map(|pricing| crate::subscription::calculate_cost(
-                                        pricing,
-                                        1.0, 1.0, 1.0, 1.0,
-                                        inp, out, cc, cr, false,
-                                    ))
+                                    pricing_cache.get(model_name).map(|pricing| {
+                                        crate::subscription::calculate_cost(
+                                            pricing, 1.0, 1.0, 1.0, 1.0, inp, out, cc, cr, false,
+                                        )
+                                    })
                                 } else {
                                     None
                                 };
@@ -945,13 +1026,16 @@ async fn proxy_handler(
                                     content_hash: content_hash.clone(),
                                 };
                                 if state.usage_tx.try_send(entry).is_err() {
-                                    tracing::warn!("Usage buffer full, dropping bonus token usage entry");
+                                    tracing::warn!(
+                                        "Usage buffer full, dropping bonus token usage entry"
+                                    );
                                 }
                             }
                         }
                         let mut resp_builder = Response::builder().status(resp_status_code);
                         *resp_builder.headers_mut().unwrap() = response_headers;
-                        return resp_builder.body(axum::body::Body::from(body_bytes_resp))
+                        return resp_builder
+                            .body(axum::body::Body::from(body_bytes_resp))
                             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
                     }
                 } else {
@@ -975,7 +1059,25 @@ async fn proxy_handler(
             }
         }
     }
-    // After all bonus servers exhausted: selected_subscription_id is already set to fallback (or None)
+    // After all bonus servers are exhausted, enforce the pending fallback subscription before group servers.
+    if !bonus_servers_to_try.is_empty()
+        && let Some(sub_id) = selected_subscription_id
+    {
+        if crate::subscription::wait_for_tpm(&state, sub_id, selected_tpm_limit)
+            .await
+            .is_err()
+        {
+            return api_error(
+                &request_path,
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                "TPM limit exceeded, please retry later",
+            );
+        }
+        if let Some(rpm) = selected_rpm_limit {
+            crate::subscription::increment_rpm(&state, sub_id, rpm).await;
+        }
+    }
     // Proceed to group server waterfall below
 
     // Count-tokens default server: try before the failover waterfall
@@ -1017,8 +1119,8 @@ async fn proxy_handler(
                 match upstream_result {
                     Ok(resp) if resp.status().is_success() => {
                         // Return the upstream response directly
-                        let ct_status = StatusCode::from_u16(resp.status().as_u16())
-                            .unwrap_or(StatusCode::OK);
+                        let ct_status =
+                            StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
                         let ct_bytes = resp.bytes().await.unwrap_or_default();
                         return (
                             ct_status,
@@ -1042,9 +1144,7 @@ async fn proxy_handler(
         // No global override — fall through to per-group count_tokens flow
     }
 
-    if is_count_tokens
-        && let Some(ref ct_server) = config.count_tokens_server
-    {
+    if is_count_tokens && let Some(ref ct_server) = config.count_tokens_server {
         // Key resolution for default server: dynamic key > server default > skip
         let ct_resolved_key = if let Some(dk) = parsed.dynamic_keys.get(&ct_server.short_id) {
             Some(dk.clone())
@@ -1082,14 +1182,23 @@ async fn proxy_handler(
 
             let mut server_log_headers = log_headers.clone();
             server_log_headers.insert("x-api-key".to_string(), Value::String(resolved_key.clone()));
-            server_log_headers.insert("authorization".to_string(), Value::String(format!("Bearer {}", resolved_key)));
+            server_log_headers.insert(
+                "authorization".to_string(),
+                Value::String(format!("Bearer {}", resolved_key)),
+            );
 
             for (name, value) in headers.iter() {
-                if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                if name == "x-api-key"
+                    || name == "authorization"
+                    || name == "host"
+                    || name == "content-length"
+                {
                     continue;
                 }
-                if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
-                    && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+                if let Ok(reqwest_name) =
+                    reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                    && let Ok(reqwest_value) =
+                        reqwest::header::HeaderValue::from_bytes(value.as_bytes())
                 {
                     upstream_req = upstream_req.header(reqwest_name, reqwest_value);
                 }
@@ -1097,7 +1206,8 @@ async fn proxy_handler(
             upstream_req = upstream_req.header("x-api-key", &resolved_key);
             upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
 
-            let attempt_body: Option<serde_json::Value> = serde_json::from_slice(&transformed_body).ok();
+            let attempt_body: Option<serde_json::Value> =
+                serde_json::from_slice(&transformed_body).ok();
             let attempt_headers = Value::Object(server_log_headers);
             let attempt_url = upstream_url.clone();
 
@@ -1117,36 +1227,63 @@ async fn proxy_handler(
                         latency_ms: server_latency,
                         resolved_key: Some(resolved_key.clone()),
                         upstream_url: Some(attempt_url),
-                        request_headers: if is_first { Some(attempt_headers) } else { None },
+                        request_headers: if is_first {
+                            Some(attempt_headers)
+                        } else {
+                            None
+                        },
                         request_body: if is_first { attempt_body } else { None },
                     });
                     last_server_id = ct_server.server_id;
                     last_server_name = ct_server.server_name.clone();
 
-                    emit_uptime_entry(&state, config.group_id, ct_server.server_id, status as i16, server_latency, request_id);
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        ct_server.server_id,
+                        status as i16,
+                        server_latency,
+                        request_id,
+                    );
 
                     if status == 200 {
                         if failover_chain.len() > 1 {
                             emit_log_entry(
-                                &state, &config, &parsed.group_key,
-                                last_server_id, &last_server_name,
-                                &request_path, &request_method,
-                                status as i16, "failover_success",
+                                &state,
+                                &config,
+                                &parsed.group_key,
+                                last_server_id,
+                                &last_server_name,
+                                &request_path,
+                                &request_method,
+                                status as i16,
+                                "failover_success",
                                 loop_start.elapsed().as_millis() as i32,
-                                &failover_chain, &request_model,
-                                None, None, None,
+                                &failover_chain,
+                                &request_model,
+                                None,
+                                None,
+                                None,
                             );
                         }
                         return build_response(resp).await;
                     } else if !config.failover_status_codes.contains(&status) {
                         emit_log_entry(
-                            &state, &config, &parsed.group_key,
-                            last_server_id, &last_server_name,
-                            &request_path, &request_method,
-                            status as i16, "upstream_error",
+                            &state,
+                            &config,
+                            &parsed.group_key,
+                            last_server_id,
+                            &last_server_name,
+                            &request_path,
+                            &request_method,
+                            status as i16,
+                            "upstream_error",
                             loop_start.elapsed().as_millis() as i32,
-                            &failover_chain, &request_model,
-                            None, None, None,
+                            &failover_chain,
+                            &request_model,
+                            None,
+                            None,
+                            None,
                         );
                         return build_response(resp).await;
                     }
@@ -1161,13 +1298,24 @@ async fn proxy_handler(
                         latency_ms: server_start.elapsed().as_millis() as i32,
                         resolved_key: Some(resolved_key.clone()),
                         upstream_url: Some(attempt_url),
-                        request_headers: if is_first { Some(attempt_headers) } else { None },
+                        request_headers: if is_first {
+                            Some(attempt_headers)
+                        } else {
+                            None
+                        },
                         request_body: if is_first { attempt_body } else { None },
                     });
                     last_server_id = ct_server.server_id;
                     last_server_name = ct_server.server_name.clone();
 
-                    emit_uptime_entry(&state, config.group_id, ct_server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        ct_server.server_id,
+                        0,
+                        server_start.elapsed().as_millis() as i32,
+                        request_id,
+                    );
                 }
             }
         }
@@ -1196,19 +1344,26 @@ async fn proxy_handler(
 
         // Circuit breaker: check re-enable first, then check if open
         if has_cb {
-            if circuit_breaker::check_re_enabled(&state.redis, config.group_id, server.server_id).await {
+            if circuit_breaker::check_re_enabled(&state.redis, config.group_id, server.server_id)
+                .await
+            {
                 let db = state.db.clone();
                 let http_client = state.http_client.clone();
                 let server_name = server.server_name.clone();
                 let group_name = config.group_name.clone();
                 tokio::spawn(telegram_notifier::send_circuit_re_enable_alert(
                     telegram_notifier::CircuitReEnableAlertContext {
-                        db, http_client, server_name, group_name,
+                        db,
+                        http_client,
+                        server_name,
+                        group_name,
                     },
                 ));
             }
 
-            if circuit_breaker::is_circuit_open(&state.redis, config.group_id, server.server_id).await {
+            if circuit_breaker::is_circuit_open(&state.redis, config.group_id, server.server_id)
+                .await
+            {
                 continue; // Skip circuit-broken server
             }
         }
@@ -1216,7 +1371,13 @@ async fn proxy_handler(
         // Rate limiter: check if server has reached its request limit
         if let Some(max_req) = server.max_requests
             && server.rate_window_seconds.is_some()
-            && rate_limiter::is_rate_limited(&state.redis, config.group_id, server.server_id, max_req).await
+            && rate_limiter::is_rate_limited(
+                &state.redis,
+                config.group_id,
+                server.server_id,
+                max_req,
+            )
+            .await
         {
             any_rate_limited = true;
             continue; // Skip rate-limited server
@@ -1263,7 +1424,13 @@ async fn proxy_handler(
 
         // Increment rate limit counter before sending request (optimistic)
         if let (Some(_), Some(window_sec)) = (server.max_requests, server.rate_window_seconds) {
-            rate_limiter::increment_rate_limit(&state.redis, config.group_id, server.server_id, window_sec).await;
+            rate_limiter::increment_rate_limit(
+                &state.redis,
+                config.group_id,
+                server.server_id,
+                window_sec,
+            )
+            .await;
         }
 
         if is_billing_endpoint(&request_path) && server.system_prompt.is_some() {
@@ -1295,7 +1462,10 @@ async fn proxy_handler(
         // Build per-server log headers (with resolved key)
         let mut server_log_headers = log_headers.clone();
         server_log_headers.insert("x-api-key".to_string(), Value::String(resolved_key.clone()));
-        server_log_headers.insert("authorization".to_string(), Value::String(format!("Bearer {}", resolved_key)));
+        server_log_headers.insert(
+            "authorization".to_string(),
+            Value::String(format!("Bearer {}", resolved_key)),
+        );
 
         // Forward headers, replacing x-api-key and authorization with resolved key
         for (name, value) in headers.iter() {
@@ -1305,8 +1475,10 @@ async fn proxy_handler(
             if name == "host" || name == "content-length" {
                 continue;
             }
-            if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
-                && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+            if let Ok(reqwest_name) =
+                reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                && let Ok(reqwest_value) =
+                    reqwest::header::HeaderValue::from_bytes(value.as_bytes())
             {
                 upstream_req = upstream_req.header(reqwest_name, reqwest_value);
             }
@@ -1315,7 +1487,8 @@ async fn proxy_handler(
         upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
 
         // Prepare curl data for this attempt
-        let attempt_body: Option<serde_json::Value> = serde_json::from_slice(&transformed_body).ok();
+        let attempt_body: Option<serde_json::Value> =
+            serde_json::from_slice(&transformed_body).ok();
         let attempt_headers = Value::Object(server_log_headers);
         let attempt_url = upstream_url.clone();
 
@@ -1334,20 +1507,34 @@ async fn proxy_handler(
                     latency_ms: server_start.elapsed().as_millis() as i32,
                     resolved_key: Some(resolved_key.clone()),
                     upstream_url: Some(attempt_url),
-                    request_headers: if is_first { Some(attempt_headers.clone()) } else { None },
+                    request_headers: if is_first {
+                        Some(attempt_headers.clone())
+                    } else {
+                        None
+                    },
                     request_body: if is_first { attempt_body } else { None },
                 });
                 last_server_id = server.server_id;
                 last_server_name = server.server_name.clone();
-                emit_uptime_entry(&state, config.group_id, server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                emit_uptime_entry(
+                    &state,
+                    config.group_id,
+                    server.server_id,
+                    0,
+                    server_start.elapsed().as_millis() as i32,
+                    request_id,
+                );
                 // Circuit breaker: record error on connection failure
                 if has_cb {
                     let tripped = circuit_breaker::record_error(
-                        &state.redis, config.group_id, server.server_id,
+                        &state.redis,
+                        config.group_id,
+                        server.server_id,
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
-                    ).await;
+                    )
+                    .await;
                     if tripped {
                         spawn_cb_alert(&state, &config, server);
                     }
@@ -1367,7 +1554,11 @@ async fn proxy_handler(
             latency_ms: server_latency,
             resolved_key: Some(resolved_key.clone()),
             upstream_url: Some(attempt_url),
-            request_headers: if is_first { Some(attempt_headers.clone()) } else { None },
+            request_headers: if is_first {
+                Some(attempt_headers.clone())
+            } else {
+                None
+            },
             request_body: if is_first { attempt_body } else { None },
         });
         last_server_id = server.server_id;
@@ -1389,17 +1580,24 @@ async fn proxy_handler(
                     tokio::time::sleep(std::time::Duration::from_secs_f64(retry_delay)).await;
                     let mut retry_req = client.request(method.clone(), &upstream_url);
                     for (name, value) in headers.iter() {
-                        if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                        if name == "x-api-key"
+                            || name == "authorization"
+                            || name == "host"
+                            || name == "content-length"
+                        {
                             continue;
                         }
-                        if let Ok(rn) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
-                            && let Ok(rv) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+                        if let Ok(rn) =
+                            reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                            && let Ok(rv) =
+                                reqwest::header::HeaderValue::from_bytes(value.as_bytes())
                         {
                             retry_req = retry_req.header(rn, rv);
                         }
                     }
                     retry_req = retry_req.header("x-api-key", &resolved_key);
-                    retry_req = retry_req.header("authorization", format!("Bearer {}", resolved_key));
+                    retry_req =
+                        retry_req.header("authorization", format!("Bearer {}", resolved_key));
                     retry_req = retry_req.body(transformed_body.clone());
                     match retry_req.send().await {
                         Ok(retry_resp) => {
@@ -1437,10 +1635,15 @@ async fn proxy_handler(
                 "400 error from upstream"
             );
             // Emit uptime for the 400 attempt
-            emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
-            if is_sig_err
-                && let Some(sanitized_body) = strip_thinking_blocks(&transformed_body)
-            {
+            emit_uptime_entry(
+                &state,
+                config.group_id,
+                server.server_id,
+                status as i16,
+                server_latency,
+                request_id,
+            );
+            if is_sig_err && let Some(sanitized_body) = strip_thinking_blocks(&transformed_body) {
                 tracing::info!(
                     server_name = %server.server_name,
                     original_body_len = transformed_body.len(),
@@ -1449,10 +1652,15 @@ async fn proxy_handler(
                 );
                 let mut retry_req = client.request(method.clone(), &upstream_url);
                 for (name, value) in headers.iter() {
-                    if name == "x-api-key" || name == "authorization" || name == "host" || name == "content-length" {
+                    if name == "x-api-key"
+                        || name == "authorization"
+                        || name == "host"
+                        || name == "content-length"
+                    {
                         continue;
                     }
-                    if let Ok(rn) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                    if let Ok(rn) =
+                        reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
                         && let Ok(rv) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
                     {
                         retry_req = retry_req.header(rn, rv);
@@ -1481,13 +1689,21 @@ async fn proxy_handler(
                         continue;
                     } else {
                         emit_log_entry(
-                            &state, &config, &parsed.group_key,
-                            last_server_id, &last_server_name,
-                            &request_path, &request_method,
-                            retry_status as i16, "upstream_error",
+                            &state,
+                            &config,
+                            &parsed.group_key,
+                            last_server_id,
+                            &last_server_name,
+                            &request_path,
+                            &request_method,
+                            retry_status as i16,
+                            "upstream_error",
                             loop_start.elapsed().as_millis() as i32,
-                            &failover_chain, &request_model,
-                            None, None, None,
+                            &failover_chain,
+                            &request_model,
+                            None,
+                            None,
+                            None,
                         );
                         return build_response(retry_resp).await;
                     }
@@ -1498,11 +1714,14 @@ async fn proxy_handler(
             if config.failover_status_codes.contains(&status) {
                 if has_cb {
                     let tripped = circuit_breaker::record_error(
-                        &state.redis, config.group_id, server.server_id,
+                        &state.redis,
+                        config.group_id,
+                        server.server_id,
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
-                    ).await;
+                    )
+                    .await;
                     if tripped {
                         spawn_cb_alert(&state, &config, server);
                     }
@@ -1510,13 +1729,21 @@ async fn proxy_handler(
                 continue;
             }
             emit_log_entry(
-                &state, &config, &parsed.group_key,
-                last_server_id, &last_server_name,
-                &request_path, &request_method,
-                status as i16, "upstream_error",
+                &state,
+                &config,
+                &parsed.group_key,
+                last_server_id,
+                &last_server_name,
+                &request_path,
+                &request_method,
+                status as i16,
+                "upstream_error",
                 loop_start.elapsed().as_millis() as i32,
-                &failover_chain, &request_model,
-                None, None, None,
+                &failover_chain,
+                &request_model,
+                None,
+                None,
+                None,
             );
             let db = state.db.clone();
             let redis = state.redis.clone();
@@ -1525,29 +1752,49 @@ async fn proxy_handler(
             let server_name = last_server_name.clone();
             let group_name = config.group_name.clone();
             let latency = loop_start.elapsed().as_millis() as i32;
-            tokio::spawn(telegram_notifier::maybe_alert(telegram_notifier::AlertContext {
-                db, redis, http_client, server_id, server_name, group_name,
-                status_code: status, latency_ms: latency,
-            }));
+            tokio::spawn(telegram_notifier::maybe_alert(
+                telegram_notifier::AlertContext {
+                    db,
+                    redis,
+                    http_client,
+                    server_id,
+                    server_name,
+                    group_name,
+                    status_code: status,
+                    latency_ms: latency,
+                },
+            ));
             let mut resp = Response::builder().status(StatusCode::BAD_REQUEST);
             resp.headers_mut().unwrap().insert(
                 header::CONTENT_TYPE,
                 HeaderValue::from_static("application/json"),
             );
-            return resp.body(Body::from(err_body)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            return resp
+                .body(Body::from(err_body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
 
         // Check if this is a failover status code
         if config.failover_status_codes.contains(&status) {
-            emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
+            emit_uptime_entry(
+                &state,
+                config.group_id,
+                server.server_id,
+                status as i16,
+                server_latency,
+                request_id,
+            );
             // Circuit breaker: record error on failover status code
             if has_cb {
                 let tripped = circuit_breaker::record_error(
-                    &state.redis, config.group_id, server.server_id,
+                    &state.redis,
+                    config.group_id,
+                    server.server_id,
                     server.cb_max_failures.unwrap(),
                     server.cb_window_seconds.unwrap(),
                     server.cb_cooldown_seconds.unwrap(),
-                ).await;
+                )
+                .await;
                 if tripped {
                     spawn_cb_alert(&state, &config, server);
                 }
@@ -1557,16 +1804,31 @@ async fn proxy_handler(
 
         // Non-failover error
         if status != 200 {
-            emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
+            emit_uptime_entry(
+                &state,
+                config.group_id,
+                server.server_id,
+                status as i16,
+                server_latency,
+                request_id,
+            );
 
             emit_log_entry(
-                &state, &config, &parsed.group_key,
-                last_server_id, &last_server_name,
-                &request_path, &request_method,
-                status as i16, "upstream_error",
+                &state,
+                &config,
+                &parsed.group_key,
+                last_server_id,
+                &last_server_name,
+                &request_path,
+                &request_method,
+                status as i16,
+                "upstream_error",
                 loop_start.elapsed().as_millis() as i32,
-                &failover_chain, &request_model,
-                None, None, None,
+                &failover_chain,
+                &request_model,
+                None,
+                None,
+                None,
             );
             if is_billing_endpoint(&request_path) {
                 let db = state.db.clone();
@@ -1576,10 +1838,18 @@ async fn proxy_handler(
                 let server_name = last_server_name.clone();
                 let group_name = config.group_name.clone();
                 let latency = loop_start.elapsed().as_millis() as i32;
-                tokio::spawn(telegram_notifier::maybe_alert(telegram_notifier::AlertContext {
-                    db, redis, http_client, server_id, server_name, group_name,
-                    status_code: status, latency_ms: latency,
-                }));
+                tokio::spawn(telegram_notifier::maybe_alert(
+                    telegram_notifier::AlertContext {
+                        db,
+                        redis,
+                        http_client,
+                        server_id,
+                        server_name,
+                        group_name,
+                        status_code: status,
+                        latency_ms: latency,
+                    },
+                ));
             }
             return build_response(upstream_resp).await;
         }
@@ -1592,17 +1862,32 @@ async fn proxy_handler(
             .is_some_and(|ct| ct.contains("text/event-stream"));
 
         if !is_sse {
-            emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
+            emit_uptime_entry(
+                &state,
+                config.group_id,
+                server.server_id,
+                status as i16,
+                server_latency,
+                request_id,
+            );
             // Non-SSE: log failover chain if applicable
             if failover_chain.len() > 1 {
                 emit_log_entry(
-                    &state, &config, &parsed.group_key,
-                    last_server_id, &last_server_name,
-                    &request_path, &request_method,
-                    status as i16, "failover_success",
+                    &state,
+                    &config,
+                    &parsed.group_key,
+                    last_server_id,
+                    &last_server_name,
+                    &request_path,
+                    &request_method,
+                    status as i16,
+                    "failover_success",
                     loop_start.elapsed().as_millis() as i32,
-                    &failover_chain, &request_model,
-                    None, None, None,
+                    &failover_chain,
+                    &request_model,
+                    None,
+                    None,
+                    None,
                 );
             }
             // Extract token usage from non-streaming billing endpoint 200 responses
@@ -1611,7 +1896,8 @@ async fn proxy_handler(
                     .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
                 let mut response_headers = HeaderMap::new();
                 for (name, value) in upstream_resp.headers().iter() {
-                    if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                    if let Ok(axum_name) =
+                        axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
                         && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
                     {
                         response_headers.insert(axum_name, axum_value);
@@ -1622,22 +1908,41 @@ async fn proxy_handler(
                 if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes)
                     && let Some(usage) = json.get("usage")
                 {
-                    let (input, output, cache_creation, cache_read) = if is_openai_endpoint(&request_path) {
-                        let inp = usage.get("prompt_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let out = usage.get("completion_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let cr = usage
-                            .get("prompt_tokens_details")
-                            .and_then(|d| d.get("cached_tokens"))
-                            .and_then(|v| v.as_i64())
-                            .map(|v| v as i32);
-                        (inp, out, None, cr)
-                    } else {
-                        let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let out = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
-                        (inp, out, cc, cr)
-                    };
+                    let (input, output, cache_creation, cache_read) =
+                        if is_openai_endpoint(&request_path) {
+                            let inp = usage
+                                .get("prompt_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let out = usage
+                                .get("completion_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let cr = usage
+                                .get("prompt_tokens_details")
+                                .and_then(|d| d.get("cached_tokens"))
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            (inp, out, None, cr)
+                        } else {
+                            let inp = usage
+                                .get("input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let out = usage
+                                .get("output_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let cc = usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            let cr = usage
+                                .get("cache_read_input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .map(|v| v as i32);
+                            (inp, out, cc, cr)
+                        };
                     if let (Some(inp), Some(out)) = (input, output) {
                         let is_dk = parsed.dynamic_keys.contains_key(&server.short_id);
                         let kh = {
@@ -1646,18 +1951,23 @@ async fn proxy_handler(
                             } else {
                                 server.api_key.clone().unwrap_or_default()
                             };
-                            if raw.is_empty() { None } else { Some(hash_key(&raw)) }
+                            if raw.is_empty() {
+                                None
+                            } else {
+                                Some(hash_key(&raw))
+                            }
                         };
 
                         // Calculate cost and update subscription counters
                         let cost_usd = if let Some(ref model_name) = request_model {
                             if let Some(sub_id) = selected_subscription_id {
-                                if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
-                                    "SELECT * FROM key_subscriptions WHERE id = $1",
-                                )
-                                .bind(sub_id)
-                                .fetch_one(&state.db)
-                                .await
+                                if let Ok(sub) =
+                                    sqlx::query_as::<_, crate::models::KeySubscription>(
+                                        "SELECT * FROM key_subscriptions WHERE id = $1",
+                                    )
+                                    .bind(sub_id)
+                                    .fetch_one(&state.db)
+                                    .await
                                 {
                                     let cost = if sub.sub_type == "pay_per_request" {
                                         // Flat cost from model_request_costs
@@ -1674,8 +1984,15 @@ async fn proxy_handler(
                                             let rcw = server.rate_cache_write.unwrap_or(1.0);
                                             let rcr = server.rate_cache_read.unwrap_or(1.0);
                                             let c = crate::subscription::calculate_cost(
-                                                pricing, ri, ro, rcw, rcr,
-                                                inp, out, cache_creation, cache_read,
+                                                pricing,
+                                                ri,
+                                                ro,
+                                                rcw,
+                                                rcr,
+                                                inp,
+                                                out,
+                                                cache_creation,
+                                                cache_read,
                                                 server.normalize_cache_read,
                                             );
                                             drop(pricing_cache);
@@ -1687,12 +2004,28 @@ async fn proxy_handler(
                                     };
 
                                     // Lazy activation
-                                    crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
+                                    crate::subscription::ensure_activated(
+                                        &state,
+                                        sub_id,
+                                        sub.duration_days,
+                                    )
+                                    .await;
 
                                     crate::subscription::update_cost_counters(
-                                        &state, sub_id, model_name, cost,
+                                        &state,
+                                        sub_id,
+                                        model_name,
+                                        cost,
                                         sub.reset_hours,
-                                    ).await;
+                                    )
+                                    .await;
+
+                                    if selected_tpm_limit.is_some() {
+                                        crate::subscription::increment_tpm(
+                                            &state, sub_id, inp, out,
+                                        )
+                                        .await;
+                                    }
 
                                     Some(cost)
                                 } else {
@@ -1707,8 +2040,15 @@ async fn proxy_handler(
                                     let rcw = server.rate_cache_write.unwrap_or(1.0);
                                     let rcr = server.rate_cache_read.unwrap_or(1.0);
                                     let cost = crate::subscription::calculate_cost(
-                                        pricing, ri, ro, rcw, rcr,
-                                        inp, out, cache_creation, cache_read,
+                                        pricing,
+                                        ri,
+                                        ro,
+                                        rcw,
+                                        rcr,
+                                        inp,
+                                        out,
+                                        cache_creation,
+                                        cache_read,
                                         server.normalize_cache_read,
                                     );
                                     drop(pricing_cache);
@@ -1744,7 +2084,9 @@ async fn proxy_handler(
                 }
                 let mut resp = Response::builder().status(resp_status_code);
                 *resp.headers_mut().unwrap() = response_headers;
-                return resp.body(Body::from(body_bytes)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                return resp
+                    .body(Body::from(body_bytes))
+                    .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
             }
             return build_response(upstream_resp).await;
         }
@@ -1760,7 +2102,8 @@ async fn proxy_handler(
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let mut response_headers = HeaderMap::new();
         for (name, value) in upstream_resp.headers().iter() {
-            if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+            if let Ok(axum_name) =
+                axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
                 && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
             {
                 response_headers.insert(axum_name, axum_value);
@@ -1779,16 +2122,35 @@ async fn proxy_handler(
                 if let Some(last) = failover_chain.last_mut() {
                     last.status = 0;
                 }
-                emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, true, &request_path, config.group_key_id);
-                emit_uptime_entry(&state, config.group_id, server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                emit_ttft_entry(
+                    &state,
+                    config.group_id,
+                    server.server_id,
+                    &request_model,
+                    None,
+                    true,
+                    &request_path,
+                    config.group_key_id,
+                );
+                emit_uptime_entry(
+                    &state,
+                    config.group_id,
+                    server.server_id,
+                    0,
+                    server_start.elapsed().as_millis() as i32,
+                    request_id,
+                );
                 // Circuit breaker: record TTFT timeout as error
                 if has_cb {
                     let tripped = circuit_breaker::record_error(
-                        &state.redis, config.group_id, server.server_id,
+                        &state.redis,
+                        config.group_id,
+                        server.server_id,
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
-                    ).await;
+                    )
+                    .await;
                     if tripped {
                         spawn_cb_alert(&state, &config, server);
                     }
@@ -1800,27 +2162,55 @@ async fn proxy_handler(
             match tokio::time::timeout(
                 std::time::Duration::from_millis(remaining_ms),
                 stream.next(),
-            ).await {
+            )
+            .await
+            {
                 Ok(Some(Ok(first_chunk))) => {
                     // First chunk received within timeout
                     let ttft_ms = server_start.elapsed().as_millis() as i32;
-                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, Some(ttft_ms), false, &request_path, config.group_key_id);
-                    emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
+                    emit_ttft_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        &request_model,
+                        Some(ttft_ms),
+                        false,
+                        &request_path,
+                        config.group_key_id,
+                    );
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        status as i16,
+                        server_latency,
+                        request_id,
+                    );
 
                     // Log failover chain if this wasn't the first server tried
                     if failover_chain.len() > 1 {
                         emit_log_entry(
-                            &state, &config, &parsed.group_key,
-                            last_server_id, &last_server_name,
-                            &request_path, &request_method,
-                            status as i16, "failover_success",
+                            &state,
+                            &config,
+                            &parsed.group_key,
+                            last_server_id,
+                            &last_server_name,
+                            &request_path,
+                            &request_method,
+                            status as i16,
+                            "failover_success",
                             loop_start.elapsed().as_millis() as i32,
-                            &failover_chain, &request_model,
-                            None, None, None,
+                            &failover_chain,
+                            &request_model,
+                            None,
+                            None,
+                            None,
                         );
                     }
 
-                    let first = futures_util::stream::iter(std::iter::once(Ok::<_, std::io::Error>(first_chunk)));
+                    let first = futures_util::stream::iter(std::iter::once(
+                        Ok::<_, std::io::Error>(first_chunk),
+                    ));
                     let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
                     let combined = first.chain(rest);
                     let body = if is_billing_endpoint(&request_path) {
@@ -1831,7 +2221,11 @@ async fn proxy_handler(
                             } else {
                                 server.api_key.clone().unwrap_or_default()
                             };
-                            if raw.is_empty() { None } else { Some(hash_key(&raw)) }
+                            if raw.is_empty() {
+                                None
+                            } else {
+                                Some(hash_key(&raw))
+                            }
                         };
                         let parser = if is_openai_endpoint(&request_path) {
                             AnyParser::OpenAi(OpenAiSseUsageParser::new())
@@ -1839,9 +2233,16 @@ async fn proxy_handler(
                             AnyParser::Anthropic(SseUsageParser::new())
                         };
                         Body::from_stream(wrap_stream_with_usage_tracking(
-                            combined, state.clone(), config.group_id, server.server_id,
-                            request_model.clone(), is_dk, kh, config.group_key_id,
+                            combined,
+                            state.clone(),
+                            config.group_id,
+                            server.server_id,
+                            request_model.clone(),
+                            is_dk,
+                            kh,
+                            config.group_key_id,
                             selected_subscription_id,
+                            selected_tpm_limit,
                             server.rate_input.unwrap_or(1.0),
                             server.rate_output.unwrap_or(1.0),
                             server.rate_cache_write.unwrap_or(1.0),
@@ -1854,20 +2255,43 @@ async fn proxy_handler(
                     };
                     let mut resp = Response::builder().status(resp_status);
                     *resp.headers_mut().unwrap() = response_headers;
-                    return resp.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    return resp
+                        .body(body)
+                        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
                 }
                 Ok(Some(Err(_))) | Ok(None) => {
                     // Empty stream or stream error — treat as connection error, try next
                     if let Some(last) = failover_chain.last_mut() {
                         last.status = 0;
                     }
-                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, false, &request_path, config.group_key_id);
-                    emit_uptime_entry(&state, config.group_id, server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                    emit_ttft_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        &request_model,
+                        None,
+                        false,
+                        &request_path,
+                        config.group_key_id,
+                    );
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        0,
+                        server_start.elapsed().as_millis() as i32,
+                        request_id,
+                    );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
-                            &state.redis, config.group_id, server.server_id,
-                            server.cb_max_failures.unwrap(), server.cb_window_seconds.unwrap(), server.cb_cooldown_seconds.unwrap(),
-                        ).await;
+                            &state.redis,
+                            config.group_id,
+                            server.server_id,
+                            server.cb_max_failures.unwrap(),
+                            server.cb_window_seconds.unwrap(),
+                            server.cb_cooldown_seconds.unwrap(),
+                        )
+                        .await;
                         if tripped {
                             spawn_cb_alert(&state, &config, server);
                         }
@@ -1880,13 +2304,34 @@ async fn proxy_handler(
                     if let Some(last) = failover_chain.last_mut() {
                         last.status = 0;
                     }
-                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, true, &request_path, config.group_key_id);
-                    emit_uptime_entry(&state, config.group_id, server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                    emit_ttft_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        &request_model,
+                        None,
+                        true,
+                        &request_path,
+                        config.group_key_id,
+                    );
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        0,
+                        server_start.elapsed().as_millis() as i32,
+                        request_id,
+                    );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
-                            &state.redis, config.group_id, server.server_id,
-                            server.cb_max_failures.unwrap(), server.cb_window_seconds.unwrap(), server.cb_cooldown_seconds.unwrap(),
-                        ).await;
+                            &state.redis,
+                            config.group_id,
+                            server.server_id,
+                            server.cb_max_failures.unwrap(),
+                            server.cb_window_seconds.unwrap(),
+                            server.cb_cooldown_seconds.unwrap(),
+                        )
+                        .await;
                         if tripped {
                             spawn_cb_alert(&state, &config, server);
                         }
@@ -1899,23 +2344,49 @@ async fn proxy_handler(
             match stream.next().await {
                 Some(Ok(first_chunk)) => {
                     let ttft_ms = server_start.elapsed().as_millis() as i32;
-                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, Some(ttft_ms), false, &request_path, config.group_key_id);
-                    emit_uptime_entry(&state, config.group_id, server.server_id, status as i16, server_latency, request_id);
+                    emit_ttft_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        &request_model,
+                        Some(ttft_ms),
+                        false,
+                        &request_path,
+                        config.group_key_id,
+                    );
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        status as i16,
+                        server_latency,
+                        request_id,
+                    );
 
                     // Log failover chain if this wasn't the first server tried
                     if failover_chain.len() > 1 {
                         emit_log_entry(
-                            &state, &config, &parsed.group_key,
-                            last_server_id, &last_server_name,
-                            &request_path, &request_method,
-                            status as i16, "failover_success",
+                            &state,
+                            &config,
+                            &parsed.group_key,
+                            last_server_id,
+                            &last_server_name,
+                            &request_path,
+                            &request_method,
+                            status as i16,
+                            "failover_success",
                             loop_start.elapsed().as_millis() as i32,
-                            &failover_chain, &request_model,
-                            None, None, None,
+                            &failover_chain,
+                            &request_model,
+                            None,
+                            None,
+                            None,
                         );
                     }
 
-                    let first = futures_util::stream::iter(std::iter::once(Ok::<_, std::io::Error>(first_chunk)));
+                    let first = futures_util::stream::iter(std::iter::once(
+                        Ok::<_, std::io::Error>(first_chunk),
+                    ));
                     let rest = stream.map(|chunk| chunk.map_err(std::io::Error::other));
                     let combined = first.chain(rest);
                     let body = if is_billing_endpoint(&request_path) {
@@ -1926,7 +2397,11 @@ async fn proxy_handler(
                             } else {
                                 server.api_key.clone().unwrap_or_default()
                             };
-                            if raw.is_empty() { None } else { Some(hash_key(&raw)) }
+                            if raw.is_empty() {
+                                None
+                            } else {
+                                Some(hash_key(&raw))
+                            }
                         };
                         let parser = if is_openai_endpoint(&request_path) {
                             AnyParser::OpenAi(OpenAiSseUsageParser::new())
@@ -1934,9 +2409,16 @@ async fn proxy_handler(
                             AnyParser::Anthropic(SseUsageParser::new())
                         };
                         Body::from_stream(wrap_stream_with_usage_tracking(
-                            combined, state.clone(), config.group_id, server.server_id,
-                            request_model.clone(), is_dk, kh, config.group_key_id,
+                            combined,
+                            state.clone(),
+                            config.group_id,
+                            server.server_id,
+                            request_model.clone(),
+                            is_dk,
+                            kh,
+                            config.group_key_id,
                             selected_subscription_id,
+                            selected_tpm_limit,
                             server.rate_input.unwrap_or(1.0),
                             server.rate_output.unwrap_or(1.0),
                             server.rate_cache_write.unwrap_or(1.0),
@@ -1949,17 +2431,40 @@ async fn proxy_handler(
                     };
                     let mut resp = Response::builder().status(resp_status);
                     *resp.headers_mut().unwrap() = response_headers;
-                    return resp.body(body).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                    return resp
+                        .body(body)
+                        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
                 }
                 Some(Err(_)) | None => {
                     // Empty stream or error — treat as connection error
-                    emit_ttft_entry(&state, config.group_id, server.server_id, &request_model, None, false, &request_path, config.group_key_id);
-                    emit_uptime_entry(&state, config.group_id, server.server_id, 0, server_start.elapsed().as_millis() as i32, request_id);
+                    emit_ttft_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        &request_model,
+                        None,
+                        false,
+                        &request_path,
+                        config.group_key_id,
+                    );
+                    emit_uptime_entry(
+                        &state,
+                        config.group_id,
+                        server.server_id,
+                        0,
+                        server_start.elapsed().as_millis() as i32,
+                        request_id,
+                    );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
-                            &state.redis, config.group_id, server.server_id,
-                            server.cb_max_failures.unwrap(), server.cb_window_seconds.unwrap(), server.cb_cooldown_seconds.unwrap(),
-                        ).await;
+                            &state.redis,
+                            config.group_id,
+                            server.server_id,
+                            server.cb_max_failures.unwrap(),
+                            server.cb_window_seconds.unwrap(),
+                            server.cb_cooldown_seconds.unwrap(),
+                        )
+                        .await;
                         if tripped {
                             spawn_cb_alert(&state, &config, server);
                         }
@@ -2006,13 +2511,21 @@ async fn proxy_handler(
         .unwrap_or(429);
 
     emit_log_entry(
-        &state, &config, &parsed.group_key,
-        last_server_id, &last_server_name,
-        &request_path, &request_method,
-        final_status, error_type,
+        &state,
+        &config,
+        &parsed.group_key,
+        last_server_id,
+        &last_server_name,
+        &request_path,
+        &request_method,
+        final_status,
+        error_type,
         loop_start.elapsed().as_millis() as i32,
-        &failover_chain, &request_model,
-        None, None, None,
+        &failover_chain,
+        &request_model,
+        None,
+        None,
+        None,
     );
 
     if is_billing_endpoint(&request_path) && final_status != 0 {
@@ -2023,10 +2536,18 @@ async fn proxy_handler(
         let server_name = last_server_name.clone();
         let group_name = config.group_name.clone();
         let latency = loop_start.elapsed().as_millis() as i32;
-        tokio::spawn(telegram_notifier::maybe_alert(telegram_notifier::AlertContext {
-            db, redis, http_client, server_id, server_name, group_name,
-            status_code: final_status as u16, latency_ms: latency,
-        }));
+        tokio::spawn(telegram_notifier::maybe_alert(
+            telegram_notifier::AlertContext {
+                db,
+                redis,
+                http_client,
+                server_id,
+                server_name,
+                group_name,
+                status_code: final_status as u16,
+                latency_ms: latency,
+            },
+        ));
     }
 
     let mut resp = api_error(
@@ -2056,6 +2577,7 @@ struct UsageTrackingStream<S> {
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
     subscription_id: Option<uuid::Uuid>,
+    tpm_limit: Option<f64>,
     rate_input: f64,
     rate_output: f64,
     rate_cache_write: f64,
@@ -2100,6 +2622,7 @@ where
                     let key_hash = this.key_hash.clone();
                     let group_key_id = this.group_key_id;
                     let subscription_id = this.subscription_id;
+                    let tpm_limit = this.tpm_limit;
                     let rate_input = this.rate_input;
                     let rate_output = this.rate_output;
                     let rate_cache_write = this.rate_cache_write;
@@ -2114,12 +2637,13 @@ where
                     tokio::spawn(async move {
                         let cost_usd = if let Some(ref model_name) = model {
                             if let Some(sub_id) = subscription_id {
-                                if let Ok(sub) = sqlx::query_as::<_, crate::models::KeySubscription>(
-                                    "SELECT * FROM key_subscriptions WHERE id = $1",
-                                )
-                                .bind(sub_id)
-                                .fetch_one(&state.db)
-                                .await
+                                if let Ok(sub) =
+                                    sqlx::query_as::<_, crate::models::KeySubscription>(
+                                        "SELECT * FROM key_subscriptions WHERE id = $1",
+                                    )
+                                    .bind(sub_id)
+                                    .fetch_one(&state.db)
+                                    .await
                                 {
                                     // Bonus subscriptions: calculate cost for tracking, but no activation or counters
                                     if sub.sub_type == "bonus" {
@@ -2127,10 +2651,14 @@ where
                                         if let Some(pricing) = pricing_cache.get(model_name) {
                                             let c = crate::subscription::calculate_cost(
                                                 pricing,
-                                                rate_input, rate_output,
-                                                rate_cache_write, rate_cache_read,
-                                                input_tokens, output_tokens,
-                                                cache_creation_tokens, cache_read_tokens,
+                                                rate_input,
+                                                rate_output,
+                                                rate_cache_write,
+                                                rate_cache_read,
+                                                input_tokens,
+                                                output_tokens,
+                                                cache_creation_tokens,
+                                                cache_read_tokens,
                                                 normalize_cache_read,
                                             );
                                             drop(pricing_cache);
@@ -2151,10 +2679,14 @@ where
                                             if let Some(pricing) = pricing_cache.get(model_name) {
                                                 let c = crate::subscription::calculate_cost(
                                                     pricing,
-                                                    rate_input, rate_output,
-                                                    rate_cache_write, rate_cache_read,
-                                                    input_tokens, output_tokens,
-                                                    cache_creation_tokens, cache_read_tokens,
+                                                    rate_input,
+                                                    rate_output,
+                                                    rate_cache_write,
+                                                    rate_cache_read,
+                                                    input_tokens,
+                                                    output_tokens,
+                                                    cache_creation_tokens,
+                                                    cache_read_tokens,
                                                     normalize_cache_read,
                                                 );
                                                 drop(pricing_cache);
@@ -2165,12 +2697,31 @@ where
                                             }
                                         };
 
-                                        crate::subscription::ensure_activated(&state, sub_id, sub.duration_days).await;
+                                        crate::subscription::ensure_activated(
+                                            &state,
+                                            sub_id,
+                                            sub.duration_days,
+                                        )
+                                        .await;
 
                                         crate::subscription::update_cost_counters(
-                                            &state, sub_id, model_name, cost,
+                                            &state,
+                                            sub_id,
+                                            model_name,
+                                            cost,
                                             sub.reset_hours,
-                                        ).await;
+                                        )
+                                        .await;
+
+                                        if tpm_limit.is_some() {
+                                            crate::subscription::increment_tpm(
+                                                &state,
+                                                sub_id,
+                                                input_tokens,
+                                                output_tokens,
+                                            )
+                                            .await;
+                                        }
 
                                         Some(cost)
                                     }
@@ -2183,10 +2734,14 @@ where
                                 if let Some(pricing) = pricing_cache.get(model_name) {
                                     let cost = crate::subscription::calculate_cost(
                                         pricing,
-                                        rate_input, rate_output,
-                                        rate_cache_write, rate_cache_read,
-                                        input_tokens, output_tokens,
-                                        cache_creation_tokens, cache_read_tokens,
+                                        rate_input,
+                                        rate_output,
+                                        rate_cache_write,
+                                        rate_cache_read,
+                                        input_tokens,
+                                        output_tokens,
+                                        cache_creation_tokens,
+                                        cache_read_tokens,
                                         normalize_cache_read,
                                     );
                                     drop(pricing_cache);
@@ -2238,6 +2793,7 @@ fn wrap_stream_with_usage_tracking<S>(
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
     subscription_id: Option<uuid::Uuid>,
+    tpm_limit: Option<f64>,
     rate_input: f64,
     rate_output: f64,
     rate_cache_write: f64,
@@ -2259,6 +2815,7 @@ where
         key_hash,
         group_key_id,
         subscription_id,
+        tpm_limit,
         rate_input,
         rate_output,
         rate_cache_write,
@@ -2379,23 +2936,20 @@ async fn build_response(upstream: reqwest::Response) -> Response {
         .is_some_and(|ct| ct.contains("text/event-stream"));
 
     if is_sse {
-        let stream = upstream.bytes_stream().map(|chunk| {
-            chunk
-                .map_err(std::io::Error::other)
-        });
+        let stream = upstream
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
         let body = Body::from_stream(stream);
         let mut resp = Response::builder().status(status);
         *resp.headers_mut().unwrap() = response_headers;
-        resp.body(body).unwrap_or_else(|_| {
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })
+        resp.body(body)
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
     } else {
         let body_bytes = upstream.bytes().await.unwrap_or_default();
         let mut resp = Response::builder().status(status);
         *resp.headers_mut().unwrap() = response_headers;
-        resp.body(Body::from(body_bytes)).unwrap_or_else(|_| {
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })
+        resp.body(Body::from(body_bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
     }
 }
 
@@ -2457,7 +3011,8 @@ mod tests {
 
     #[test]
     fn test_is_thinking_signature_error_with_signature() {
-        let body = br#"{"error":{"type":"<nil>","message":"Invalid `signature` in `thinking` block"}}"#;
+        let body =
+            br#"{"error":{"type":"<nil>","message":"Invalid `signature` in `thinking` block"}}"#;
         assert!(is_thinking_signature_error(body));
     }
 
@@ -2485,7 +3040,8 @@ mod tests {
                 ]},
                 {"role": "user", "content": "follow up"}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let result = strip_thinking_blocks(&body).unwrap();
         let parsed: Value = serde_json::from_slice(&result).unwrap();
@@ -2504,7 +3060,8 @@ mod tests {
                     {"type": "text", "text": "Hi there"}
                 ]}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         assert!(strip_thinking_blocks(&body).is_none());
     }
@@ -2522,7 +3079,8 @@ mod tests {
                     {"type": "text", "text": "response"}
                 ]}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let result = strip_thinking_blocks(&body).unwrap();
         let parsed: Value = serde_json::from_slice(&result).unwrap();
@@ -2537,7 +3095,10 @@ mod tests {
         let client = Some(&Value::String("You are a coding assistant".to_string()));
         let server = Some("Always respond in Vietnamese");
         let result = merge_system_prompts(client, server).unwrap();
-        assert_eq!(result, "You are a coding assistant\n\nAlways respond in Vietnamese");
+        assert_eq!(
+            result,
+            "You are a coding assistant\n\nAlways respond in Vietnamese"
+        );
     }
 
     #[test]
@@ -2617,17 +3178,30 @@ mod tests {
     fn test_transform_request_body_with_model_mapping_and_system_merge() {
         let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
         let mappings = serde_json::json!({"claude-opus-4-6": "my-opus"});
-        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), "/v1/messages");
+        let result = transform_request_body(
+            body,
+            &mappings,
+            Some("Always respond in Vietnamese"),
+            "/v1/messages",
+        );
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["model"], "my-opus");
-        assert_eq!(parsed["system"], "You are helpful\n\nAlways respond in Vietnamese");
+        assert_eq!(
+            parsed["system"],
+            "You are helpful\n\nAlways respond in Vietnamese"
+        );
     }
 
     #[test]
     fn test_transform_request_body_no_merge_on_non_messages_endpoint() {
         let body = br#"{"model":"claude-opus-4-6","system":"You are helpful","messages":[]}"#;
         let mappings = serde_json::json!({});
-        let result = transform_request_body(body, &mappings, Some("Always respond in Vietnamese"), "/v1/other");
+        let result = transform_request_body(
+            body,
+            &mappings,
+            Some("Always respond in Vietnamese"),
+            "/v1/other",
+        );
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["system"], "You are helpful");
     }

@@ -20,36 +20,106 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
 }
 
+fn invalidate_subscription_caches(state: &AppState, key_ids: &[(Uuid,)]) {
+    let redis = state.redis.clone();
+    let key_ids = key_ids.to_vec();
+    tokio::spawn(async move {
+        if let Ok(mut conn) = redis.get().await {
+            for (key_id,) in &key_ids {
+                let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+            }
+        }
+    });
+}
+
+async fn active_subscription_key_ids(state: &AppState, plan_id: Uuid) -> Vec<(Uuid,)> {
+    sqlx::query_as(
+        "SELECT DISTINCT group_key_id FROM key_subscriptions WHERE plan_id = $1 AND status = 'active'",
+    )
+    .bind(plan_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+}
+
+async fn sync_plan_limit_to_active_subscriptions(
+    state: &AppState,
+    plan_id: Uuid,
+    column: &str,
+    value: Option<f64>,
+) -> Result<u64, ApiError> {
+    let sql = match column {
+        "rpm_limit" => {
+            "UPDATE key_subscriptions SET rpm_limit = $1 WHERE plan_id = $2 AND status = 'active'"
+        }
+        "tpm_limit" => {
+            "UPDATE key_subscriptions SET tpm_limit = $1 WHERE plan_id = $2 AND status = 'active'"
+        }
+        _ => return Err(internal("invalid sync column")),
+    };
+
+    let result = sqlx::query(sql)
+        .bind(value)
+        .bind(plan_id)
+        .execute(&state.db)
+        .await
+        .map_err(internal)?;
+
+    let key_ids = active_subscription_key_ids(state, plan_id).await;
+    invalidate_subscription_caches(state, &key_ids);
+
+    Ok(result.rows_affected())
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_plans).post(create_plan))
-        .route("/{id}", get(get_plan).patch(update_plan).delete(delete_plan))
+        .route(
+            "/{id}",
+            get(get_plan).patch(update_plan).delete(delete_plan),
+        )
         .route("/{id}/sync-rpm", axum::routing::post(sync_rpm))
+        .route("/{id}/sync-tpm", axum::routing::post(sync_tpm))
 }
 
 async fn create_plan(
     State(state): State<AppState>,
     Json(input): Json<CreateSubscriptionPlan>,
 ) -> Result<(StatusCode, Json<SubscriptionPlan>), ApiError> {
-    if input.sub_type != "fixed" && input.sub_type != "hourly_reset" && input.sub_type != "pay_per_request" {
-        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'"));
+    if input.sub_type != "fixed"
+        && input.sub_type != "hourly_reset"
+        && input.sub_type != "pay_per_request"
+    {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'",
+        ));
     }
     if input.sub_type == "hourly_reset" && input.reset_hours.is_none() {
-        return Err(err(StatusCode::BAD_REQUEST, "reset_hours is required for hourly_reset plans"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "reset_hours is required for hourly_reset plans",
+        ));
     }
 
     let model_limits = input.model_limits.unwrap_or(serde_json::json!({}));
     let model_request_costs = input.model_request_costs.unwrap_or(serde_json::json!({}));
 
     if input.sub_type == "pay_per_request"
-        && model_request_costs.as_object().map(|o| o.is_empty()).unwrap_or(true)
+        && model_request_costs
+            .as_object()
+            .map(|o| o.is_empty())
+            .unwrap_or(true)
     {
-        return Err(err(StatusCode::BAD_REQUEST, "model_request_costs must not be empty for pay_per_request plans"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "model_request_costs must not be empty for pay_per_request plans",
+        ));
     }
 
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
@@ -59,6 +129,7 @@ async fn create_plan(
     .bind(input.reset_hours)
     .bind(input.duration_days)
     .bind(input.rpm_limit)
+    .bind(input.tpm_limit)
     .fetch_one(&state.db)
     .await
     .map_err(internal)?;
@@ -83,14 +154,13 @@ async fn get_plan(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<SubscriptionPlan>, ApiError> {
-    let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "SELECT * FROM subscription_plans WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
+    let plan =
+        sqlx::query_as::<_, SubscriptionPlan>("SELECT * FROM subscription_plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
     Ok(Json(plan))
 }
@@ -101,9 +171,14 @@ async fn update_plan(
     Json(input): Json<UpdateSubscriptionPlan>,
 ) -> Result<Json<SubscriptionPlan>, ApiError> {
     if let Some(ref st) = input.sub_type
-        && st != "fixed" && st != "hourly_reset" && st != "pay_per_request"
+        && st != "fixed"
+        && st != "hourly_reset"
+        && st != "pay_per_request"
     {
-        return Err(err(StatusCode::BAD_REQUEST, "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'"));
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "sub_type must be 'fixed', 'hourly_reset', or 'pay_per_request'",
+        ));
     }
 
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
@@ -117,8 +192,9 @@ async fn update_plan(
          duration_days = COALESCE($8, duration_days), \
          is_active = COALESCE($9, is_active), \
          rpm_limit = CASE WHEN $10 THEN $11 ELSE rpm_limit END, \
+         tpm_limit = CASE WHEN $12 THEN $13 ELSE tpm_limit END, \
          updated_at = now() \
-         WHERE id = $12 RETURNING *",
+         WHERE id = $14 RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
@@ -131,35 +207,22 @@ async fn update_plan(
     .bind(input.is_active)
     .bind(input.rpm_limit.is_some())
     .bind(input.rpm_limit.flatten())
+    .bind(input.tpm_limit.is_some())
+    .bind(input.tpm_limit.flatten())
     .bind(id)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
-    // Auto-sync rpm_limit to active subscriptions when rpm_limit is updated
+    // Auto-sync plan rate limits to active subscriptions when updated.
     if input.rpm_limit.is_some() {
-        let _ = sqlx::query(
-            "UPDATE key_subscriptions SET rpm_limit = $1 WHERE plan_id = $2 AND status = 'active'",
-        )
-        .bind(plan.rpm_limit)
-        .bind(id)
-        .execute(&state.db)
-        .await;
-
-        let key_ids: Vec<(Uuid,)> = sqlx::query_as(
-            "SELECT DISTINCT group_key_id FROM key_subscriptions WHERE plan_id = $1 AND status = 'active'",
-        )
-        .bind(id)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
-
-        if let Ok(mut conn) = state.redis.get().await {
-            for (key_id,) in &key_ids {
-                let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
-            }
-        }
+        let _ =
+            sync_plan_limit_to_active_subscriptions(&state, id, "rpm_limit", plan.rpm_limit).await;
+    }
+    if input.tpm_limit.is_some() {
+        let _ =
+            sync_plan_limit_to_active_subscriptions(&state, id, "tpm_limit", plan.tpm_limit).await;
     }
 
     Ok(Json(plan))
@@ -203,39 +266,36 @@ async fn sync_rpm(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<SyncResult>, ApiError> {
-    let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "SELECT * FROM subscription_plans WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
+    let plan =
+        sqlx::query_as::<_, SubscriptionPlan>("SELECT * FROM subscription_plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
     // Update rpm_limit on all active subscriptions from this plan
-    let result = sqlx::query(
-        "UPDATE key_subscriptions SET rpm_limit = $1 WHERE plan_id = $2 AND status = 'active'",
-    )
-    .bind(plan.rpm_limit)
-    .bind(id)
-    .execute(&state.db)
-    .await
-    .map_err(internal)?;
+    let updated =
+        sync_plan_limit_to_active_subscriptions(&state, id, "rpm_limit", plan.rpm_limit).await?;
 
-    // Invalidate subscription list caches for affected keys
-    let key_ids: Vec<(Uuid,)> = sqlx::query_as(
-        "SELECT DISTINCT group_key_id FROM key_subscriptions WHERE plan_id = $1 AND status = 'active'",
-    )
-    .bind(id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    Ok(Json(SyncResult { updated }))
+}
 
-    if let Ok(mut conn) = state.redis.get().await {
-        for (key_id,) in &key_ids {
-            let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
-        }
-    }
+async fn sync_tpm(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SyncResult>, ApiError> {
+    let plan =
+        sqlx::query_as::<_, SubscriptionPlan>("SELECT * FROM subscription_plans WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
-    Ok(Json(SyncResult { updated: result.rows_affected() }))
+    // Update tpm_limit on all active subscriptions from this plan
+    let updated =
+        sync_plan_limit_to_active_subscriptions(&state, id, "tpm_limit", plan.tpm_limit).await?;
+
+    Ok(Json(SyncResult { updated }))
 }

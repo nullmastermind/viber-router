@@ -14,6 +14,7 @@ pub struct KeySubscription {
     pub reset_hours: Option<i32>,
     pub duration_days: i32,
     pub rpm_limit: Option<f64>,
+    pub tpm_limit: Option<f64>,
     pub status: String,
     pub activated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -45,4 +46,69 @@ pub struct CancelSubscription {
 #[derive(Debug, Deserialize)]
 pub struct UpdateBonusSubscription {
     pub bonus_allowed_models: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_subscription_deserializes_null_tpm_as_unlimited() {
+        let sub: KeySubscription = serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4(),
+            "group_key_id": Uuid::new_v4(),
+            "plan_id": Uuid::new_v4(),
+            "sub_type": "fixed",
+            "cost_limit_usd": 10.0,
+            "model_limits": {},
+            "model_request_costs": {},
+            "reset_hours": null,
+            "duration_days": 30,
+            "rpm_limit": null,
+            "tpm_limit": null,
+            "status": "active",
+            "activated_at": null,
+            "expires_at": null,
+            "created_at": chrono::Utc::now(),
+            "bonus_base_url": null,
+            "bonus_api_key": null,
+            "bonus_name": null,
+            "bonus_quota_url": null,
+            "bonus_quota_headers": null,
+            "bonus_allowed_models": null
+        }))
+        .unwrap();
+
+        assert_eq!(sub.tpm_limit, None);
+    }
+
+    #[test]
+    fn key_subscription_deserializes_tpm_limit_value() {
+        let sub: KeySubscription = serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4(),
+            "group_key_id": Uuid::new_v4(),
+            "plan_id": Uuid::new_v4(),
+            "sub_type": "fixed",
+            "cost_limit_usd": 10.0,
+            "model_limits": {},
+            "model_request_costs": {},
+            "reset_hours": null,
+            "duration_days": 30,
+            "rpm_limit": null,
+            "tpm_limit": 100000.0,
+            "status": "active",
+            "activated_at": null,
+            "expires_at": null,
+            "created_at": chrono::Utc::now(),
+            "bonus_base_url": null,
+            "bonus_api_key": null,
+            "bonus_name": null,
+            "bonus_quota_url": null,
+            "bonus_quota_headers": null,
+            "bonus_allowed_models": null
+        }))
+        .unwrap();
+
+        assert_eq!(sub.tpm_limit, Some(100000.0));
+    }
 }

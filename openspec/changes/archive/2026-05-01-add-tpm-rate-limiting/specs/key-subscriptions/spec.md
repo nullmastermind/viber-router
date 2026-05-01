@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Key subscriptions table
 The system SHALL store subscription instances in a `key_subscriptions` table with columns: `id` (UUID PK), `group_key_id` (UUID FK to group_keys ON DELETE CASCADE), `plan_id` (UUID FK to subscription_plans, nullable), `sub_type` (TEXT NOT NULL), `cost_limit_usd` (FLOAT8 NOT NULL), `model_limits` (JSONB DEFAULT '{}'), `model_request_costs` (JSONB NOT NULL DEFAULT '{}'), `rpm_limit` (FLOAT8, nullable), `tpm_limit` (FLOAT8, nullable), `reset_hours` (INT, nullable), `duration_days` (INT NOT NULL), `status` (TEXT NOT NULL DEFAULT 'active'), `activated_at` (TIMESTAMPTZ, nullable), `expires_at` (TIMESTAMPTZ, nullable), `created_at` (TIMESTAMPTZ). Additionally, the table SHALL have five nullable bonus columns: `bonus_base_url TEXT`, `bonus_api_key TEXT`, `bonus_name TEXT`, `bonus_quota_url TEXT`, `bonus_quota_headers JSONB`. Index on `(group_key_id, status)`. The `sub_type` CHECK constraint SHALL include `'bonus'` in addition to existing values.
