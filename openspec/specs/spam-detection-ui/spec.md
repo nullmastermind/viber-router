@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: Spam tab in group detail
 The admin UI SHALL provide a "Spam" tab in the Group Detail page that displays spam detection results for the selected group.
 

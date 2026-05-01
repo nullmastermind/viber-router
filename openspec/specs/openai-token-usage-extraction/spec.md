@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: OpenAI SSE usage parser
 The system SHALL provide an `OpenAiSseUsageParser` struct in `sse_usage_parser.rs` that parses OpenAI streaming SSE events and returns a `ParsedUsage` value. The parser SHALL buffer incoming bytes, split on `\n\n` event boundaries, and for each `data: ` line attempt JSON parsing. The parser SHALL extract `usage.prompt_tokens` as `input_tokens` and `usage.completion_tokens` as `output_tokens` from any chunk that contains a `usage` object. The parser SHALL skip `data: [DONE]` lines without error. `cache_creation_tokens` SHALL always be `None`. `cache_read_tokens` SHALL be extracted from `usage.prompt_tokens_details.cached_tokens` when present.
 

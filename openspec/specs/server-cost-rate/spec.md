@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Server cost rate multiplier fields
 The `group_servers` table SHALL have 4 nullable FLOAT8 columns: `rate_input`, `rate_output`, `rate_cache_write`, `rate_cache_read`. When NULL, the effective rate SHALL be 1.0. The table SHALL also have `normalize_cache_read BOOLEAN NOT NULL DEFAULT false`.
 

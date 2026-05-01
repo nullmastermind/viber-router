@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Bonus subscription creation without plan
 The system SHALL allow creating a bonus subscription directly (without a `plan_id`) via POST `/api/admin/groups/:group_id/keys/:key_id/subscriptions`. The request body MUST include `bonus_name`, `bonus_base_url`, and `bonus_api_key`. Optional fields are `bonus_quota_url`, `bonus_quota_headers`, and `bonus_allowed_models`. When provided, `bonus_allowed_models` MUST be stored as model name strings. A missing, null, or empty `bonus_allowed_models` value SHALL mean the bonus subscription accepts all models. The system SHALL set `sub_type = 'bonus'`, `cost_limit_usd = 0`, `model_limits = {}`, `model_request_costs = {}`, `duration_days = 36500`, `reset_hours = NULL`, `rpm_limit = NULL`, `plan_id = NULL` for all bonus subscriptions.
 

@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: TTFT chart in Group Detail page
 The Group Detail page SHALL display a Chart.js line chart showing TTFT measurements per server over the last hour. Each server SHALL be rendered as a separate line/series with a distinct color.
 

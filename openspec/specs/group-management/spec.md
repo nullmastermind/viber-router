@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Get a group by ID
 The system SHALL return a single group's details including its assigned servers with priorities and model mappings, the count-tokens default server configuration, the list of allowed models, and the list of blocked user-agents.
 

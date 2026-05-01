@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Chain-level uptime endpoint
 The system SHALL provide `GET /api/public/uptime?key=...` returning chain-level uptime data bucketed into 90 × 30-minute intervals. The endpoint SHALL use the same key validation and IP rate limiting as the existing public usage endpoint.
 

@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: TPM limit storage
 The system SHALL support an optional `tpm_limit` on subscription plans and key subscriptions. A null `tpm_limit` SHALL mean no tokens-per-minute limit applies.
 

@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Token usage section in Group Detail page
 The Group Detail page SHALL display a "Token Usage" section with two child tabs: "By Server" (showing aggregated token usage statistics per server) and "By Sub-Key" (showing aggregated usage per sub-key). The "By Server" tab SHALL be the default active child tab and SHALL contain all existing filtering controls and cost information unchanged.
 

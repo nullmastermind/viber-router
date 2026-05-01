@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: User Agents tab on group detail page
 The GroupDetailPage SHALL include a "User Agents" tab after the "Spam" tab. The tab panel SHALL contain a "Blocked User Agents" section with:
 - A `q-select` with `use-input` and `use-chips` props that filters from the list of recorded UAs for the group. The admin SHALL also be able to type a custom UA string not in the recorded list.

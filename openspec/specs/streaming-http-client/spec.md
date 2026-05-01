@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: HTTP client configured for long-running SSE streams
 The shared `reqwest::Client` used for upstream proxying SHALL be constructed with explicit timeout, keepalive, and TCP settings instead of using default configuration.
 

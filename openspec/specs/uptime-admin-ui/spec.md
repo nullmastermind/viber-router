@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Per-server uptime bars in group detail
 The GroupDetailPage servers tab SHALL display a row of 90 colored bars under each server, representing uptime over the last 45 hours (30-minute buckets).
 

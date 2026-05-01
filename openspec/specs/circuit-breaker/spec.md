@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Circuit breaker error counting
 The system SHALL track errors per (group_id, server_id) in Redis using key `cb:err:{group_id}:{server_id}`. Each error SHALL increment the counter via INCR. When the key is first created, its TTL SHALL be set to the server's `cb_window_seconds`. The counter auto-resets when the TTL expires.
 

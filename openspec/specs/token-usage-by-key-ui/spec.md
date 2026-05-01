@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Sub-key usage table in Group Detail page
 The Group Detail page SHALL display a "By Sub-Key" child tab within the Token Usage tab showing aggregated token usage per sub-key.
 

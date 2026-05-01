@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Group-server assignment has rate limit fields
 The `group_servers` table SHALL include two nullable integer columns: `max_requests` and `rate_window_seconds`. Both default to NULL. New assignments SHALL be created with both as NULL (rate limiting disabled).
 

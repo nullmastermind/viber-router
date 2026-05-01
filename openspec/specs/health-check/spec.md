@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: Health endpoint returns system status
 The system SHALL expose a `GET /health` endpoint that checks connectivity to both PostgreSQL and Redis, returning a JSON response with individual component statuses.
 

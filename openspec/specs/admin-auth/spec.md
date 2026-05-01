@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Admin endpoints require ADMIN_TOKEN authentication
 All `/api/admin/*` endpoints SHALL require a valid `Authorization: Bearer <token>` header where `<token>` matches the `ADMIN_TOKEN` environment variable.
 

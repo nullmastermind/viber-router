@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: TTFT statistics API endpoint
 The system SHALL provide a GET endpoint at `/api/admin/ttft-stats` that returns aggregated TTFT statistics per server for a given group within a time window. The endpoint SHALL require admin authentication.
 

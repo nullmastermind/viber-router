@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Create a server
 The system SHALL allow creating a new upstream server with name and base_url as required fields, api_key and system_prompt as optional fields. The system SHALL auto-assign a unique short_id (auto-increment integer).
 

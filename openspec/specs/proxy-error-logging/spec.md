@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Log proxy requests with non-200 final status
 The system SHALL record a log entry for every proxy request whose final response status code is not 200. The log entry SHALL be created after the failover waterfall completes (either a server responded with a non-failover non-200 status, or all servers were exhausted).
 

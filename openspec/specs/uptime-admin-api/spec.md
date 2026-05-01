@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Per-server uptime bars endpoint
 The system SHALL provide `GET /api/admin/groups/{id}/uptime` returning per-server uptime data bucketed into 90 × 30-minute intervals covering the last 45 hours. The endpoint SHALL require admin authentication.
 

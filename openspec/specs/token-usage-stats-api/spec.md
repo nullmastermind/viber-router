@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Token usage statistics API endpoint
 The system SHALL provide a GET endpoint at `/api/admin/token-usage` that returns aggregated token usage statistics per server for a given group within a time range. The endpoint SHALL require admin authentication. The response SHALL include cost fields calculated by joining model pricing and server rate data.
 

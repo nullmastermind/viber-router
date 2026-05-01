@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Record unique user-agents per group
 On each proxy request, after group config resolution, the system SHALL extract the `User-Agent` request header. If the header is absent or empty, the system SHALL normalize it to the string `"(empty)"`. The system SHALL then call `add_group_ua(redis, group_id, user_agent)` which runs `SADD group:{group_id}:user_agents {ua}` in Redis. If the SADD returns 1 (new member), the system SHALL insert a row into `group_user_agents(group_id, user_agent, first_seen_at)` using `ON CONFLICT DO NOTHING`. This entire operation SHALL be performed in a `tokio::spawn` task (fire-and-forget) and SHALL NOT block the proxy request.
 

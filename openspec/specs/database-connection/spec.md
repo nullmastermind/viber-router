@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: PostgreSQL connection pool is established at startup
 The system SHALL create a SQLx PgPool using the DATABASE_URL environment variable. The pool SHALL be configured with a maximum number of connections specified by DATABASE_MAX_CONNECTIONS, defaulting to 50.
 

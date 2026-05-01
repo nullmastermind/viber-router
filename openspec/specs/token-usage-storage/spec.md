@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Token usage log table
 The system SHALL persist token usage records in a partitioned `token_usage_logs` PostgreSQL table with columns: `id` (UUID), `created_at` (TIMESTAMPTZ), `group_id` (UUID), `server_id` (UUID), `model` (TEXT, nullable), `input_tokens` (INTEGER), `output_tokens` (INTEGER), `cache_creation_tokens` (INTEGER, nullable), `cache_read_tokens` (INTEGER, nullable), `is_dynamic_key` (BOOLEAN), `key_hash` (TEXT, nullable), `group_key_id` (UUID, nullable), `cost_usd` (FLOAT8, nullable), `subscription_id` (UUID, nullable), `content_hash` (TEXT, nullable), partitioned by range on `created_at`. A composite index SHALL exist on `(group_id, content_hash, created_at)`.
 

@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: Biome replaces ESLint and Prettier
 The project SHALL use `@biomejs/biome` as the sole tool for formatting and linting. ESLint, Prettier, and all related plugins SHALL be removed from devDependencies.
 

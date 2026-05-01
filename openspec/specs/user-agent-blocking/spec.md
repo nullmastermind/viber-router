@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Block user-agents per group in proxy
 The proxy SHALL check the incoming request's User-Agent (normalized: absent or empty becomes `"(empty)"`) against `GroupConfig.blocked_user_agents`. This check SHALL occur after the `is_active` check and before the `servers.is_empty()` check. If the UA matches any entry in `blocked_user_agents` (exact string match), the proxy SHALL return HTTP 403 with `error_type: "permission_error"` and `message: "Access denied"` using the path-appropriate error format.
 

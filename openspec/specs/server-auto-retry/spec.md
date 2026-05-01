@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Per-server retry configuration stored in group_servers
 The `group_servers` table SHALL include three nullable columns: `retry_status_codes INTEGER[]`, `retry_count INTEGER`, and `retry_delay_seconds DOUBLE PRECISION`. All three default to NULL. A NULL set means retry is disabled for that server. New assignments SHALL be created with all three as NULL.
 

@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Uptime checks table
 The system SHALL store uptime check records in an `uptime_checks` table partitioned by RANGE on `created_at` with columns: `id` (UUID PK), `created_at` (TIMESTAMPTZ), `group_id` (UUID NOT NULL), `server_id` (UUID NOT NULL), `status_code` (SMALLINT NOT NULL), `latency_ms` (INTEGER NOT NULL), `request_id` (UUID NOT NULL). Indexes SHALL exist on `(group_id, server_id, created_at)` and `(group_id, created_at)`.
 

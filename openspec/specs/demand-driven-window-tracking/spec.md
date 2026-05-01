@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Window start key lifecycle
 The system SHALL store the start of an active subscription window in Redis under the key `sub_window_start:{sub_id}` as a Unix epoch integer (i64). The key SHALL have a TTL of exactly `reset_hours * 3600` seconds. When the TTL expires, no window is active for that subscription.
 

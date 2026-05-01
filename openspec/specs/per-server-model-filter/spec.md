@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Server has a supported_models filter list
 Each server assignment in a group SHALL have a `supported_models` field (array of model name strings). An empty array means the server accepts all models. A non-empty array means the server only accepts requests whose model matches an entry in the list or a key in the server's `model_mappings`.
 

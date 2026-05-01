@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Start usage meter
 The system SHALL allow a user to start the usage meter, which captures a snapshot of the current `data.usage` array and begins tracking elapsed time.
 

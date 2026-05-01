@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Cost calculation formula
 The system SHALL calculate cost for each token usage row using the formula: `cost = tokens × model_price_per_1m × server_rate / 1_000_000` for each of the 4 token types (input, output, cache write, cache read). The total cost for a row is the sum of all 4 type costs.
 

@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Monthly range partitioning for proxy_logs
 The proxy_logs table SHALL be created as a PostgreSQL range-partitioned table on the created_at column with monthly partitions. Partition tables SHALL be named proxy_logs_YYYY_MM (e.g., proxy_logs_2026_03).
 

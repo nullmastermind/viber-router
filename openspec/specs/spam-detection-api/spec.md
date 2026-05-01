@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: Low-token spam detection
 The system SHALL detect group keys that send an excessive number of requests with very low input token counts within a recent time window.
 

@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Parse dynamic server keys from x-api-key header
 The system SHALL parse the `x-api-key` header to extract a group API key and zero or more dynamic per-server keys. The format is `{group_key}-rsv-{short_id}-{server_key}` where multiple `-rsv-{short_id}-{server_key}` segments may be appended.
 

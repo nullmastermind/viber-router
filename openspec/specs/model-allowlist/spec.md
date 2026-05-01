@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: List models
 The system SHALL return a paginated list of models with optional name search. Pagination SHALL use page/limit query parameters.
 

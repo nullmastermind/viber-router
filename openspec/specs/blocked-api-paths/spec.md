@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Blocked paths proxy check
 The proxy SHALL check incoming request paths against a globally configured list of blocked paths as the very first operation in `proxy_handler`, before API key extraction. If the request path matches any blocked path (exact match on the path component, excluding query string), the proxy SHALL return HTTP 404 with Anthropic-style error JSON: `{"type":"error","error":{"type":"not_found_error","message":"Not found"}}`.
 

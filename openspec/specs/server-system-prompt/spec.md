@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Server has optional system_prompt field
 The `servers` table SHALL include an optional `system_prompt` TEXT column. Servers created without a system_prompt SHALL have NULL value.
 

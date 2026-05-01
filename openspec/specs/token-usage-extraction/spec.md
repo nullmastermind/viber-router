@@ -1,5 +1,7 @@
-## MODIFIED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Extract token usage from non-streaming responses
 When the proxy receives a non-streaming HTTP 200 response on a billing endpoint (`/v1/messages` or `/v1/chat/completions`), the system SHALL extract token usage and calculate cost using cached model pricing and server rate multipliers. The cost and selected subscription_id SHALL be included in the `TokenUsageEntry` sent to the usage buffer. For `/v1/messages` responses, the system SHALL read `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, and `usage.cache_read_input_tokens`. For `/v1/chat/completions` responses, the system SHALL read `usage.prompt_tokens` as `input_tokens`, `usage.completion_tokens` as `output_tokens`, `usage.prompt_tokens_details.cached_tokens` as `cache_read_tokens`, and SHALL set `cache_creation_tokens` to `None`.
 

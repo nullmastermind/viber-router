@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Pay-per-request flat cost billing
 When a subscription has `sub_type = "pay_per_request"`, the proxy SHALL calculate the request cost as the flat value from `model_request_costs[model]` instead of the token-based formula. The `calculate_cost()` function SHALL NOT be called for this subscription type.
 

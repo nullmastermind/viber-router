@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Token usage aggregation by sub-key endpoint
 The system SHALL provide a `GET /api/admin/token-usage/by-key` endpoint that returns token usage aggregated per `group_key_id` for a given group.
 

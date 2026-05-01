@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Subscription budget check applies to OpenAI chat completions
 The proxy SHALL apply the same subscription budget check to `/v1/chat/completions` requests from sub-keys as it does to `/v1/messages`. The check SHALL use `is_billing_endpoint(path)` to determine whether to run the subscription check.
 

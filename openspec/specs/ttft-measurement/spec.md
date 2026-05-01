@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: TTFT measurement on SSE streaming requests
 The system SHALL measure Time to First Token (TTFT) for every SSE streaming response. TTFT is defined as the elapsed time from when the upstream HTTP response headers are received to when the first SSE data chunk arrives from the upstream server.
 

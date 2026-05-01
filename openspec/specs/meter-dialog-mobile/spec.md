@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Meter Results dialog fits viewport on mobile
 The Meter Results dialog card SHALL use `width: 95vw; max-width: 480px` so it occupies 95% of the viewport width on narrow screens and is capped at 480px on wider screens.
 

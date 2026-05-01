@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Telegram alert on circuit breaker trip
 The system SHALL send a Telegram alert when a circuit breaker trips (server auto-disabled). The alert SHALL use the same delivery mechanism as upstream error alerts (settings, cooldown, chat IDs). The cooldown key SHALL be `tg:cooldown:cb:{group_id}:{server_id}` with TTL = `alert_cooldown_mins * 60`.
 

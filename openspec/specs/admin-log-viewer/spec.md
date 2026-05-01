@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Log query API endpoint
 The system SHALL provide a GET /api/admin/logs endpoint that returns proxy error logs with server-side pagination and filtering. The endpoint SHALL be protected by admin authentication.
 

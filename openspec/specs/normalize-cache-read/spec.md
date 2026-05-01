@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: normalize_cache_read flag on group_servers
 The `group_servers` table SHALL have a `normalize_cache_read BOOLEAN NOT NULL DEFAULT false` column. When `true`, cache-read tokens for that server assignment SHALL be priced at the input rate instead of the cache-read rate.
 

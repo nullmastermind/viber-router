@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Chain-level status display on public page
 The PublicUsagePage SHALL display a "Status" section showing the current chain-level status text and 90 uptime bars.
 

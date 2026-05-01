@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Resolve API key per server in fallback chain
 The system SHALL resolve the API key for each server in the fallback chain using the following priority: (1) dynamic key from parsed header matching the server's short_id, (2) server's default api_key from database, (3) no key available.
 

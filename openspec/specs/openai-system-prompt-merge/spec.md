@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Server system_prompt injected into OpenAI messages array
 When the request path starts with `/v1/chat/` and the server has a non-null `system_prompt`, the proxy SHALL inject the server system prompt into the request body's `messages` array before forwarding. If the first message has `"role": "system"`, the server prompt SHALL be appended to its `content` string with `"\n\n"` separator. If no system message exists, a new `{"role":"system","content":"<server_prompt>"}` object SHALL be prepended to the `messages` array.
 

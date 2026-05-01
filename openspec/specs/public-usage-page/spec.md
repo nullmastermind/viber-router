@@ -1,5 +1,6 @@
-## ADDED Requirements
-
+## Purpose
+TBD
+## Requirements
 ### Requirement: Public usage page routes
 The system SHALL provide a public page at `/usage` (with key input form) and `/usage/:key` (direct link). Both routes MUST be accessible without admin login.
 
@@ -37,15 +38,23 @@ When a valid key is loaded, the page SHALL display the key name and group name.
 - **THEN** the page displays the key name and group name prominently at the top
 
 ### Requirement: Subscription cards display
-The page SHALL display subscription information as cards, with active subscriptions first and inactive ones (expired/cancelled/exhausted) visually dimmed. Bonus subscriptions SHALL be rendered with a distinct card style separate from budget-based subscriptions.
+The page SHALL display subscription information as cards, with active subscriptions first and inactive ones (expired/cancelled/exhausted) visually dimmed. Non-bonus subscription cards SHALL show lifetime cost progress and, when `weekly_cost_limit_usd` is present, weekly cost usage, weekly limit, and weekly reset time. Bonus subscriptions SHALL be rendered with a distinct card style separate from budget-based subscriptions.
 
 #### Scenario: Active subscription card
 - **WHEN** a subscription has status `active` and `sub_type` is not `bonus`
-- **THEN** the card shows: subscription type, cost_used / cost_limit_usd (as progress), status badge, and expires_at (if set)
+- **THEN** the card shows: subscription type, cost_used / cost_limit_usd (as progress), weekly_cost_used / weekly_cost_limit_usd when present, weekly_reset_at when present, status badge, and expires_at (if set)
+
+#### Scenario: Weekly limit hidden when unlimited
+- **WHEN** a non-bonus subscription has `weekly_cost_limit_usd: null`
+- **THEN** the card SHALL NOT display a weekly limit progress indicator
 
 #### Scenario: Hourly reset subscription shows countdown
 - **WHEN** a subscription has type `hourly_reset` and `window_reset_at` is set
 - **THEN** the card displays the remaining time until quota reset (e.g., "Resets in 2h 15m")
+
+#### Scenario: Weekly reset shown
+- **WHEN** a non-bonus subscription has `weekly_reset_at` set
+- **THEN** the card displays the remaining time or formatted time until the weekly cost limit resets
 
 #### Scenario: Inactive subscription card
 - **WHEN** a subscription has status `expired`, `cancelled`, or `exhausted`
@@ -101,3 +110,4 @@ The page SHALL show a loading indicator while fetching data from the API.
 - **THEN** a loading spinner is displayed
 - **WHEN** the data is loaded or an error occurs
 - **THEN** the loading spinner is replaced with the data or error message
+

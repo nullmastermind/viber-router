@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Model pricing fields
 The `models` table SHALL have 4 nullable FLOAT8 columns: `input_1m_usd`, `output_1m_usd`, `cache_write_1m_usd`, `cache_read_1m_usd`, representing the cost in USD per 1 million tokens for each token type.
 

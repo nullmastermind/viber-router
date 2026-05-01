@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Per-server password protection
 The system SHALL allow an optional password to be set on any upstream server. When a password is set, the server's `base_url` and `api_key` SHALL be hidden from admin users until the correct password is provided.
 

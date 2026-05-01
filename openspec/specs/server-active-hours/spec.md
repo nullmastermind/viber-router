@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Admin UI displays active hours configuration on server cards
 The group detail page server list SHALL display an active hours badge on each server card when `active_hours_start`, `active_hours_end`, and `active_hours_timezone` are all set. The badge SHALL show the window in the format `HH:MM-HH:MM (timezone)` (e.g., `08:00-23:00 (Asia/Ho_Chi_Minh)`). When the fields are all NULL, no active hours badge SHALL be shown.
 

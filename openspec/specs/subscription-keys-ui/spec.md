@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Subscriptions section in expanded sub-key row
 The expanded sub-key row in GroupDetailPage Keys tab SHALL display a "Subscriptions" section positioned before the SubKeyUsage component. It SHALL show a table of all subscriptions for that key.
 

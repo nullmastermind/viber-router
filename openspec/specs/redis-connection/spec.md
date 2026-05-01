@@ -1,3 +1,7 @@
+## Purpose
+TBD
+
+## Requirements
 ### Requirement: Redis connection pool is established at startup
 The system SHALL create a deadpool-redis connection pool using the REDIS_URL environment variable. The pool SHALL be configured with a maximum number of connections specified by REDIS_MAX_CONNECTIONS, defaulting to 30.
 

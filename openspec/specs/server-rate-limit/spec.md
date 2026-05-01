@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Rate limiter checks request count against configured limit
 The rate limiter module SHALL check the current request count for a group-server pair in Redis using key `rl:{group_id}:{server_id}`. If the count is >= `max_requests`, the server SHALL be considered rate-limited. If Redis is unavailable, the check SHALL return false (fail open — server is not rate-limited).
 

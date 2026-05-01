@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
+TBD
 
+## Requirements
 ### Requirement: Count-tokens default server selection
 When a group has `count_tokens_server_id` configured and a request targets `/v1/messages/count_tokens`, the system SHALL try the configured default server before the normal failover waterfall.
 
