@@ -2017,6 +2017,7 @@ async fn proxy_handler(
                                         model_name,
                                         cost,
                                         sub.reset_hours,
+                                        sub.weekly_cost_limit_usd,
                                     )
                                     .await;
 
@@ -2710,6 +2711,7 @@ where
                                             model_name,
                                             cost,
                                             sub.reset_hours,
+                                            sub.weekly_cost_limit_usd,
                                         )
                                         .await;
 

@@ -1,12 +1,110 @@
 use std::time::Duration;
 
-use chrono::{TimeZone, Utc};
+use chrono::{Datelike, Duration as ChronoDuration, LocalResult, NaiveTime, TimeZone, Utc};
 use deadpool_redis::redis::{AsyncCommands, cmd};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::cache;
 use crate::models::KeySubscription;
 use crate::routes::{AppState, ModelPricing};
+
+
+#[derive(Debug, Clone)]
+pub struct WeeklyWindow {
+    pub monday_start_utc: chrono::DateTime<Utc>,
+    pub next_monday_start_utc: chrono::DateTime<Utc>,
+    pub monday_epoch: i64,
+    pub ttl_seconds: i64,
+    pub reset_at: chrono::DateTime<Utc>,
+}
+
+pub async fn get_configured_timezone(state: &AppState) -> chrono_tz::Tz {
+    let timezone = match cache::get_timezone(&state.redis).await {
+        Ok(Some(tz)) => tz,
+        Ok(None) | Err(()) => {
+            let tz = sqlx::query_scalar::<_, Option<String>>("SELECT timezone FROM settings WHERE id = 1")
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten()
+                .unwrap_or_else(|| cache::DEFAULT_TIMEZONE.to_string());
+            cache::set_timezone(&state.redis, &tz).await;
+            tz
+        }
+    };
+
+    timezone
+        .parse::<chrono_tz::Tz>()
+        .unwrap_or(chrono_tz::Asia::Ho_Chi_Minh)
+}
+
+fn local_midnight(tz: chrono_tz::Tz, date: chrono::NaiveDate) -> chrono::DateTime<chrono_tz::Tz> {
+    match tz.from_local_datetime(&date.and_time(NaiveTime::MIN)) {
+        LocalResult::Single(dt) => dt,
+        LocalResult::Ambiguous(earliest, _) => earliest,
+        LocalResult::None => tz
+            .from_local_datetime(&date.and_time(NaiveTime::from_hms_opt(1, 0, 0).unwrap()))
+            .earliest()
+            .unwrap_or_else(|| Utc::now().with_timezone(&tz)),
+    }
+}
+
+pub fn weekly_window_for(tz: chrono_tz::Tz, now_utc: chrono::DateTime<Utc>) -> WeeklyWindow {
+    let now_local = now_utc.with_timezone(&tz);
+    let days_from_monday = now_local.weekday().num_days_from_monday() as i64;
+    let monday_date = now_local.date_naive() - ChronoDuration::days(days_from_monday);
+    let next_monday_date = monday_date + ChronoDuration::days(7);
+    let monday_start_utc = local_midnight(tz, monday_date).with_timezone(&Utc);
+    let next_monday_start_utc = local_midnight(tz, next_monday_date).with_timezone(&Utc);
+    let ttl_seconds = (next_monday_start_utc - now_utc).num_seconds().max(1);
+
+    WeeklyWindow {
+        monday_start_utc,
+        next_monday_start_utc,
+        monday_epoch: monday_start_utc.timestamp(),
+        ttl_seconds,
+        reset_at: next_monday_start_utc,
+    }
+}
+
+pub async fn current_weekly_window(state: &AppState) -> WeeklyWindow {
+    let tz = get_configured_timezone(state).await;
+    weekly_window_for(tz, Utc::now())
+}
+
+pub async fn get_weekly_cost(state: &AppState, sub: &KeySubscription) -> f64 {
+    if sub.sub_type == "bonus" || sub.weekly_cost_limit_usd.is_none() {
+        return 0.0;
+    }
+
+    let window = current_weekly_window(state).await;
+    let key = format!("sub_weekly_cost:{}:w:{}", sub.id, window.monday_epoch);
+    if let Ok(mut conn) = state.redis.get().await {
+        let val: Result<Option<f64>, _> = conn.get(&key).await;
+        if let Ok(Some(cost)) = val {
+            return cost;
+        }
+    }
+
+    let cost = sqlx::query_scalar::<_, f64>(
+        "SELECT COALESCE(SUM(cost_usd), 0) FROM token_usage_logs \
+         WHERE subscription_id = $1 AND created_at >= $2 AND created_at < $3",
+    )
+    .bind(sub.id)
+    .bind(window.monday_start_utc)
+    .bind(window.next_monday_start_utc)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0.0);
+
+    if let Ok(mut conn) = state.redis.get().await {
+        let _: Result<(), _> = conn.set_ex(&key, cost, window.ttl_seconds as u64).await;
+    }
+
+    cost
+}
 
 /// Get the window start epoch for a subscription from Redis.
 /// Returns None if no active window exists (key missing or Redis error).
@@ -353,6 +451,14 @@ pub async fn check_subscriptions(
             continue;
         }
 
+        // Check weekly budget without exhausting the subscription; it resets next week.
+        if let Some(weekly_limit) = sub.weekly_cost_limit_usd
+            && weekly_limit > 0.0
+            && get_weekly_cost(state, sub).await >= weekly_limit
+        {
+            continue;
+        }
+
         // For pay_per_request: skip if model is not in model_request_costs
         if sub.sub_type == "pay_per_request"
             && let Some(model_name) = model
@@ -527,11 +633,25 @@ pub async fn update_cost_counters(
     model: &str,
     cost: f64,
     reset_hours: Option<i32>,
+    weekly_cost_limit_usd: Option<f64>,
 ) {
     let Ok(mut conn) = state.redis.get().await else {
         tracing::warn!("Redis unavailable for cost counter update, sub_id={sub_id}, cost={cost}");
         return;
     };
+
+    if let Some(weekly_limit) = weekly_cost_limit_usd
+        && weekly_limit > 0.0
+    {
+        let window = current_weekly_window(state).await;
+        let weekly_key = format!("sub_weekly_cost:{sub_id}:w:{}", window.monday_epoch);
+        let _: Result<f64, _> = deadpool_redis::redis::cmd("INCRBYFLOAT")
+            .arg(&weekly_key)
+            .arg(cost)
+            .query_async(&mut *conn)
+            .await;
+        let _: Result<(), _> = conn.expire(&weekly_key, window.ttl_seconds).await;
+    }
 
     if let Some(rh) = reset_hours {
         // Demand-driven windowing: ensure a window start exists
@@ -598,6 +718,19 @@ pub fn compute_rpm_window(rpm: f64) -> (i64, i64) {
 mod tests {
     use super::*;
     use crate::routes::ModelPricing;
+
+    #[test]
+    fn test_weekly_window_for_uses_configured_monday_boundary() {
+        let tz = chrono_tz::Asia::Ho_Chi_Minh;
+        let now = Utc.with_ymd_and_hms(2026, 5, 1, 3, 0, 0).unwrap();
+        let window = weekly_window_for(tz, now);
+
+        assert_eq!(window.monday_start_utc, Utc.with_ymd_and_hms(2026, 4, 27, 17, 0, 0).unwrap());
+        assert_eq!(window.next_monday_start_utc, Utc.with_ymd_and_hms(2026, 5, 4, 17, 0, 0).unwrap());
+        assert_eq!(window.monday_epoch, Utc.with_ymd_and_hms(2026, 4, 27, 17, 0, 0).unwrap().timestamp());
+        assert_eq!(window.reset_at, window.next_monday_start_utc);
+        assert!(window.ttl_seconds > 0);
+    }
 
     #[test]
     fn test_compute_rpm_window_above_one() {
@@ -715,6 +848,7 @@ mod tests {
             plan_id: None,
             sub_type: "bonus".to_string(),
             cost_limit_usd: 0.0,
+            weekly_cost_limit_usd: None,
             model_limits: serde_json::json!({}),
             model_request_costs: serde_json::json!({}),
             reset_hours: None,
@@ -756,6 +890,7 @@ mod tests {
             plan_id: None,
             sub_type: "bonus".to_string(),
             cost_limit_usd: 0.0,
+            weekly_cost_limit_usd: None,
             model_limits: serde_json::json!({}),
             model_request_costs: serde_json::json!({}),
             reset_hours: None,
@@ -796,6 +931,7 @@ mod tests {
             plan_id: None,
             sub_type: "bonus".to_string(),
             cost_limit_usd: 0.0,
+            weekly_cost_limit_usd: None,
             model_limits: serde_json::json!({}),
             model_request_costs: serde_json::json!({}),
             reset_hours: None,

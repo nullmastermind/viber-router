@@ -274,6 +274,26 @@
                   Resets in {{ formatCountdown(sub.window_reset_at) }}
                 </span>
               </div>
+              <template v-if="sub.weekly_cost_limit_usd != null">
+                <q-linear-progress
+                  :value="sub.weekly_cost_limit_usd > 0 ? (sub.weekly_cost_used ?? 0) / sub.weekly_cost_limit_usd : 0"
+                  :color="(sub.weekly_cost_used ?? 0) / sub.weekly_cost_limit_usd > 0.9 ? 'negative' : 'secondary'"
+                  class="q-mt-sm q-mb-xs"
+                  rounded
+                  size="8px"
+                  aria-label="Weekly cost usage"
+                  :aria-valuenow="Math.round((sub.weekly_cost_limit_usd > 0 ? (sub.weekly_cost_used ?? 0) / sub.weekly_cost_limit_usd : 0) * 100)"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                />
+                <div class="row items-center">
+                  <span class="text-caption">Weekly ${{ (sub.weekly_cost_used ?? 0).toFixed(2) }} / ${{ sub.weekly_cost_limit_usd.toFixed(2) }}</span>
+                  <q-space />
+                  <span v-if="sub.weekly_reset_at" class="text-caption" style="color: var(--vr-text-secondary)">
+                    Weekly resets in {{ formatCountdown(sub.weekly_reset_at) }}
+                  </span>
+                </div>
+              </template>
             </q-card-section>
           </q-card>
         </div>
@@ -541,6 +561,9 @@ interface Subscription {
   id: string;
   sub_type: string;
   cost_limit_usd: number;
+  weekly_cost_used: number | null;
+  weekly_cost_limit_usd: number | null;
+  weekly_reset_at: string | null;
   rpm_limit: number | null;
   status: string;
   cost_used: number;

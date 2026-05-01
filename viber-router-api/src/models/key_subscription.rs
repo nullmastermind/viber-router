@@ -9,6 +9,7 @@ pub struct KeySubscription {
     pub plan_id: Option<Uuid>,
     pub sub_type: String,
     pub cost_limit_usd: f64,
+    pub weekly_cost_limit_usd: Option<f64>,
     pub model_limits: serde_json::Value,
     pub model_request_costs: serde_json::Value,
     pub reset_hours: Option<i32>,
@@ -60,6 +61,7 @@ mod tests {
             "plan_id": Uuid::new_v4(),
             "sub_type": "fixed",
             "cost_limit_usd": 10.0,
+            "weekly_cost_limit_usd": null,
             "model_limits": {},
             "model_request_costs": {},
             "reset_hours": null,
@@ -90,6 +92,7 @@ mod tests {
             "plan_id": Uuid::new_v4(),
             "sub_type": "fixed",
             "cost_limit_usd": 10.0,
+            "weekly_cost_limit_usd": null,
             "model_limits": {},
             "model_request_costs": {},
             "reset_hours": null,
@@ -110,5 +113,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(sub.tpm_limit, Some(100000.0));
+        assert_eq!(sub.weekly_cost_limit_usd, None);
     }
 }

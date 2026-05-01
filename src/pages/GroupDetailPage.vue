@@ -325,6 +325,13 @@
                               <template v-else>${{ sProps.row.cost_limit_usd.toFixed(2) }}</template>
                             </q-td>
                           </template>
+                          <template #body-cell-weekly_cost_limit_usd="sProps">
+                            <q-td :props="sProps">
+                              <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                              <template v-else-if="sProps.row.weekly_cost_limit_usd != null">${{ sProps.row.weekly_cost_limit_usd.toFixed(2) }}</template>
+                              <template v-else>Unlimited</template>
+                            </q-td>
+                          </template>
                           <template #body-cell-bonus_allowed_models="sProps">
                             <q-td :props="sProps">
                               <template v-if="sProps.row.sub_type === 'bonus'">
@@ -688,6 +695,13 @@
                               <q-td :props="sProps">
                                 <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
                                 <template v-else>${{ sProps.row.cost_limit_usd.toFixed(2) }}</template>
+                              </q-td>
+                            </template>
+                            <template #body-cell-weekly_cost_limit_usd="sProps">
+                              <q-td :props="sProps">
+                                <template v-if="sProps.row.sub_type === 'bonus'">N/A</template>
+                                <template v-else-if="sProps.row.weekly_cost_limit_usd != null">${{ sProps.row.weekly_cost_limit_usd.toFixed(2) }}</template>
+                                <template v-else>Unlimited</template>
                               </q-td>
                             </template>
                             <template #body-cell-bonus_allowed_models="sProps">
@@ -1513,6 +1527,7 @@ interface KeySubscription {
   plan_id: string | null;
   sub_type: string;
   cost_limit_usd: number;
+  weekly_cost_limit_usd: number | null;
   model_limits: Record<string, number>;
   reset_hours: number | null;
   rpm_limit: number | null;
@@ -1535,6 +1550,7 @@ interface SubscriptionPlan {
   name: string;
   sub_type: string;
   cost_limit_usd: number;
+  weekly_cost_limit_usd: number | null;
   is_active: boolean;
 }
 const keySubscriptions = ref<Record<string, { data: KeySubscription[]; total: number }>>({});
@@ -1572,6 +1588,7 @@ const subColumns = [
   { name: 'plan_name', label: 'Plan', field: (row: KeySubscription) => row.bonus_name ?? (row.plan_id ? 'Plan' : '—'), align: 'left' as const },
   { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Budget', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
+  { name: 'weekly_cost_limit_usd', label: 'Weekly Limit', field: 'weekly_cost_limit_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(2)}` : 'Unlimited' },
   { name: 'cost_used', label: 'Used', field: 'cost_used', align: 'right' as const },
   { name: 'bonus_allowed_models', label: 'Allowed Models', field: 'bonus_allowed_models', align: 'left' as const },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },

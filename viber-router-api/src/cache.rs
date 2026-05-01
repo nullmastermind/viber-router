@@ -83,6 +83,29 @@ pub async fn invalidate_groups_by_server(redis: &Pool, db: &PgPool, server_id: U
 
 const BLOCKED_PATHS_KEY: &str = "settings:blocked_paths";
 
+const TIMEZONE_KEY: &str = "settings:timezone";
+pub const DEFAULT_TIMEZONE: &str = "Asia/Ho_Chi_Minh";
+
+/// Returns Ok(Some(timezone)) on cache hit, Ok(None) on cache miss, Err(()) on Redis failure.
+pub async fn get_timezone(redis: &Pool) -> Result<Option<String>, ()> {
+    let mut conn = redis.get().await.map_err(|_| ())?;
+    let data: Option<String> = conn.get(TIMEZONE_KEY).await.map_err(|_| ())?;
+    Ok(data)
+}
+
+pub async fn set_timezone(redis: &Pool, timezone: &str) {
+    if let Ok(mut conn) = redis.get().await {
+        let _: Result<(), _> = conn.set(TIMEZONE_KEY, timezone).await;
+    }
+}
+
+pub async fn invalidate_timezone(redis: &Pool) {
+    if let Ok(mut conn) = redis.get().await {
+        let _: Result<(), _> = conn.del(TIMEZONE_KEY).await;
+    }
+}
+
+
 /// Returns Ok(Some(paths)) on cache hit, Ok(None) on cache miss, Err(()) on Redis failure.
 pub async fn get_blocked_paths(redis: &Pool) -> Result<Option<Vec<String>>, ()> {
     let mut conn = redis.get().await.map_err(|_| ())?;

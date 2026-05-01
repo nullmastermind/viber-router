@@ -72,6 +72,7 @@
             </template>
           </q-select>
           <q-input v-model.number="form.cost_limit_usd" label="Cost Limit ($)" outlined dense type="number" :min="0" />
+          <q-input v-model.number="form.weekly_cost_limit_usd" label="Weekly Cost Limit ($)" outlined dense type="number" :min="0" :step="0.01" hint="Empty = unlimited" clearable @clear="form.weekly_cost_limit_usd = null" />
           <q-input v-model.number="form.duration_days" label="Duration (days)" outlined dense type="number" :min="1" />
           <q-input v-if="form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request'" v-model.number="form.reset_hours" label="Reset Hours" outlined dense type="number" :min="1" />
           <q-input v-model.number="form.rpm_limit" label="RPM Limit" outlined dense type="number" :min="0" :step="0.1" hint="Requests per minute (empty = unlimited)" clearable @clear="form.rpm_limit = null" />
@@ -114,6 +115,7 @@ interface Plan {
   name: string;
   sub_type: string;
   cost_limit_usd: number;
+  weekly_cost_limit_usd: number | null;
   model_limits: Record<string, number>;
   model_request_costs: Record<string, number>;
   reset_hours: number | null;
@@ -141,6 +143,7 @@ const form = reactive({
   name: '',
   sub_type: 'fixed' as string,
   cost_limit_usd: 0,
+  weekly_cost_limit_usd: null as number | null,
   duration_days: 30,
   reset_hours: null as number | null,
   rpm_limit: null as number | null,
@@ -151,6 +154,7 @@ const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left' as const },
   { name: 'sub_type', label: 'Type', field: 'sub_type', align: 'left' as const, format: (v: string) => getSubTypeLabel(v) },
   { name: 'cost_limit_usd', label: 'Cost Limit', field: 'cost_limit_usd', align: 'right' as const, format: (v: number) => `$${v.toFixed(2)}` },
+  { name: 'weekly_cost_limit_usd', label: 'Weekly Cost Limit', field: 'weekly_cost_limit_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(2)}` : 'Unlimited' },
   { name: 'rpm_limit', label: 'RPM', field: 'rpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'tpm_limit', label: 'TPM Limit', field: 'tpm_limit', align: 'right' as const, format: (v: number | null) => v != null ? String(v) : '\u2014' },
   { name: 'model_limits', label: 'Model Limits', field: 'model_limits', align: 'left' as const },
@@ -193,6 +197,7 @@ function openEdit(row: Plan) {
   form.name = row.name;
   form.sub_type = row.sub_type;
   form.cost_limit_usd = row.cost_limit_usd;
+  form.weekly_cost_limit_usd = row.weekly_cost_limit_usd;
   form.duration_days = row.duration_days;
   form.reset_hours = row.reset_hours;
   form.rpm_limit = row.rpm_limit;
@@ -206,6 +211,7 @@ function resetForm() {
   form.name = '';
   form.sub_type = 'fixed';
   form.cost_limit_usd = 0;
+  form.weekly_cost_limit_usd = null;
   form.duration_days = 30;
   form.reset_hours = null;
   form.rpm_limit = null;
@@ -248,6 +254,7 @@ async function onSave() {
       name: form.name,
       sub_type: form.sub_type,
       cost_limit_usd: form.cost_limit_usd,
+      weekly_cost_limit_usd: form.weekly_cost_limit_usd != null && Number.isFinite(form.weekly_cost_limit_usd) ? form.weekly_cost_limit_usd : null,
       duration_days: form.duration_days,
       reset_hours: (form.sub_type === 'hourly_reset' || form.sub_type === 'pay_per_request') ? form.reset_hours : null,
       rpm_limit: form.rpm_limit && Number.isFinite(form.rpm_limit) ? form.rpm_limit : null,

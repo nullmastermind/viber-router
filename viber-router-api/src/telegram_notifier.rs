@@ -11,6 +11,7 @@ fn default_settings() -> Settings {
         alert_status_codes: vec![500, 502, 503],
         alert_cooldown_mins: 5,
         blocked_paths: vec![],
+        timezone: crate::cache::DEFAULT_TIMEZONE.to_string(),
         ct_always_estimate: false,
         ct_anthropic_base_url: None,
         ct_anthropic_api_key: None,
@@ -204,7 +205,7 @@ pub async fn send_circuit_re_enable_alert(ctx: CircuitReEnableAlertContext) {
 async fn load_settings(db: &PgPool) -> Option<Settings> {
     match sqlx::query_as::<_, Settings>(
         "SELECT telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
          FROM settings WHERE id = 1",
     )
     .fetch_optional(db)

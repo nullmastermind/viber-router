@@ -17,6 +17,7 @@ pub struct SubscriptionPlan {
     pub name: String,
     pub sub_type: String,
     pub cost_limit_usd: f64,
+    pub weekly_cost_limit_usd: Option<f64>,
     pub model_limits: serde_json::Value,
     pub model_request_costs: serde_json::Value,
     pub reset_hours: Option<i32>,
@@ -33,6 +34,7 @@ pub struct CreateSubscriptionPlan {
     pub name: String,
     pub sub_type: String,
     pub cost_limit_usd: f64,
+    pub weekly_cost_limit_usd: Option<f64>,
     pub model_limits: Option<serde_json::Value>,
     pub model_request_costs: Option<serde_json::Value>,
     pub reset_hours: Option<i32>,
@@ -46,6 +48,8 @@ pub struct UpdateSubscriptionPlan {
     pub name: Option<String>,
     pub sub_type: Option<String>,
     pub cost_limit_usd: Option<f64>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub weekly_cost_limit_usd: Option<Option<f64>>,
     pub model_limits: Option<serde_json::Value>,
     pub model_request_costs: Option<serde_json::Value>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
@@ -74,6 +78,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(plan.tpm_limit, Some(100000.0));
+        assert_eq!(plan.weekly_cost_limit_usd, None);
     }
 
     #[test]
@@ -87,6 +92,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(plan.tpm_limit, None);
+        assert_eq!(plan.weekly_cost_limit_usd, None);
     }
 
     #[test]
@@ -94,6 +100,7 @@ mod tests {
         let missing: UpdateSubscriptionPlan =
             serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(missing.tpm_limit, None);
+        assert_eq!(missing.weekly_cost_limit_usd, None);
 
         let clear: UpdateSubscriptionPlan = serde_json::from_value(serde_json::json!({
             "tpm_limit": null

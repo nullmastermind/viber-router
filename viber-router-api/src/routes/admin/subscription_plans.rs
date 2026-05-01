@@ -52,6 +52,9 @@ async fn sync_plan_limit_to_active_subscriptions(
         "rpm_limit" => {
             "UPDATE key_subscriptions SET rpm_limit = $1 WHERE plan_id = $2 AND status = 'active'"
         }
+        "weekly_cost_limit_usd" => {
+            "UPDATE key_subscriptions SET weekly_cost_limit_usd = $1 WHERE plan_id = $2 AND status = 'active'"
+        }
         "tpm_limit" => {
             "UPDATE key_subscriptions SET tpm_limit = $1 WHERE plan_id = $2 AND status = 'active'"
         }
@@ -118,12 +121,13 @@ async fn create_plan(
     }
 
     let plan = sqlx::query_as::<_, SubscriptionPlan>(
-        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
+        "INSERT INTO subscription_plans (name, sub_type, cost_limit_usd, weekly_cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
     .bind(input.cost_limit_usd)
+    .bind(input.weekly_cost_limit_usd)
     .bind(&model_limits)
     .bind(&model_request_costs)
     .bind(input.reset_hours)
@@ -186,19 +190,22 @@ async fn update_plan(
          name = COALESCE($1, name), \
          sub_type = COALESCE($2, sub_type), \
          cost_limit_usd = COALESCE($3, cost_limit_usd), \
-         model_limits = COALESCE($4, model_limits), \
-         model_request_costs = COALESCE($5, model_request_costs), \
-         reset_hours = CASE WHEN $6 THEN $7 ELSE reset_hours END, \
-         duration_days = COALESCE($8, duration_days), \
-         is_active = COALESCE($9, is_active), \
-         rpm_limit = CASE WHEN $10 THEN $11 ELSE rpm_limit END, \
-         tpm_limit = CASE WHEN $12 THEN $13 ELSE tpm_limit END, \
+         weekly_cost_limit_usd = CASE WHEN $4 THEN $5 ELSE weekly_cost_limit_usd END, \
+         model_limits = COALESCE($6, model_limits), \
+         model_request_costs = COALESCE($7, model_request_costs), \
+         reset_hours = CASE WHEN $8 THEN $9 ELSE reset_hours END, \
+         duration_days = COALESCE($10, duration_days), \
+         is_active = COALESCE($11, is_active), \
+         rpm_limit = CASE WHEN $12 THEN $13 ELSE rpm_limit END, \
+         tpm_limit = CASE WHEN $14 THEN $15 ELSE tpm_limit END, \
          updated_at = now() \
-         WHERE id = $14 RETURNING *",
+         WHERE id = $16 RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.sub_type)
     .bind(input.cost_limit_usd)
+    .bind(input.weekly_cost_limit_usd.is_some())
+    .bind(input.weekly_cost_limit_usd.flatten())
     .bind(&input.model_limits)
     .bind(&input.model_request_costs)
     .bind(input.reset_hours.is_some())
@@ -216,6 +223,15 @@ async fn update_plan(
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Plan not found"))?;
 
     // Auto-sync plan rate limits to active subscriptions when updated.
+    if input.weekly_cost_limit_usd.is_some() {
+        let _ = sync_plan_limit_to_active_subscriptions(
+            &state,
+            id,
+            "weekly_cost_limit_usd",
+            plan.weekly_cost_limit_usd,
+        )
+        .await;
+    }
     if input.rpm_limit.is_some() {
         let _ =
             sync_plan_limit_to_active_subscriptions(&state, id, "rpm_limit", plan.rpm_limit).await;

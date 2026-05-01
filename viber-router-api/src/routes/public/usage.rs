@@ -56,6 +56,9 @@ pub struct PublicSubscription {
     id: Uuid,
     sub_type: String,
     cost_limit_usd: f64,
+    weekly_cost_used: Option<f64>,
+    weekly_cost_limit_usd: Option<f64>,
+    weekly_reset_at: Option<String>,
     rpm_limit: Option<f64>,
     tpm_limit: Option<f64>,
     status: String,
@@ -159,6 +162,13 @@ pub async fn public_usage(
         } else {
             None
         };
+        let (weekly_cost_used, weekly_reset_at) = if !is_bonus && sub.weekly_cost_limit_usd.is_some() {
+            let weekly_cost = subscription::get_weekly_cost(&state, sub).await;
+            let weekly_window = subscription::current_weekly_window(&state).await;
+            (Some(weekly_cost), Some(weekly_window.reset_at.to_rfc3339()))
+        } else {
+            (None, None)
+        };
 
         let (bonus_quotas, bonus_usage) = if is_bonus {
             // Fetch per-model request counts for last 30 days
@@ -203,6 +213,9 @@ pub async fn public_usage(
             id: sub.id,
             sub_type: sub.sub_type.clone(),
             cost_limit_usd: sub.cost_limit_usd,
+            weekly_cost_used,
+            weekly_cost_limit_usd: sub.weekly_cost_limit_usd,
+            weekly_reset_at,
             rpm_limit: sub.rpm_limit,
             tpm_limit: sub.tpm_limit,
             status: sub.status.clone(),

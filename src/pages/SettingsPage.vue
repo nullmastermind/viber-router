@@ -2,6 +2,24 @@
   <q-page padding>
     <div class="text-h5 q-mb-md">Settings</div>
 
+    <q-card flat bordered style="max-width: 640px" class="q-mb-md">
+      <q-card-section>
+        <div class="text-subtitle1 q-mb-md">General</div>
+        <q-select
+          v-model="form.timezone"
+          :options="timezoneOptions"
+          label="Timezone"
+          outlined
+          dense
+          emit-value
+          map-options
+          class="q-mb-md"
+        />
+        <div v-if="saveError" class="text-negative text-caption q-mb-sm">{{ saveError }}</div>
+        <q-btn color="primary" label="Save Settings" :loading="saving" @click="saveSettings" />
+      </q-card-section>
+    </q-card>
+
     <q-card flat bordered style="max-width: 640px">
       <q-card-section>
         <div class="text-subtitle1 q-mb-md">Telegram Alerts</div>
@@ -256,6 +274,7 @@ interface Settings {
   alert_status_codes: number[];
   alert_cooldown_mins: number;
   blocked_paths: string[];
+  timezone: string;
   ct_always_estimate: boolean;
   ct_anthropic_base_url: string | null;
   ct_anthropic_api_key: string | null;
@@ -275,6 +294,7 @@ const form = ref<Settings>({
   alert_status_codes: [500, 502, 503],
   alert_cooldown_mins: 5,
   blocked_paths: [],
+  timezone: 'Asia/Ho_Chi_Minh',
   ct_always_estimate: false,
   ct_anthropic_base_url: null,
   ct_anthropic_api_key: null,
@@ -300,6 +320,23 @@ const discoveredChats = ref<TelegramChat[]>([]);
 const selectedChats = ref<string[]>([]);
 const newBlockedPath = ref('');
 
+const timezoneOptions = [
+  'UTC',
+  'Asia/Ho_Chi_Minh',
+  'Asia/Bangkok',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Kolkata',
+  'Australia/Sydney',
+  'Europe/London',
+  'Europe/Paris',
+  'America/New_York',
+  'America/Los_Angeles',
+].map((tz) => ({ label: tz, value: tz }));
+
 const purgeKeepDaysOptions = [
   { label: '1 day', value: 1 },
   { label: '3 days', value: 3 },
@@ -316,7 +353,7 @@ const showPurgeDialog = ref(false);
 onMounted(async () => {
   try {
     const { data } = await api.get<Settings>('/api/admin/settings');
-    form.value = data;
+    form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
   } catch {
     // use defaults
   }
@@ -337,11 +374,12 @@ async function saveSettings() {
       alert_status_codes: form.value.alert_status_codes,
       alert_cooldown_mins: form.value.alert_cooldown_mins,
       blocked_paths: form.value.blocked_paths,
+      timezone: form.value.timezone,
       ct_always_estimate: form.value.ct_always_estimate,
       ct_anthropic_base_url: form.value.ct_anthropic_base_url || null,
       ct_anthropic_api_key: form.value.ct_anthropic_api_key || null,
     });
-    form.value = data;
+    form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });
   } catch (err: unknown) {
     const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to save settings';
