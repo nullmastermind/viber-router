@@ -10,6 +10,7 @@ pub struct UptimeCheckEntry {
     pub status_code: i16,
     pub latency_ms: i32,
     pub request_id: Uuid,
+    pub request_model: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -58,6 +59,7 @@ async fn flush_batch(pool: &PgPool, entries: &[UptimeCheckEntry]) {
     let mut status_codes = Vec::with_capacity(len);
     let mut latency_mss = Vec::with_capacity(len);
     let mut request_ids = Vec::with_capacity(len);
+    let mut request_models = Vec::with_capacity(len);
 
     for e in entries {
         ids.push(Uuid::new_v4());
@@ -67,14 +69,15 @@ async fn flush_batch(pool: &PgPool, entries: &[UptimeCheckEntry]) {
         status_codes.push(e.status_code);
         latency_mss.push(e.latency_ms);
         request_ids.push(e.request_id);
+        request_models.push(e.request_model.as_deref());
     }
 
     let result = sqlx::query(
         "INSERT INTO uptime_checks \
-         (id, created_at, group_id, server_id, status_code, latency_ms, request_id) \
+         (id, created_at, group_id, server_id, status_code, latency_ms, request_id, request_model) \
          SELECT * FROM UNNEST(\
            $1::uuid[], $2::timestamptz[], $3::uuid[], $4::uuid[], \
-           $5::smallint[], $6::integer[], $7::uuid[])",
+           $5::smallint[], $6::integer[], $7::uuid[], $8::text[])",
     )
     .bind(&ids)
     .bind(&created_ats)
@@ -83,6 +86,7 @@ async fn flush_batch(pool: &PgPool, entries: &[UptimeCheckEntry]) {
     .bind(&status_codes)
     .bind(&latency_mss)
     .bind(&request_ids)
+    .bind(&request_models)
     .execute(pool)
     .await;
 
@@ -103,6 +107,7 @@ mod tests {
             status_code: 200,
             latency_ms: 150,
             request_id: Uuid::new_v4(),
+            request_model: Some("test-model".to_string()),
             created_at: Utc::now(),
         }
     }

@@ -1628,6 +1628,7 @@ async fn proxy_handler(
                         status as i16,
                         server_latency,
                         request_id,
+                        &request_model,
                     );
 
                     if status == 200 {
@@ -1699,6 +1700,7 @@ async fn proxy_handler(
                         0,
                         server_start.elapsed().as_millis() as i32,
                         request_id,
+                        &request_model,
                     );
                 }
             }
@@ -1907,6 +1909,7 @@ async fn proxy_handler(
                     0,
                     server_start.elapsed().as_millis() as i32,
                     request_id,
+                    &request_model,
                 );
                 // Circuit breaker: record error on connection failure
                 if has_cb {
@@ -2026,6 +2029,7 @@ async fn proxy_handler(
                 status as i16,
                 server_latency,
                 request_id,
+                &request_model,
             );
             if is_sig_err && let Some(sanitized_body) = strip_thinking_blocks(&transformed_body) {
                 tracing::info!(
@@ -2167,6 +2171,7 @@ async fn proxy_handler(
                 status as i16,
                 server_latency,
                 request_id,
+                &request_model,
             );
             // Circuit breaker: record error on failover status code
             if has_cb {
@@ -2195,6 +2200,7 @@ async fn proxy_handler(
                 status as i16,
                 server_latency,
                 request_id,
+                &request_model,
             );
 
             emit_log_entry(
@@ -2253,6 +2259,7 @@ async fn proxy_handler(
                 status as i16,
                 server_latency,
                 request_id,
+                &request_model,
             );
             // Non-SSE: log failover chain if applicable
             if failover_chain.len() > 1 {
@@ -2525,6 +2532,7 @@ async fn proxy_handler(
                     0,
                     server_start.elapsed().as_millis() as i32,
                     request_id,
+                    &request_model,
                 );
                 // Circuit breaker: record TTFT timeout as error
                 if has_cb {
@@ -2571,6 +2579,7 @@ async fn proxy_handler(
                         status as i16,
                         server_latency,
                         request_id,
+                        &request_model,
                     );
 
                     // Log failover chain if this wasn't the first server tried
@@ -2668,6 +2677,7 @@ async fn proxy_handler(
                         0,
                         server_start.elapsed().as_millis() as i32,
                         request_id,
+                        &request_model,
                     );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
@@ -2708,6 +2718,7 @@ async fn proxy_handler(
                         0,
                         server_start.elapsed().as_millis() as i32,
                         request_id,
+                        &request_model,
                     );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
@@ -2748,6 +2759,7 @@ async fn proxy_handler(
                         status as i16,
                         server_latency,
                         request_id,
+                        &request_model,
                     );
 
                     // Log failover chain if this wasn't the first server tried
@@ -2842,6 +2854,7 @@ async fn proxy_handler(
                         0,
                         server_start.elapsed().as_millis() as i32,
                         request_id,
+                        &request_model,
                     );
                     if has_cb {
                         let tripped = circuit_breaker::record_error(
@@ -3310,6 +3323,7 @@ fn emit_uptime_entry(
     status_code: i16,
     latency_ms: i32,
     request_id: uuid::Uuid,
+    request_model: &Option<String>,
 ) {
     let entry = UptimeCheckEntry {
         group_id,
@@ -3317,6 +3331,7 @@ fn emit_uptime_entry(
         status_code,
         latency_ms,
         request_id,
+        request_model: request_model.clone(),
         created_at: Utc::now(),
     };
 

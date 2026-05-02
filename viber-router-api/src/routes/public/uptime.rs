@@ -103,7 +103,7 @@ pub async fn public_uptime(
 
     let cutoff = chrono::DateTime::from_timestamp(bucket_timestamps[0], 0).unwrap_or_default();
 
-    // --- All uptime data (overall + per-model) from proxy_logs ---
+    // --- All uptime data (overall + per-model) from uptime_checks ---
 
     // 1. Get allowed model names for this group
     #[derive(sqlx::FromRow)]
@@ -123,7 +123,7 @@ pub async fn public_uptime(
     .await
     .unwrap_or_default();
 
-    // 2. Query proxy_logs grouped by request_model and 30-min bucket
+    // 2. Query uptime_checks grouped by request_model and 30-min bucket
     #[derive(sqlx::FromRow)]
     struct RawModelBucket {
         request_model: String,
@@ -137,7 +137,7 @@ pub async fn public_uptime(
            (floor(extract(epoch from created_at) / 1800) * 1800)::bigint as bucket, \
            COUNT(*)::bigint as total_requests, \
            COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 299)::bigint as successful_requests \
-         FROM proxy_logs \
+         FROM uptime_checks \
          WHERE group_id = $1 AND created_at >= $2 AND request_model IS NOT NULL \
          GROUP BY request_model, bucket",
     )
@@ -191,7 +191,7 @@ pub async fn public_uptime(
         })
         .collect();
 
-    // 4. Build overall buckets by aggregating all proxy_logs data
+    // 4. Build overall buckets by aggregating all uptime_checks data
     //    (uses the same data source as per-model bars so they are always consistent)
     let mut overall_map: HashMap<i64, (i64, i64)> = HashMap::new();
     for rb in &raw_model_buckets {
@@ -211,7 +211,7 @@ pub async fn public_uptime(
         })
         .collect();
 
-    // 5. Derive overall status from aggregated proxy_logs data
+    // 5. Derive overall status from aggregated uptime_checks data
     let overall_total: i64 = buckets.iter().map(|b| b.total_requests).sum();
     let overall_success: i64 = buckets.iter().map(|b| b.successful_requests).sum();
     let (status_text, uptime_percent) = derive_status(overall_total, overall_success);
