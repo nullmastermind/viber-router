@@ -18,6 +18,7 @@ pub struct TokenUsageEntry {
     pub group_key_id: Option<Uuid>,
     pub cost_usd: Option<f64>,
     pub subscription_id: Option<Uuid>,
+    pub user_endpoint_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub content_hash: Option<String>,
 }
@@ -81,6 +82,7 @@ async fn flush_batch(pool: &PgPool, entries: &[TokenUsageEntry]) {
     let mut group_key_ids: Vec<Option<Uuid>> = Vec::with_capacity(len);
     let mut cost_usds: Vec<Option<f64>> = Vec::with_capacity(len);
     let mut subscription_ids: Vec<Option<Uuid>> = Vec::with_capacity(len);
+    let mut user_endpoint_ids: Vec<Option<Uuid>> = Vec::with_capacity(len);
     let mut content_hashes: Vec<Option<String>> = Vec::with_capacity(len);
 
     for e in entries {
@@ -98,6 +100,7 @@ async fn flush_batch(pool: &PgPool, entries: &[TokenUsageEntry]) {
         group_key_ids.push(e.group_key_id);
         cost_usds.push(e.cost_usd);
         subscription_ids.push(e.subscription_id);
+        user_endpoint_ids.push(e.user_endpoint_id);
         content_hashes.push(e.content_hash.clone());
     }
 
@@ -105,12 +108,12 @@ async fn flush_batch(pool: &PgPool, entries: &[TokenUsageEntry]) {
         "INSERT INTO token_usage_logs \
          (id, created_at, group_id, server_id, model, input_tokens, output_tokens, \
           cache_creation_tokens, cache_read_tokens, is_dynamic_key, key_hash, group_key_id, \
-          cost_usd, subscription_id, content_hash) \
+          cost_usd, subscription_id, user_endpoint_id, content_hash) \
          SELECT * FROM UNNEST(\
            $1::uuid[], $2::timestamptz[], $3::uuid[], $4::uuid[], \
            $5::text[], $6::integer[], $7::integer[], \
            $8::integer[], $9::integer[], $10::boolean[], $11::text[], $12::uuid[], \
-           $13::float8[], $14::uuid[], $15::text[])",
+           $13::float8[], $14::uuid[], $15::uuid[], $16::text[])",
     )
     .bind(&ids)
     .bind(&created_ats)
@@ -126,6 +129,7 @@ async fn flush_batch(pool: &PgPool, entries: &[TokenUsageEntry]) {
     .bind(&group_key_ids)
     .bind(&cost_usds)
     .bind(&subscription_ids)
+    .bind(&user_endpoint_ids)
     .bind(&content_hashes)
     .execute(pool)
     .await;
@@ -154,6 +158,7 @@ mod tests {
             group_key_id: None,
             cost_usd: None,
             subscription_id: None,
+            user_endpoint_id: None,
             created_at: Utc::now(),
             content_hash: None,
         }

@@ -1,41 +1,4 @@
-## Purpose
-TBD
-## Requirements
-### Requirement: Public usage page routes
-The system SHALL provide a public page at `/usage` (with key input form) and `/usage/:key` (direct link). Both routes MUST be accessible without admin login.
-
-#### Scenario: Access via form
-- **WHEN** a user navigates to `/#/usage`
-- **THEN** the page displays a form with a text input for the sub-key and a submit button
-
-#### Scenario: Access via direct link
-- **WHEN** a user navigates to `/#/usage/sk-vibervn-abc123`
-- **THEN** the page automatically loads and displays usage data for that sub-key
-
-#### Scenario: Form submission navigates to key route
-- **WHEN** a user enters a sub-key in the form and submits
-- **THEN** the browser navigates to `/#/usage/<entered-key>` and displays the usage data
-
-### Requirement: Page is outside admin layout
-The page SHALL render outside `MainLayout.vue` (no sidebar, no admin navigation). It follows the same pattern as `LoginPage.vue`.
-
-#### Scenario: No admin UI elements
-- **WHEN** the public usage page is displayed
-- **THEN** there is no left drawer, no admin navigation links, no admin header
-
-### Requirement: Navigation guard exempts usage paths
-The Vue Router `beforeEach` guard SHALL allow navigation to paths starting with `/usage` without an admin token in localStorage.
-
-#### Scenario: Unauthenticated access to usage page
-- **WHEN** a user with no admin token navigates to `/#/usage/sk-vibervn-abc123`
-- **THEN** the page loads normally without redirecting to `/login`
-
-### Requirement: Key info display
-When a valid key is loaded, the page SHALL display the key name and group name.
-
-#### Scenario: Key info shown
-- **WHEN** the API returns data for a valid sub-key
-- **THEN** the page displays the key name and group name prominently at the top
+## MODIFIED Requirements
 
 ### Requirement: Subscription cards display
 The page SHALL display subscription information as cards, with active subscriptions first and inactive ones (expired/cancelled/exhausted) visually dimmed. Non-bonus subscription cards SHALL show lifetime cost progress and, when `weekly_cost_limit_usd` is present, weekly cost usage, weekly limit, and weekly reset time. Bonus subscriptions SHALL be rendered with a distinct card style separate from budget-based subscriptions. The page SHALL render a Custom Endpoints section after subscription cards and before the token usage table.
@@ -80,41 +43,7 @@ The page SHALL display subscription information as cards, with active subscripti
 - **WHEN** a valid sub-key's usage data is displayed
 - **THEN** the Custom Endpoints section appears between the subscriptions section and token usage table
 
-### Requirement: Token usage table display
-The page SHALL display a table of token usage aggregated by model for the last 30 days. The table SHALL show effective input tokens (input + cache creation + cache read combined) and SHALL NOT show separate Cache Creation or Cache Read columns.
-
-#### Scenario: Usage table columns
-- **WHEN** the sub-key has usage data
-- **THEN** the table shows exactly these columns: Model, Input, Output, Requests, Cost ($)
-
-#### Scenario: Input column shows effective_input_tokens
-- **WHEN** the API returns `effective_input_tokens: 1700` for a model row
-- **THEN** the Input column displays `1700` (or compact-formatted equivalent)
-
-#### Scenario: No usage data
-- **WHEN** the sub-key has no usage data in the last 30 days
-- **THEN** the page shows "No usage data" in the usage section
-
-### Requirement: Error handling
-The page SHALL display appropriate error messages for API errors.
-
-#### Scenario: Invalid key error
-- **WHEN** the API returns 403 (invalid or inactive key)
-- **THEN** the page displays "Invalid or inactive key" error message
-
-#### Scenario: Rate limit error
-- **WHEN** the API returns 429 (too many requests)
-- **THEN** the page displays "Too many requests. Please try again later." error message
-
-### Requirement: Loading state
-The page SHALL show a loading indicator while fetching data from the API.
-
-#### Scenario: Loading indicator
-- **WHEN** the page is fetching usage data
-- **THEN** a loading spinner is displayed
-- **WHEN** the data is loaded or an error occurs
-- **THEN** the loading spinner is replaced with the data or error message
-
+## ADDED Requirements
 
 ### Requirement: Custom endpoint cards
 The public usage page SHALL display user endpoints as cards in a Custom Endpoints section. Each card SHALL show the endpoint name, truncated base URL, priority mode badge, enabled toggle, edit button, delete button, quota display when quota data is configured, and 30-day usage statistics.

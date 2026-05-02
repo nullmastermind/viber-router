@@ -298,6 +298,116 @@
           </q-card>
         </div>
 
+
+        <!-- Custom Endpoints -->
+        <div class="row items-center q-mb-sm">
+          <div class="text-subtitle1">Custom Endpoints</div>
+          <q-space />
+          <q-btn
+            color="primary"
+            dense
+            no-caps
+            icon="add"
+            label="Add Endpoint"
+            :disable="endpointLimitReached"
+            @click="openEndpointDialog()"
+          />
+        </div>
+        <div v-if="endpointLimitReached" class="text-caption q-mb-sm" style="color: var(--vr-text-secondary)">
+          Maximum of 10 custom endpoints reached.
+        </div>
+        <div v-if="!data.user_endpoints.length" class="text-caption q-mb-lg" style="color: var(--vr-text-secondary)">
+          No custom endpoints yet.
+        </div>
+        <div v-else class="q-mb-lg">
+          <q-card v-for="endpoint in data.user_endpoints" :key="endpoint.id" bordered flat class="q-mb-sm">
+            <q-card-section>
+              <div class="row items-center q-mb-sm no-wrap">
+                <div style="min-width: 0">
+                  <div class="text-weight-medium ellipsis">{{ endpoint.name }}</div>
+                  <div class="text-caption ellipsis" style="color: var(--vr-text-secondary)">{{ endpoint.base_url }}</div>
+                </div>
+                <q-space />
+                <q-badge :color="endpoint.priority_mode === 'priority' ? 'secondary' : 'grey'" :label="endpoint.priority_mode" class="q-mr-sm" />
+                <q-toggle
+                  :model-value="endpoint.is_enabled"
+                  dense
+                  color="primary"
+                  aria-label="Toggle endpoint enabled"
+                  @update:model-value="toggleEndpoint(endpoint, $event)"
+                />
+                <q-btn flat dense round icon="edit" aria-label="Edit endpoint" @click="openEndpointDialog(endpoint)" />
+                <q-btn flat dense round icon="delete" color="negative" aria-label="Delete endpoint" @click="confirmDeleteEndpoint(endpoint)" />
+              </div>
+
+              <template v-if="endpoint.quotas !== null">
+                <div v-if="endpoint.quotas.length === 0" class="text-caption q-mb-sm" style="color: var(--vr-text-secondary)">
+                  Quota info unavailable
+                </div>
+                <div v-else class="q-mb-sm">
+                  <div v-for="[accountName, quotas] in groupedQuotas(endpoint.quotas)" :key="accountName" class="q-mb-sm">
+                    <div v-if="accountName" class="text-caption text-weight-medium q-mb-xs" style="color: var(--vr-text-secondary)">
+                      {{ accountName }}
+                    </div>
+                    <q-markup-table flat bordered dense>
+                      <thead>
+                        <tr>
+                          <th class="text-left">Model</th>
+                          <th class="text-right">Usage</th>
+                          <th class="text-right">Reset</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="quota in quotas" :key="quota.name">
+                          <td>{{ quota.name }}</td>
+                          <td class="text-right" style="min-width: 120px">
+                            <div class="row items-center justify-end q-gutter-x-sm no-wrap">
+                              <span class="text-caption">{{ Math.round(quota.utilization * 100) }}%</span>
+                              <q-linear-progress
+                                :value="quota.utilization"
+                                :color="quota.utilization > 0.9 ? 'negative' : 'primary'"
+                                rounded
+                                size="6px"
+                                style="width: 60px; flex-shrink: 0"
+                              />
+                            </div>
+                          </td>
+                          <td class="text-right">
+                            <span v-if="quota.reset_at" class="text-caption" style="color: var(--vr-text-secondary)">
+                              {{ formatCountdown(quota.reset_at) }}
+                            </span>
+                            <span v-else class="text-caption" style="color: var(--vr-text-secondary)">—</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </q-markup-table>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="endpoint.usage.length > 0">
+                <div class="text-caption text-weight-medium q-mb-xs">Usage (last 30 days)</div>
+                <q-markup-table flat bordered dense>
+                  <thead>
+                    <tr>
+                      <th class="text-left">Model</th>
+                      <th class="text-right">Requests</th>
+                      <th class="text-right">Cost (USD)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="usage in endpoint.usage" :key="usage.model">
+                      <td>{{ usage.model }}</td>
+                      <td class="text-right">{{ usage.request_count }}</td>
+                      <td class="text-right">{{ usage.cost_usd > 0 ? `$${usage.cost_usd.toFixed(4)}` : '—' }}</td>
+                    </tr>
+                  </tbody>
+                </q-markup-table>
+              </div>
+            </q-card-section>
+          </q-card>
+        </div>
+
         <!-- Usage table -->
         <div class="row items-center q-mb-sm">
           <div class="text-subtitle1">Usage ({{ usagePeriodLabels[usagePeriod] }})</div>
@@ -480,6 +590,30 @@
       </q-card>
     </q-dialog>
 
+
+    <!-- Custom Endpoint Dialog -->
+    <q-dialog v-model="showEndpointDialog" persistent>
+      <q-card style="width: 95vw; max-width: 520px">
+        <q-card-section>
+          <div class="text-subtitle1">{{ editingEndpointId ? 'Edit Endpoint' : 'Add Endpoint' }}</div>
+          <div class="text-caption" style="color: var(--vr-text-secondary)">Configure a custom upstream endpoint for this sub-key.</div>
+        </q-card-section>
+        <q-card-section class="q-gutter-sm">
+          <q-input v-model="endpointForm.name" label="Name" outlined dense :error="!!endpointErrors.name" :error-message="endpointErrors.name" />
+          <q-input v-model="endpointForm.base_url" label="Base URL" outlined dense :error="!!endpointErrors.base_url" :error-message="endpointErrors.base_url" />
+          <q-input v-model="endpointForm.api_key" label="API Key" outlined dense :error="!!endpointErrors.api_key" :error-message="endpointErrors.api_key" />
+          <q-input v-model="endpointForm.model_mappings" label="Model Mappings JSON" outlined dense type="textarea" autogrow :error="!!endpointErrors.model_mappings" :error-message="endpointErrors.model_mappings" />
+          <q-select v-model="endpointForm.priority_mode" label="Priority Mode" outlined dense :options="priorityModeOptions" emit-value map-options />
+          <q-input v-model="endpointForm.quota_url" label="Quota URL" outlined dense />
+          <q-input v-model="endpointForm.quota_headers" label="Quota Headers JSON" outlined dense type="textarea" autogrow :error="!!endpointErrors.quota_headers" :error-message="endpointErrors.quota_headers" />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" :disable="endpointSaving" v-close-popup />
+          <q-btn color="primary" label="Save" :loading="endpointSaving" @click="saveEndpoint" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <!-- QR Dialog -->
     <q-dialog v-model="showQr">
       <q-card style="min-width: 280px">
@@ -557,6 +691,30 @@ interface BonusModelUsage {
   cost_usd: number;
 }
 
+interface UserEndpoint {
+  id: string;
+  name: string;
+  base_url: string;
+  api_key: string;
+  model_mappings: Record<string, string>;
+  quota_url: string | null;
+  quota_headers: Record<string, string> | null;
+  priority_mode: 'priority' | 'fallback';
+  is_enabled: boolean;
+  quotas: QuotaInfo[] | null;
+  usage: BonusModelUsage[];
+}
+
+interface EndpointForm {
+  name: string;
+  base_url: string;
+  api_key: string;
+  model_mappings: string;
+  priority_mode: 'priority' | 'fallback';
+  quota_url: string;
+  quota_headers: string;
+}
+
 interface Subscription {
   id: string;
   sub_type: string;
@@ -582,6 +740,7 @@ interface UsageData {
   allowed_models: string[];
   usage: ModelUsage[];
   subscriptions: Subscription[];
+  user_endpoints: UserEndpoint[];
 }
 
 interface TtftDataPoint {
@@ -627,6 +786,23 @@ const selectedHaiku = ref('');
 const selectedSubAgent = ref('');
 const showQr = ref(false);
 const qrDataUrl = ref('');
+const showEndpointDialog = ref(false);
+const endpointSaving = ref(false);
+const editingEndpointId = ref<string | null>(null);
+const endpointForm = ref<EndpointForm>({
+  name: '',
+  base_url: '',
+  api_key: '',
+  model_mappings: '{}',
+  priority_mode: 'fallback',
+  quota_url: '',
+  quota_headers: '{}',
+});
+const endpointErrors = ref<Record<string, string>>({});
+const priorityModeOptions = [
+  { label: 'Priority', value: 'priority' },
+  { label: 'Fallback', value: 'fallback' },
+];
 
 // Meter state
 const meterRunning = ref(false);
@@ -799,6 +975,124 @@ const bonusSubscriptions = computed(() =>
 const nonBonusSubscriptions = computed(() =>
   sortedSubscriptions.value.filter((s) => s.sub_type !== 'bonus'),
 );
+
+const endpointLimitReached = computed(() => (data.value?.user_endpoints.length ?? 0) >= 10);
+
+
+function openEndpointDialog(endpoint?: UserEndpoint) {
+  if (!endpoint && endpointLimitReached.value) {
+    $q.notify({ message: 'Maximum of 10 custom endpoints reached', type: 'negative' });
+    return;
+  }
+  editingEndpointId.value = endpoint?.id ?? null;
+  endpointErrors.value = {};
+  endpointForm.value = {
+    name: endpoint?.name ?? '',
+    base_url: endpoint?.base_url ?? '',
+    api_key: endpoint?.api_key ?? '',
+    model_mappings: JSON.stringify(endpoint?.model_mappings ?? {}, null, 2),
+    priority_mode: endpoint?.priority_mode ?? 'fallback',
+    quota_url: endpoint?.quota_url ?? '',
+    quota_headers: JSON.stringify(endpoint?.quota_headers ?? {}, null, 2),
+  };
+  showEndpointDialog.value = true;
+}
+
+function parseJsonObjectField(value: string, field: string): Record<string, unknown> | null {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      endpointErrors.value[field] = 'Must be a JSON object';
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    endpointErrors.value[field] = 'Invalid JSON';
+    return null;
+  }
+}
+
+function validateEndpointForm() {
+  endpointErrors.value = {};
+  if (!editingEndpointId.value) {
+    if (!endpointForm.value.name.trim()) endpointErrors.value.name = 'Name is required';
+    if (!endpointForm.value.base_url.trim()) endpointErrors.value.base_url = 'Base URL is required';
+    if (!endpointForm.value.api_key.trim()) endpointErrors.value.api_key = 'API Key is required';
+  }
+  const modelMappings = parseJsonObjectField(endpointForm.value.model_mappings, 'model_mappings');
+  const quotaHeaders = parseJsonObjectField(endpointForm.value.quota_headers, 'quota_headers');
+  if (Object.keys(endpointErrors.value).length > 0 || modelMappings === null || quotaHeaders === null) return null;
+  return { modelMappings, quotaHeaders };
+}
+
+async function saveEndpoint() {
+  const key = routeKey.value;
+  if (!key) return;
+  const parsed = validateEndpointForm();
+  if (!parsed) return;
+  endpointSaving.value = true;
+  try {
+    const payload = {
+      name: endpointForm.value.name.trim(),
+      base_url: endpointForm.value.base_url.trim(),
+      api_key: endpointForm.value.api_key.trim(),
+      model_mappings: parsed.modelMappings,
+      priority_mode: endpointForm.value.priority_mode,
+      quota_url: endpointForm.value.quota_url.trim() || null,
+      quota_headers: Object.keys(parsed.quotaHeaders).length ? parsed.quotaHeaders : null,
+    };
+    if (editingEndpointId.value) {
+      await api.patch(`/api/public/user-endpoints/${editingEndpointId.value}`, payload, { params: { key } });
+      $q.notify({ message: 'Endpoint updated', type: 'positive' });
+    } else {
+      await api.post('/api/public/user-endpoints', payload, { params: { key } });
+      $q.notify({ message: 'Endpoint created', type: 'positive' });
+    }
+    showEndpointDialog.value = false;
+    await fetchUsage(key, true);
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Failed to save endpoint';
+    $q.notify({ message: msg, type: 'negative' });
+  } finally {
+    endpointSaving.value = false;
+  }
+}
+
+async function toggleEndpoint(endpoint: UserEndpoint, enabled: boolean) {
+  const key = routeKey.value;
+  if (!key) return;
+  try {
+    await api.patch(`/api/public/user-endpoints/${endpoint.id}`, { is_enabled: enabled }, { params: { key } });
+    $q.notify({ message: enabled ? 'Endpoint enabled' : 'Endpoint disabled', type: 'positive' });
+    await fetchUsage(key, true);
+  } catch {
+    $q.notify({ message: 'Failed to update endpoint', type: 'negative' });
+    await fetchUsage(key, true);
+  }
+}
+
+function confirmDeleteEndpoint(endpoint: UserEndpoint) {
+  $q.dialog({
+    title: 'Delete endpoint',
+    message: `Delete ${endpoint.name}?`,
+    cancel: true,
+    persistent: true,
+  }).onOk(() => deleteEndpoint(endpoint));
+}
+
+async function deleteEndpoint(endpoint: UserEndpoint) {
+  const key = routeKey.value;
+  if (!key) return;
+  try {
+    await api.delete(`/api/public/user-endpoints/${endpoint.id}`, { params: { key } });
+    $q.notify({ message: 'Endpoint deleted', type: 'positive' });
+    await fetchUsage(key, true);
+  } catch {
+    $q.notify({ message: 'Failed to delete endpoint', type: 'negative' });
+  }
+}
 
 function groupedQuotas(quotas: QuotaInfo[]): Map<string, QuotaInfo[]> {
   const map = new Map<string, QuotaInfo[]>();

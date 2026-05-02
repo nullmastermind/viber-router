@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::routes::AppState;
+use crate::routes::public::user_endpoints::list_endpoint_responses;
 use crate::subscription;
 
 #[derive(Debug, Deserialize)]
@@ -25,6 +26,7 @@ pub struct PublicUsageResponse {
     allowed_models: Vec<String>,
     usage: Vec<ModelUsage>,
     subscriptions: Vec<PublicSubscription>,
+    user_endpoints: Vec<crate::models::PublicUserEndpoint>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -255,6 +257,10 @@ pub async fn public_usage(
         group_models.into_iter().map(|(n,)| n).collect()
     };
 
+    let user_endpoints = list_endpoint_responses(&state, key_info.key_id)
+        .await
+        .unwrap_or_default();
+
     Json(PublicUsageResponse {
         key_name: key_info.key_name,
         group_name: key_info.group_name,
@@ -262,6 +268,7 @@ pub async fn public_usage(
         allowed_models,
         usage,
         subscriptions,
+        user_endpoints,
     })
     .into_response()
 }

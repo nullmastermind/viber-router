@@ -7,6 +7,7 @@ mod model;
 mod server;
 pub mod settings;
 mod subscription_plan;
+mod user_endpoint;
 
 pub use group::*;
 pub use group_key::*;
@@ -17,3 +18,4 @@ pub use model::*;
 pub use server::*;
 pub use settings::Settings;
 pub use subscription_plan::*;
+pub use user_endpoint::*;

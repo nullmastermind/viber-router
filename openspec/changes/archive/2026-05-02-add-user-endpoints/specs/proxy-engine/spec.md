@@ -1,7 +1,5 @@
-## Purpose
-TBD
+## MODIFIED Requirements
 
-## Requirements
 ### Requirement: Streaming (SSE) passthrough
 The system SHALL support streaming responses. When the upstream server returns a streaming SSE response, the system SHALL stream it directly to the client. When TTFT auto-switch is enabled and the current server is not the last in the waterfall, the system SHALL detect SSE responses in the proxy handler (before delegating to build_response) to enable TTFT timeout logic. When a count-tokens default server is configured and the request path is `/v1/messages/count_tokens`, the proxy handler SHALL attempt the default server before entering the failover waterfall, and SHALL skip the default server's `server_id` in the waterfall if the default attempt failed. **Before attempting enabled, model-compatible bonus servers, subscription checks, or group servers, the proxy SHALL attempt enabled, model-compatible user endpoints with `priority_mode = 'priority'` in `created_at ASC` order. A priority user endpoint 2xx response SHALL be returned immediately. Non-2xx responses and connection errors SHALL be logged and the proxy SHALL continue to the next priority user endpoint.** **Before attempting each server, the proxy SHALL check if the server's circuit breaker is open (Redis key `cb:open:{group_id}:{server_id}` exists) and skip it if so. After each error (failover status code, connection error, or TTFT timeout), if the server has circuit breaker configured, the proxy SHALL increment the error counter and trip the breaker if threshold is reached.** **After reading the request body and extracting the model, if the group has a non-empty `allowed_models` list, the proxy SHALL validate the request model against the list. If the model is not in the list, or the request has no `model` field, the proxy SHALL return HTTP 403 with `permission_error` type and message "Your API key does not have permission to use the specified model." without contacting any upstream server. If the request was authenticated via a sub-key with a non-empty `key_allowed_models` list, the proxy SHALL additionally validate the model against the key's list. Errors from the `allowed_models` and `key_allowed_models` database queries SHALL be propagated (not silently swallowed) so that DB failures result in a request error rather than a security bypass.** **Before entering the failover waterfall, the proxy SHALL estimate input tokens from the request body by: (1) parsing the body as JSON, (2) removing content objects where `"type" == "image"` from each message's content array, (3) serializing the filtered JSON to a string, (4) dividing the byte length by 4. The estimate SHALL be computed once and reused for all servers. If JSON parsing fails, the estimate is absent. For each server in the failover waterfall, after the rate limit check, if the server has `max_input_tokens` set (non-null) and the estimated token count is strictly greater than `max_input_tokens`, the proxy SHALL skip that server and continue to the next.** **Before attempting each server in the failover waterfall, after the circuit breaker check, the proxy SHALL check if the server has rate limiting configured (`max_requests` and `rate_window_seconds` both non-null). If configured, the proxy SHALL check the Redis counter `rl:{group_id}:{server_id}`. If the count >= `max_requests`, the proxy SHALL skip this server. If the count < `max_requests`, the proxy SHALL INCR the counter (setting TTL to `rate_window_seconds` if the key is new) before sending the request. If Redis is unavailable during the rate limit check, the proxy SHALL proceed (fail open). When all servers in the chain are exhausted and at least one was skipped due to rate limiting, the proxy SHALL return HTTP 429 with `rate_limit_error` type and message "Rate limit exceeded".** **For requests to `/v1/messages`, before forwarding to the upstream server, the proxy SHALL merge the client-provided system prompt with the server's configured system_prompt (if any) using the existing hybrid strategy targeting the top-level `system` field. For requests to paths starting with `/v1/chat/`, the proxy SHALL merge the server system_prompt into the `messages` array.** **Error responses SHALL use the format matching the request path: Anthropic format (`{"type":"error","error":{"type":...,"message":...}}`) for `/v1/messages` and related paths; OpenAI format (`{"error":{"message":...,"type":...,"param":null,"code":null}}`) for paths starting with `/v1/chat/`. All other paths SHALL use Anthropic format.** **When the request path is a billing endpoint (`/v1/messages` or `/v1/chat/completions`) and the upstream returns HTTP 200, the proxy SHALL extract token usage and wrap streaming responses with the appropriate parser (`SseUsageParser` for Anthropic, `OpenAiSseUsageParser` for OpenAI).** **After the `is_active` check and before the `servers.is_empty()` check, the proxy SHALL extract the `User-Agent` header (normalizing absent or empty to `"(empty)"`), check it against `GroupConfig.blocked_user_agents` using exact string match, and if matched, return HTTP 403 with `permission_error` type and message "Access denied" using the path-appropriate error format.** **After receiving a response from an upstream server, if the server has retry config (`retry_status_codes`, `retry_count`, and `retry_delay_seconds` all non-null) and the response status code is in `retry_status_codes`, the proxy SHALL retry the same server up to `retry_count` times. Between each retry attempt, the proxy SHALL sleep for `retry_delay_seconds` seconds using `tokio::time::sleep`. If any retry attempt returns a status code NOT in `retry_status_codes`, the proxy SHALL use that response immediately (success or failover check). After all retry attempts are exhausted, the proxy SHALL use the final response and proceed to the normal failover check. The retry loop applies to both streaming and non-streaming paths.** **When the subscription check returns `BonusServers`, the proxy SHALL attempt each bonus server in FIFO order before entering the group server waterfall. Each bonus attempt uses the bonus server's `base_url` and `api_key`. A 2xx response is returned immediately. A non-2xx response is logged and iteration continues. After all bonus servers are exhausted, the proxy SHALL proceed to the group server waterfall using `fallback_subscription` (if present) for subscription tracking, or with no subscription tracking if `fallback_subscription` is None.** **When the subscription check blocks a request, or when all group servers fail, the proxy SHALL attempt enabled, model-compatible user endpoints with `priority_mode = 'fallback'` in `created_at ASC` order before returning the final 429. A fallback user endpoint 2xx response SHALL be returned immediately. If all fallback endpoints fail, the proxy SHALL return the existing path-appropriate 429 response.**
 
@@ -196,53 +194,3 @@ The system SHALL support streaming responses. When the upstream server returns a
 #### Scenario: Per-server retry — retry succeeds mid-loop, stops retrying
 - **WHEN** a server has `retry_status_codes=[503], retry_count=3` and the second retry returns a status NOT in `retry_status_codes` (e.g., 200)
 - **THEN** the system SHALL stop retrying and use that response immediately
-
-### Requirement: Active hours skip condition in proxy failover
-Before attempting each server in the failover waterfall, after existing skip conditions (circuit breaker, rate limit, token thresholds, per-server model filter), the proxy SHALL evaluate the server's active hours configuration. If all three fields (`active_hours_start`, `active_hours_end`, `active_hours_timezone`) are present (non-null), the proxy SHALL parse the timezone using the `chrono-tz` crate, obtain the current local time in that timezone, and determine whether the current time falls within the configured window. If the current time is outside the window, the proxy SHALL skip the server and continue to the next one. If any of the three fields is absent, or if the timezone string cannot be parsed, the proxy SHALL skip the active hours check and treat the server as always active (fail-open), emitting a `warn!` log if the timezone is unparseable.
-
-#### Scenario: Current time within active hours window — server attempted
-- **WHEN** a server has `active_hours_start="08:00"`, `active_hours_end="23:00"`, `active_hours_timezone="Asia/Ho_Chi_Minh"`, and the current time in that timezone is 14:30
-- **THEN** the proxy SHALL proceed to attempt the server (active hours check passes)
-
-#### Scenario: Current time outside active hours window — server skipped
-- **WHEN** a server has `active_hours_start="08:00"`, `active_hours_end="23:00"`, `active_hours_timezone="Asia/Ho_Chi_Minh"`, and the current time in that timezone is 01:00
-- **THEN** the proxy SHALL skip this server without sending a request and continue to the next server in the waterfall
-
-#### Scenario: Overnight window — current time after start
-- **WHEN** a server has `active_hours_start="22:00"`, `active_hours_end="06:00"`, and the current time in the configured timezone is 23:30
-- **THEN** the proxy SHALL treat the server as active (start > end indicates overnight window; 23:30 >= 22:00)
-
-#### Scenario: Overnight window — current time before end
-- **WHEN** a server has `active_hours_start="22:00"`, `active_hours_end="06:00"`, and the current time in the configured timezone is 03:00
-- **THEN** the proxy SHALL treat the server as active (03:00 <= 06:00)
-
-#### Scenario: Overnight window — current time in inactive gap
-- **WHEN** a server has `active_hours_start="22:00"`, `active_hours_end="06:00"`, and the current time in the configured timezone is 12:00
-- **THEN** the proxy SHALL skip this server (12:00 is outside 22:00-06:00 overnight window)
-
-#### Scenario: Incomplete active hours config — fail open
-- **WHEN** a server has `active_hours_start="08:00"` but `active_hours_end=NULL` and `active_hours_timezone=NULL`
-- **THEN** the proxy SHALL skip the active hours check and treat the server as always active
-
-#### Scenario: Unparseable timezone — fail open with warning
-- **WHEN** a server has all three active hours fields set but `active_hours_timezone` contains a string not recognized by `chrono-tz`
-- **THEN** the proxy SHALL skip the active hours check, treat the server as always active, and emit a `warn!` log message
-
-#### Scenario: Active hours config is NULL — no check performed
-- **WHEN** a server has all three active hours fields set to NULL
-- **THEN** the proxy SHALL not perform any active hours check and SHALL attempt the server normally
-
-### Requirement: Active hours window interpretation
-The active hours window SHALL be interpreted as follows:
-- If `active_hours_start <= active_hours_end` (same-day window): the server is active when `start <= current_time <= end`
-- If `active_hours_start > active_hours_end` (overnight window): the server is active when `current_time >= start OR current_time <= end`
-
-Time comparison SHALL be performed at minute granularity (HH:MM), ignoring seconds.
-
-#### Scenario: Boundary — current time equals start
-- **WHEN** current time equals `active_hours_start` exactly (e.g., both are 08:00)
-- **THEN** the proxy SHALL treat the server as active (inclusive boundary)
-
-#### Scenario: Boundary — current time equals end
-- **WHEN** current time equals `active_hours_end` exactly (e.g., both are 23:00)
-- **THEN** the proxy SHALL treat the server as active (inclusive boundary)

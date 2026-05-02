@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::cache;
 use crate::circuit_breaker;
 use crate::log_buffer::{FailoverAttempt, ProxyLogEntry};
-use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail};
+use crate::models::{CountTokensServer, GroupConfig, GroupServerDetail, UserEndpoint};
 use crate::rate_limiter;
 use crate::routes::AppState;
 use crate::routes::key_parser::parse_api_key;
@@ -579,6 +579,357 @@ fn transform_request_body(
     serde_json::to_vec(&json).unwrap_or_else(|_| body.to_vec())
 }
 
+fn user_endpoint_accepts_model(endpoint: &UserEndpoint, request_model: Option<&str>) -> bool {
+    crate::models::endpoint_accepts_model(endpoint, request_model)
+}
+
+fn build_user_endpoint_url(endpoint: &UserEndpoint, original_uri: &axum::http::Uri) -> String {
+    let path = original_uri.path();
+    if let Some(query) = original_uri.query() {
+        format!("{}{path}?{query}", endpoint.base_url.trim_end_matches('/'))
+    } else {
+        format!("{}{path}", endpoint.base_url.trim_end_matches('/'))
+    }
+}
+
+async fn load_user_endpoints(state: &AppState, group_key_id: Option<uuid::Uuid>) -> Vec<UserEndpoint> {
+    let Some(group_key_id) = group_key_id else {
+        return vec![];
+    };
+
+    if let Some(endpoints) = cache::get_user_endpoints(&state.redis, group_key_id).await {
+        return endpoints;
+    }
+
+    let endpoints = sqlx::query_as::<_, UserEndpoint>(
+        "SELECT * FROM user_endpoints WHERE group_key_id = $1 AND is_enabled = true ORDER BY created_at ASC",
+    )
+    .bind(group_key_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    cache::set_user_endpoints(&state.redis, group_key_id, &endpoints).await;
+    endpoints
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn try_user_endpoint_waterfall(
+    state: &AppState,
+    endpoints: &[UserEndpoint],
+    mode: &str,
+    original_uri: &axum::http::Uri,
+    method: &axum::http::Method,
+    headers: &HeaderMap,
+    body_bytes: &Bytes,
+    request_model: &Option<String>,
+    config: &GroupConfig,
+    content_hash: &Option<String>,
+) -> Option<Response> {
+    for endpoint in endpoints
+        .iter()
+        .filter(|ep| ep.priority_mode == mode && user_endpoint_accepts_model(ep, request_model.as_deref()))
+    {
+        let upstream_url = build_user_endpoint_url(endpoint, original_uri);
+        let transformed_body = transform_request_body(
+            body_bytes,
+            &endpoint.model_mappings,
+            None,
+            original_uri.path(),
+        );
+        let mut upstream_req = state.http_client.request(method.clone(), &upstream_url);
+        for (name, value) in headers.iter() {
+            if name == "x-api-key"
+                || name == "authorization"
+                || name == "host"
+                || name == "content-length"
+            {
+                continue;
+            }
+            if let Ok(reqwest_name) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes())
+                && let Ok(reqwest_value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
+            {
+                upstream_req = upstream_req.header(reqwest_name, reqwest_value);
+            }
+        }
+        upstream_req = upstream_req.header("x-api-key", &endpoint.api_key);
+        upstream_req = upstream_req.header("authorization", format!("Bearer {}", endpoint.api_key));
+        upstream_req = upstream_req.body(transformed_body);
+
+        let start = std::time::Instant::now();
+        match upstream_req.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if resp.status().is_success() {
+                    return Some(
+                        build_user_endpoint_success_response(
+                            state,
+                            config,
+                            endpoint,
+                            resp,
+                            original_uri.path(),
+                            request_model,
+                            content_hash,
+                        )
+                        .await,
+                    );
+                }
+                tracing::warn!(
+                    endpoint_id = %endpoint.id,
+                    endpoint_name = %endpoint.name,
+                    mode,
+                    status,
+                    latency_ms = start.elapsed().as_millis() as i32,
+                    "User endpoint returned non-2xx, trying next"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    endpoint_id = %endpoint.id,
+                    endpoint_name = %endpoint.name,
+                    mode,
+                    error = %error,
+                    "User endpoint connection error, trying next"
+                );
+            }
+        }
+    }
+    None
+}
+
+async fn build_user_endpoint_success_response(
+    state: &AppState,
+    config: &GroupConfig,
+    endpoint: &UserEndpoint,
+    resp: reqwest::Response,
+    request_path: &str,
+    request_model: &Option<String>,
+    content_hash: &Option<String>,
+) -> Response {
+    let is_sse = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.contains("text/event-stream"));
+    let resp_status_code = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+    let mut response_headers = HeaderMap::new();
+    for (name, value) in resp.headers().iter() {
+        if let Ok(axum_name) = axum::http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+            && let Ok(axum_value) = HeaderValue::from_bytes(value.as_bytes())
+        {
+            response_headers.insert(axum_name, axum_value);
+        }
+    }
+
+    if is_sse {
+        let stream = resp
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
+        let parser = if is_openai_endpoint(request_path) {
+            AnyParser::OpenAi(OpenAiSseUsageParser::new())
+        } else {
+            AnyParser::Anthropic(SseUsageParser::new())
+        };
+        let body = Body::from_stream(wrap_stream_with_usage_tracking(
+            stream,
+            state.clone(),
+            config.group_id,
+            uuid::Uuid::nil(),
+            request_model.clone(),
+            false,
+            None,
+            config.group_key_id,
+            None,
+            Some(endpoint.id),
+            None,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            false,
+            parser,
+        ));
+        let mut resp_builder = Response::builder().status(resp_status_code);
+        *resp_builder.headers_mut().unwrap() = response_headers;
+        return resp_builder
+            .body(body)
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    let body_bytes_resp = resp.bytes().await.unwrap_or_default();
+    if is_billing_endpoint(request_path)
+        && let Ok(json) = serde_json::from_slice::<Value>(&body_bytes_resp)
+        && let Some(usage) = json.get("usage")
+    {
+        let (input, output, cache_creation, cache_read) = if is_openai_endpoint(request_path) {
+            let inp = usage.get("prompt_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let out = usage.get("completion_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let cr = usage
+                .get("prompt_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+            (inp, out, None, cr)
+        } else {
+            let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let out = usage.get("output_tokens").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let cc = usage
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+            let cr = usage
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+            (inp, out, cc, cr)
+        };
+        if let (Some(input_tokens), Some(output_tokens)) = (input, output) {
+            let cost_usd = if let Some(model_name) = request_model {
+                let pricing_cache = state.pricing_cache.read().await;
+                pricing_cache.get(model_name).map(|pricing| {
+                    crate::subscription::calculate_cost(
+                        pricing,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        input_tokens,
+                        output_tokens,
+                        cache_creation,
+                        cache_read,
+                        false,
+                    )
+                })
+            } else {
+                None
+            };
+            let entry = TokenUsageEntry {
+                group_id: config.group_id,
+                server_id: uuid::Uuid::nil(),
+                model: request_model.clone(),
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens: cache_creation,
+                cache_read_tokens: cache_read,
+                is_dynamic_key: false,
+                key_hash: None,
+                group_key_id: config.group_key_id,
+                cost_usd,
+                subscription_id: None,
+                user_endpoint_id: Some(endpoint.id),
+                created_at: Utc::now(),
+                content_hash: content_hash.clone(),
+            };
+            if state.usage_tx.try_send(entry).is_err() {
+                tracing::warn!("Usage buffer full, dropping user endpoint token usage entry");
+            }
+        }
+    }
+
+    let mut resp_builder = Response::builder().status(resp_status_code);
+    *resp_builder.headers_mut().unwrap() = response_headers;
+    resp_builder
+        .body(Body::from(body_bytes_resp))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fallback_or_error(
+    state: &AppState,
+    endpoints: &[UserEndpoint],
+    original_uri: &axum::http::Uri,
+    method: &axum::http::Method,
+    headers: &HeaderMap,
+    body_bytes: &Bytes,
+    request_model: &Option<String>,
+    config: &GroupConfig,
+    content_hash: &Option<String>,
+    error_type: &str,
+    message: &str,
+) -> Response {
+    if let Some(resp) = try_user_endpoint_waterfall(
+        state,
+        endpoints,
+        "fallback",
+        original_uri,
+        method,
+        headers,
+        body_bytes,
+        request_model,
+        config,
+        content_hash,
+    )
+    .await
+    {
+        return resp;
+    }
+
+    api_error(original_uri.path(), StatusCode::TOO_MANY_REQUESTS, error_type, message)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fallback_or_overloaded_error(
+    state: &AppState,
+    endpoints: &[UserEndpoint],
+    original_uri: &axum::http::Uri,
+    method: &axum::http::Method,
+    headers: &HeaderMap,
+    body_bytes: &Bytes,
+    request_model: &Option<String>,
+    config: &GroupConfig,
+    content_hash: &Option<String>,
+) -> Response {
+    let mut resp = fallback_or_error(
+        state,
+        endpoints,
+        original_uri,
+        method,
+        headers,
+        body_bytes,
+        request_model,
+        config,
+        content_hash,
+        "overloaded_error",
+        "All upstream servers unavailable",
+    )
+    .await;
+    if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+        resp.headers_mut().insert(
+            header::HeaderName::from_static("retry-after"),
+            HeaderValue::from_static("30"),
+        );
+    }
+    resp
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fallback_or_subscription_error(
+    state: &AppState,
+    endpoints: &[UserEndpoint],
+    original_uri: &axum::http::Uri,
+    method: &axum::http::Method,
+    headers: &HeaderMap,
+    body_bytes: &Bytes,
+    request_model: &Option<String>,
+    config: &GroupConfig,
+    content_hash: &Option<String>,
+    message: &str,
+) -> Response {
+    fallback_or_error(
+        state,
+        endpoints,
+        original_uri,
+        method,
+        headers,
+        body_bytes,
+        request_model,
+        config,
+        content_hash,
+        "rate_limit_error",
+        message,
+    )
+    .await
+}
+
 async fn proxy_handler(
     State(state): State<AppState>,
     OriginalUri(original_uri): OriginalUri,
@@ -735,15 +1086,6 @@ async fn proxy_handler(
         });
     }
 
-    if config.servers.is_empty() {
-        return api_error(
-            original_uri.path(),
-            StatusCode::from_u16(429).unwrap(),
-            "overloaded_error",
-            "All upstream servers unavailable",
-        );
-    }
-
     // Capture request parts
     let method = req.method().clone();
     let headers = req.headers().clone();
@@ -816,6 +1158,25 @@ async fn proxy_handler(
         }
     }
 
+    let user_endpoints = load_user_endpoints(&state, config.group_key_id).await;
+
+    if let Some(resp) = try_user_endpoint_waterfall(
+        &state,
+        &user_endpoints,
+        "priority",
+        &original_uri,
+        &method,
+        &headers,
+        &body_bytes,
+        &request_model,
+        &config,
+        &content_hash,
+    )
+    .await
+    {
+        return resp;
+    }
+
     // Subscription budget check (only for sub-keys on billing endpoints)
     let mut selected_subscription_id: Option<uuid::Uuid> = None;
     let mut selected_rpm_limit: Option<f64> = None;
@@ -840,12 +1201,19 @@ async fn proxy_handler(
                     .await
                     .is_err()
                 {
-                    return api_error(
-                        &request_path,
-                        StatusCode::TOO_MANY_REQUESTS,
-                        "rate_limit_error",
+                    return fallback_or_subscription_error(
+                        &state,
+                        &user_endpoints,
+                        &original_uri,
+                        &method,
+                        &headers,
+                        &body_bytes,
+                        &request_model,
+                        &config,
+                        &content_hash,
                         "TPM limit exceeded, please retry later",
-                    );
+                    )
+                    .await;
                 }
                 selected_subscription_id = Some(subscription_id);
                 selected_tpm_limit = tpm_limit;
@@ -855,12 +1223,19 @@ async fn proxy_handler(
                 }
             }
             crate::subscription::SubCheckResult::Blocked => {
-                return api_error(
-                    &request_path,
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "rate_limit_error",
+                return fallback_or_subscription_error(
+                    &state,
+                    &user_endpoints,
+                    &original_uri,
+                    &method,
+                    &headers,
+                    &body_bytes,
+                    &request_model,
+                    &config,
+                    &content_hash,
                     "Subscription limit exceeded",
-                );
+                )
+                .await;
             }
             crate::subscription::SubCheckResult::BonusServers {
                 servers,
@@ -964,6 +1339,7 @@ async fn proxy_handler(
                             config.group_key_id,
                             Some(bonus_sub_id),
                             None,
+                            None,
                             1.0,
                             1.0,
                             1.0,
@@ -1022,6 +1398,7 @@ async fn proxy_handler(
                                     group_key_id: config.group_key_id,
                                     cost_usd,
                                     subscription_id: Some(bonus_sub_id),
+                                    user_endpoint_id: None,
                                     created_at: Utc::now(),
                                     content_hash: content_hash.clone(),
                                 };
@@ -1067,12 +1444,19 @@ async fn proxy_handler(
             .await
             .is_err()
         {
-            return api_error(
-                &request_path,
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limit_error",
+            return fallback_or_subscription_error(
+                &state,
+                &user_endpoints,
+                &original_uri,
+                &method,
+                &headers,
+                &body_bytes,
+                &request_model,
+                &config,
+                &content_hash,
                 "TPM limit exceeded, please retry later",
-            );
+            )
+            .await;
         }
         if let Some(rpm) = selected_rpm_limit {
             crate::subscription::increment_rpm(&state, sub_id, rpm).await;
@@ -2075,6 +2459,7 @@ async fn proxy_handler(
                             group_key_id: config.group_key_id,
                             cost_usd,
                             subscription_id: selected_subscription_id,
+                            user_endpoint_id: None,
                             created_at: Utc::now(),
                             content_hash: content_hash.clone(),
                         };
@@ -2243,6 +2628,7 @@ async fn proxy_handler(
                             kh,
                             config.group_key_id,
                             selected_subscription_id,
+                            None,
                             selected_tpm_limit,
                             server.rate_input.unwrap_or(1.0),
                             server.rate_output.unwrap_or(1.0),
@@ -2419,6 +2805,7 @@ async fn proxy_handler(
                             kh,
                             config.group_key_id,
                             selected_subscription_id,
+                            None,
                             selected_tpm_limit,
                             server.rate_input.unwrap_or(1.0),
                             server.rate_output.unwrap_or(1.0),
@@ -2478,22 +2865,37 @@ async fn proxy_handler(
 
     // All servers rate-limited — return 429 with rate_limit_error
     if !any_server_attempted && any_rate_limited {
-        return api_error(
-            &request_path,
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_error",
+        return fallback_or_subscription_error(
+            &state,
+            &user_endpoints,
+            &original_uri,
+            &method,
+            &headers,
+            &body_bytes,
+            &request_model,
+            &config,
+            &content_hash,
             "Rate limit exceeded",
-        );
+        )
+        .await;
     }
 
     // All servers skipped — no key available for any server
     if !any_server_attempted {
-        return api_error(
-            &request_path,
-            StatusCode::UNAUTHORIZED,
+        return fallback_or_error(
+            &state,
+            &user_endpoints,
+            &original_uri,
+            &method,
+            &headers,
+            &body_bytes,
+            &request_model,
+            &config,
+            &content_hash,
             "authentication_error",
             "No server keys configured",
-        );
+        )
+        .await;
     }
 
     // All servers with keys exhausted (failover codes or connection errors)
@@ -2551,17 +2953,18 @@ async fn proxy_handler(
         ));
     }
 
-    let mut resp = api_error(
-        &request_path,
-        StatusCode::TOO_MANY_REQUESTS,
-        "overloaded_error",
-        "All upstream servers unavailable",
-    );
-    resp.headers_mut().insert(
-        header::HeaderName::from_static("retry-after"),
-        HeaderValue::from_static("30"),
-    );
-    resp
+    return fallback_or_overloaded_error(
+        &state,
+        &user_endpoints,
+        &original_uri,
+        &method,
+        &headers,
+        &body_bytes,
+        &request_model,
+        &config,
+        &content_hash,
+    )
+    .await;
 }
 
 use std::pin::Pin;
@@ -2578,6 +2981,7 @@ struct UsageTrackingStream<S> {
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
     subscription_id: Option<uuid::Uuid>,
+    user_endpoint_id: Option<uuid::Uuid>,
     tpm_limit: Option<f64>,
     rate_input: f64,
     rate_output: f64,
@@ -2623,6 +3027,7 @@ where
                     let key_hash = this.key_hash.clone();
                     let group_key_id = this.group_key_id;
                     let subscription_id = this.subscription_id;
+                    let user_endpoint_id = this.user_endpoint_id;
                     let tpm_limit = this.tpm_limit;
                     let rate_input = this.rate_input;
                     let rate_output = this.rate_output;
@@ -2769,6 +3174,7 @@ where
                             group_key_id,
                             cost_usd,
                             subscription_id,
+                            user_endpoint_id,
                             created_at: Utc::now(),
                             content_hash: None,
                         };
@@ -2795,6 +3201,7 @@ fn wrap_stream_with_usage_tracking<S>(
     key_hash: Option<String>,
     group_key_id: Option<uuid::Uuid>,
     subscription_id: Option<uuid::Uuid>,
+    user_endpoint_id: Option<uuid::Uuid>,
     tpm_limit: Option<f64>,
     rate_input: f64,
     rate_output: f64,
@@ -2817,6 +3224,7 @@ where
         key_hash,
         group_key_id,
         subscription_id,
+        user_endpoint_id,
         tpm_limit,
         rate_input,
         rate_output,
