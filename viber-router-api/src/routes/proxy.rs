@@ -210,7 +210,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
     };
 
     let servers = sqlx::query_as::<_, GroupServerDetail>(
-        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, gs.priority, gs.model_mappings, gs.is_enabled, \
+        "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, s.remove_thinking, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
@@ -259,9 +259,10 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                 String,
                 Option<String>,
                 Option<String>,
+                bool,
             ),
         >(
-            "SELECT id, short_id, name, base_url, api_key, system_prompt FROM servers WHERE id = $1"
+            "SELECT id, short_id, name, base_url, api_key, system_prompt, remove_thinking FROM servers WHERE id = $1"
         )
         .bind(ct_server_id)
         .fetch_optional(&state.db)
@@ -269,7 +270,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         .ok()
         .flatten()
         .map(
-            |(server_id, short_id, server_name, base_url, api_key, system_prompt)| {
+            |(server_id, short_id, server_name, base_url, api_key, system_prompt, remove_thinking)| {
                 CountTokensServer {
                     server_id,
                     short_id,
@@ -277,6 +278,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                     base_url,
                     api_key,
                     system_prompt,
+                    remove_thinking,
                     model_mappings: group.count_tokens_model_mappings.clone(),
                 }
             },
@@ -524,6 +526,7 @@ fn transform_request_body(
     model_mappings: &serde_json::Value,
     server_system_prompt: Option<&str>,
     request_path: &str,
+    remove_thinking: bool,
 ) -> Vec<u8> {
     let mut json: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -559,6 +562,15 @@ fn transform_request_body(
             "OpenAI system prompt injected: server_prompt={:?}",
             server_system_prompt,
         );
+    }
+
+    // Remove thinking and output_config if server has remove_thinking enabled
+    if remove_thinking && let Some(obj) = json.as_object_mut() {
+        let removed_thinking = obj.remove("thinking").is_some();
+        let removed_output_config = obj.remove("output_config").is_some();
+        if removed_thinking || removed_output_config {
+            tracing::info!("Removed thinking/output_config from request body (remove_thinking=true)");
+        }
     }
 
     // Inject stream_options.include_usage for OpenAI streaming requests so
@@ -635,6 +647,7 @@ async fn try_user_endpoint_waterfall(
             &endpoint.model_mappings,
             None,
             original_uri.path(),
+            false,
         );
         let mut upstream_req = state.http_client.request(method.clone(), &upstream_url);
         for (name, value) in headers.iter() {
@@ -1553,6 +1566,7 @@ async fn proxy_handler(
                 &ct_server.model_mappings,
                 ct_server.system_prompt.as_deref(),
                 original_uri.path(),
+                ct_server.remove_thinking,
             );
 
             let path = original_uri.path();
@@ -1832,6 +1846,7 @@ async fn proxy_handler(
             &server.model_mappings,
             server.system_prompt.as_deref(),
             &request_path,
+            server.remove_thinking,
         );
 
         // Build upstream URL: server.base_url + original path + query
@@ -3608,6 +3623,7 @@ mod tests {
             &mappings,
             Some("Always respond in Vietnamese"),
             "/v1/messages",
+            false,
         );
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["model"], "my-opus");
@@ -3626,6 +3642,7 @@ mod tests {
             &mappings,
             Some("Always respond in Vietnamese"),
             "/v1/other",
+            false,
         );
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["system"], "You are helpful");

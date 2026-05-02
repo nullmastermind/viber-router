@@ -927,6 +927,7 @@
             <q-input v-model="editServerForm.base_url" label="Base URL" outlined class="q-mb-sm" />
             <q-input v-model="editServerForm.api_key" label="API Key (optional)" outlined class="q-mb-sm" />
             <q-input v-model="editServerForm.system_prompt" label="System Prompt (optional)" type="textarea" outlined class="q-mb-sm" />
+            <q-toggle v-model="editServerForm.remove_thinking" label="Remove Thinking" class="q-mt-sm" />
             <div class="text-subtitle2 q-mt-md q-mb-xs">Circuit Breaker</div>
             <div class="text-caption text-grey q-mb-sm">
               Auto-shutdown the server when errors exceed a threshold, then auto-restart after a cooldown period. Leave all fields empty to disable.
@@ -1381,7 +1382,7 @@ const mappingEntries = ref<{ from: string; to: string }[]>([]);
 
 const showEditServer = ref(false);
 const editServerId = ref('');
-const editServerForm = ref({ name: '', base_url: '', api_key: '', system_prompt: '' });
+const editServerForm = ref({ name: '', base_url: '', api_key: '', system_prompt: '', remove_thinking: false });
 const editServerCbForm = ref({
   cb_max_failures: null as number | null,
   cb_window_seconds: null as number | null,
@@ -2365,7 +2366,7 @@ async function openEditServer(s: GroupServerDetail) {
 function doOpenEditServer(s: GroupServerDetail) {
   editServerId.value = s.server_id;
   const fullServer = serversStore.servers.find((srv) => srv.id === s.server_id);
-  editServerForm.value = { name: s.server_name, base_url: s.base_url || '', api_key: s.api_key || '', system_prompt: fullServer?.system_prompt || '' };
+  editServerForm.value = { name: s.server_name, base_url: s.base_url || '', api_key: s.api_key || '', system_prompt: fullServer?.system_prompt || '', remove_thinking: fullServer?.remove_thinking ?? false };
   editServerCbForm.value = {
     cb_max_failures: s.cb_max_failures,
     cb_window_seconds: s.cb_window_seconds,
@@ -2429,6 +2430,7 @@ async function onSaveEditServer() {
       base_url: editServerForm.value.base_url,
       api_key: editServerForm.value.api_key || null,
       system_prompt: editServerForm.value.system_prompt || null,
+      remove_thinking: editServerForm.value.remove_thinking,
     });
     // Save circuit breaker fields via assignment update
     if (group.value) {

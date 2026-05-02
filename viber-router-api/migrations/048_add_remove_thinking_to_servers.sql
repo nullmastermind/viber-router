@@ -1,0 +1,1 @@
+ALTER TABLE servers ADD COLUMN remove_thinking BOOLEAN NOT NULL DEFAULT false;

@@ -66,6 +66,7 @@
           <q-input v-model="form.api_key" label="API Key (optional)" outlined class="q-mb-sm" />
           <q-input v-model="form.password" label="Protect Password (optional)" type="password" outlined class="q-mb-sm" />
           <q-input v-model="form.system_prompt" label="System Prompt (optional)" type="textarea" outlined />
+          <q-toggle v-model="form.remove_thinking" label="Remove Thinking" class="q-mt-sm" />
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
@@ -86,7 +87,7 @@ const store = useServersStore();
 const search = ref('');
 const showDialog = ref(false);
 const editingServer = ref<Server | null>(null);
-const form = ref({ name: '', base_url: '', api_key: '', password: '', system_prompt: '' });
+const form = ref({ name: '', base_url: '', api_key: '', password: '', system_prompt: '', remove_thinking: false });
 
 const columns = [
   { name: 'short_id', label: 'Short ID', field: 'short_id', align: 'left' as const, sortable: true },
@@ -153,15 +154,15 @@ async function openDialog(server?: Server) {
     const fresh = store.servers.find((s) => s.id === server.id);
     if (!fresh) return;
     editingServer.value = fresh;
-    form.value = { name: fresh.name, base_url: fresh.base_url || '', api_key: fresh.api_key || '', password: '', system_prompt: fresh.system_prompt || '' };
+    form.value = { name: fresh.name, base_url: fresh.base_url || '', api_key: fresh.api_key || '', password: '', system_prompt: fresh.system_prompt || '', remove_thinking: fresh.remove_thinking ?? false };
     showDialog.value = true;
     return;
   }
 
   editingServer.value = server || null;
   form.value = server
-    ? { name: server.name, base_url: server.base_url || '', api_key: server.api_key || '', password: '', system_prompt: server.system_prompt || '' }
-    : { name: '', base_url: '', api_key: '', password: '', system_prompt: '' };
+    ? { name: server.name, base_url: server.base_url || '', api_key: server.api_key || '', password: '', system_prompt: server.system_prompt || '', remove_thinking: server.remove_thinking ?? false }
+    : { name: '', base_url: '', api_key: '', password: '', system_prompt: '', remove_thinking: false };
   showDialog.value = true;
 }
 
@@ -170,21 +171,23 @@ async function saveServer() {
     const apiKey = form.value.api_key || null;
     const systemPrompt = form.value.system_prompt || null;
     if (editingServer.value) {
-      const input: { name: string; base_url: string; api_key: string | null; password?: string | null; system_prompt: string | null } = {
+      const input: { name: string; base_url: string; api_key: string | null; password?: string | null; system_prompt: string | null; remove_thinking: boolean } = {
         name: form.value.name,
         base_url: form.value.base_url,
         api_key: apiKey,
         system_prompt: systemPrompt,
+        remove_thinking: form.value.remove_thinking,
       };
       if (form.value.password) {
         input.password = form.value.password;
       }
       await store.updateServer(editingServer.value.id, input);
     } else {
-      const input: { name: string; base_url: string; api_key?: string; password?: string; system_prompt: string | null } = {
+      const input: { name: string; base_url: string; api_key?: string; password?: string; system_prompt: string | null; remove_thinking: boolean } = {
         name: form.value.name,
         base_url: form.value.base_url,
         system_prompt: systemPrompt,
+        remove_thinking: form.value.remove_thinking,
       };
       if (form.value.api_key) input.api_key = form.value.api_key;
       if (form.value.password) input.password = form.value.password;
