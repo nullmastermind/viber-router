@@ -1,13 +1,12 @@
 ## Purpose
 TBD
-
 ## Requirements
 ### Requirement: Chain-level uptime endpoint
-The system SHALL provide `GET /api/public/uptime?key=...` returning chain-level uptime data bucketed into 90 × 30-minute intervals. The endpoint SHALL use the same key validation and IP rate limiting as the existing public usage endpoint.
+The system SHALL provide `GET /api/public/uptime?key=...` returning chain-level uptime data bucketed into 90 x 30-minute intervals, plus a `models` array with per-model uptime data. The endpoint SHALL use the same key validation and IP rate limiting as the existing public usage endpoint.
 
 #### Scenario: Successful response
 - **WHEN** a user sends GET `/api/public/uptime?key=sk-vibervn-abc123` with a valid active sub-key
-- **THEN** the system SHALL return HTTP 200 with a JSON object containing `status` (string: "operational", "degraded", "down", or "no_data"), `uptime_percent` (float, last 30 minutes), and `buckets` array of 90 `{ timestamp, total_requests, successful_requests }` objects sorted chronologically
+- **THEN** the system SHALL return HTTP 200 with a JSON object containing `status` (string: "operational", "degraded", "down", or "no_data"), `uptime_percent` (float, last 30 minutes), `buckets` array of 90 `{ timestamp, total_requests, successful_requests }` objects sorted chronologically, and `models` array of per-model entries each containing `{ model, status, uptime_percent, buckets }`
 
 #### Scenario: Chain success definition
 - **WHEN** a proxy request (identified by request_id) has attempts with status codes [429, 200]
@@ -40,3 +39,4 @@ The system SHALL provide `GET /api/public/uptime?key=...` returning chain-level 
 #### Scenario: Rate limited
 - **WHEN** a user exceeds the IP rate limit
 - **THEN** the system SHALL return HTTP 429 with Retry-After header
+
