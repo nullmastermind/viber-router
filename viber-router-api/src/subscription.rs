@@ -194,7 +194,7 @@ async fn load_subscriptions(state: &AppState, group_key_id: Uuid) -> Vec<KeySubs
 
     // DB fallback
     let subs = sqlx::query_as::<_, KeySubscription>(
-        "SELECT * FROM key_subscriptions WHERE group_key_id = $1 ORDER BY created_at ASC",
+        "SELECT * FROM key_subscriptions WHERE group_key_id = $1 ORDER BY sort_order ASC, created_at ASC",
     )
     .bind(group_key_id)
     .fetch_all(&state.db)
@@ -495,7 +495,7 @@ pub async fn check_subscriptions(
         break;
     }
 
-    // Collect active bonus subs sorted by created_at ASC
+    // Collect active bonus subs sorted by sort_order ASC, created_at ASC
     let bonus_servers: Vec<BonusServer> = bonus_subs
         .into_iter()
         .filter_map(|sub| {
@@ -520,7 +520,7 @@ pub async fn check_subscriptions(
             })
         })
         .collect();
-    // bonus_servers already ordered by created_at ASC from load_subscriptions (FIFO)
+    // bonus_servers already ordered by sort_order ASC, created_at ASC from load_subscriptions
 
     // If non-empty bonus subs — return BonusServers
     if !bonus_servers.is_empty() {
@@ -865,6 +865,7 @@ mod tests {
             bonus_quota_url: None,
             bonus_quota_headers: None,
             bonus_allowed_models: None,
+            sort_order: 0,
         };
 
         // Simulate the filter_map logic from check_subscriptions
@@ -907,6 +908,7 @@ mod tests {
             bonus_quota_url: None,
             bonus_quota_headers: None,
             bonus_allowed_models: None,
+            sort_order: 0,
         };
 
         // Simulate the filter_map — should return None due to missing base_url
@@ -948,6 +950,7 @@ mod tests {
             bonus_quota_url: None,
             bonus_quota_headers: None,
             bonus_allowed_models: None,
+            sort_order: 0,
         };
 
         let name = sub.bonus_name.unwrap_or_default();

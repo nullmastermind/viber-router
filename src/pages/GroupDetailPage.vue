@@ -371,6 +371,22 @@
                           </template>
                           <template #body-cell-actions="sProps">
                             <q-td :props="sProps">
+                              <q-btn
+                                v-if="sProps.row.sub_type === 'bonus'"
+                                flat dense size="sm"
+                                icon="arrow_upward"
+                                :disable="getBonusIndex(props.row.id, sProps.row.id) <= 0"
+                                :loading="reorderingBonusSubs.has(sProps.row.id)"
+                                @click.stop="onMoveBonus(props.row.id, sProps.row.id, 'up')"
+                              />
+                              <q-btn
+                                v-if="sProps.row.sub_type === 'bonus'"
+                                flat dense size="sm"
+                                icon="arrow_downward"
+                                :disable="getBonusIndex(props.row.id, sProps.row.id) >= getBonusCount(props.row.id) - 1"
+                                :loading="reorderingBonusSubs.has(sProps.row.id)"
+                                @click.stop="onMoveBonus(props.row.id, sProps.row.id, 'down')"
+                              />
                               <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.id, sProps.row.id)" />
                             </q-td>
                           </template>
@@ -749,6 +765,22 @@
                             </template>
                             <template #body-cell-actions="sProps">
                               <q-td :props="sProps">
+                                <q-btn
+                                  v-if="sProps.row.sub_type === 'bonus'"
+                                  flat dense size="sm"
+                                  icon="arrow_upward"
+                                  :disable="getBonusIndex(props.row.group_key_id ?? '', sProps.row.id) <= 0"
+                                  :loading="reorderingBonusSubs.has(sProps.row.id)"
+                                  @click.stop="onMoveBonus(props.row.group_key_id ?? '', sProps.row.id, 'up')"
+                                />
+                                <q-btn
+                                  v-if="sProps.row.sub_type === 'bonus'"
+                                  flat dense size="sm"
+                                  icon="arrow_downward"
+                                  :disable="getBonusIndex(props.row.group_key_id ?? '', sProps.row.id) >= getBonusCount(props.row.group_key_id ?? '') - 1"
+                                  :loading="reorderingBonusSubs.has(sProps.row.id)"
+                                  @click.stop="onMoveBonus(props.row.group_key_id ?? '', sProps.row.id, 'down')"
+                                />
                                 <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.group_key_id ?? '', sProps.row.id)" />
                               </q-td>
                             </template>
@@ -1545,6 +1577,7 @@ interface KeySubscription {
   bonus_quota_url: string | null;
   bonus_quota_headers: Record<string, string> | null;
   bonus_allowed_models?: string[] | null;
+  sort_order: number;
 }
 interface SubscriptionPlan {
   id: string;
@@ -1571,6 +1604,9 @@ const addBonusForm = ref({
   bonus_allowed_models: [] as string[],
 });
 const addBonusLoading = ref(false);
+
+// Reorder bonus state
+const reorderingBonusSubs = ref<Set<string>>(new Set());
 
 // Edit Bonus allowed models dialog state
 const showEditBonusModelsDialog = ref(false);
@@ -2676,6 +2712,49 @@ async function onCancelSubscription(keyId: string, subId: string) {
     const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to cancel';
     $q.notify({ type: 'negative', message: msg });
   }
+}
+
+async function onMoveBonus(keyId: string, subId: string, direction: 'up' | 'down') {
+  if (!group.value) return;
+  const subs = keySubscriptions.value[keyId]?.data ?? [];
+  const bonusSubs = subs.filter((s) => s.sub_type === 'bonus');
+  const idx = bonusSubs.findIndex((s) => s.id === subId);
+  if (idx < 0) return;
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= bonusSubs.length) return;
+
+  const ordered = bonusSubs.map((s) => s.id);
+  const tmp = ordered[idx] as string;
+  ordered[idx] = ordered[swapIdx] as string;
+  ordered[swapIdx] = tmp;
+
+  reorderingBonusSubs.value.add(subId);
+  try {
+    await api.put(
+      `/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions/reorder`,
+      { ordered_ids: ordered },
+    );
+    await loadKeySubscriptions(keyId);
+  } catch (e: unknown) {
+    const msg =
+      (e as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+      'Failed to reorder';
+    $q.notify({ type: 'negative', message: msg });
+    await loadKeySubscriptions(keyId);
+  } finally {
+    reorderingBonusSubs.value.delete(subId);
+  }
+}
+
+function getBonusIndex(keyId: string, subId: string): number {
+  const subs = keySubscriptions.value[keyId]?.data ?? [];
+  const bonusSubs = subs.filter((s) => s.sub_type === 'bonus');
+  return bonusSubs.findIndex((s) => s.id === subId);
+}
+
+function getBonusCount(keyId: string): number {
+  const subs = keySubscriptions.value[keyId]?.data ?? [];
+  return subs.filter((s) => s.sub_type === 'bonus').length;
 }
 
 function canEditBonusAllowedModels(sub: KeySubscription): boolean {

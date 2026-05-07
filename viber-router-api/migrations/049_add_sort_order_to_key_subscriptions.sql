@@ -1,0 +1,1 @@
+ALTER TABLE key_subscriptions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;

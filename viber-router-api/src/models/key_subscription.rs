@@ -26,6 +26,8 @@ pub struct KeySubscription {
     pub bonus_quota_url: Option<String>,
     pub bonus_quota_headers: Option<serde_json::Value>,
     pub bonus_allowed_models: Option<Vec<String>>,
+    #[serde(default)]
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,7 +79,8 @@ mod tests {
             "bonus_name": null,
             "bonus_quota_url": null,
             "bonus_quota_headers": null,
-            "bonus_allowed_models": null
+            "bonus_allowed_models": null,
+            "sort_order": 0
         }))
         .unwrap();
 
@@ -108,7 +111,8 @@ mod tests {
             "bonus_name": null,
             "bonus_quota_url": null,
             "bonus_quota_headers": null,
-            "bonus_allowed_models": null
+            "bonus_allowed_models": null,
+            "sort_order": 0
         }))
         .unwrap();
 
