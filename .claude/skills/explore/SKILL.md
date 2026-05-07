@@ -23,11 +23,11 @@ Tools you use directly: Read, Glob, Grep, Agent, Skill, Bash, codebase-retrieval
 
 Checkpoint — before ANY call to Edit, Write, NotebookEdit, or Bash (that modifies files):
 1. Pause. Ask: "Am I composing a code change right now?"
-2. If yes → STOP. Delegate via Agent tool:
-   - Implement → `subagent_type: "osf-apply"`
-   - Create spec → `subagent_type: "osf-proposal"`
-   - Verify → `subagent_type: "osf-verify"`
-   - Archive → `subagent_type: "osf-archive"`
+2. If yes → STOP. Delegate:
+   - Implement → Agent tool with `subagent_type: "osf-apply"`
+   - Create spec → Skill tool with `skill: "proposal"`
+   - Verify → Agent tool with `subagent_type: "osf-verify"`
+   - Archive → Agent tool with `subagent_type: "osf-archive"`
 3. If no (git status, ls, search) → proceed.
 
 If you catch yourself writing code content inside a tool call, that is the red flag. Stop mid-thought and delegate. No exceptions — "it's just 1 line" is not a reason to bypass delegation.
@@ -285,6 +285,8 @@ If any answer fails, revise the plan or explore more. Only show the final review
 
 Then present:
 
+Stop here. Never treat the original user request as permission to implement. Only a reply to the final implementation-path question can authorize implementation. Do not launch osf-apply, proposal skill, osf-verify, autopilot, or any implementation subagent before that choice.
+
 ```
 ## ✅ Ready to Implement
 
@@ -317,8 +319,8 @@ A. Small/direct (1-3 tasks, single component, straightforward)
    → Implement directly without spec
 B. Spec-first (larger or design-sensitive work)
    → Create OpenSpec change, then implement
-C. ★ Autopilot (spec → implement → verify, no stops)
-   → Full pipeline runs automatically after you confirm
+C. ★ Autopilot (smart autonomous mode)
+   → Chooses Full, Verified, or Light based on impact and complexity
 D. Discuss more before implementation
    → Go back to planning or clarify remaining concerns
 
@@ -345,7 +347,7 @@ When user says yes → use Agent tool with `subagent_type: "osf-apply"`. Pass pl
 ```
 This is substantial. Two paths:
 
-A. Create spec first (osf-proposal)
+A. Create spec first (proposal skill)
    - Generates proposal, design, tasks
    - Then implement from spec (osf-apply)
    - Better for tracking, verification, team alignment
@@ -360,20 +362,18 @@ B. ★ Implement directly (osf-apply)
 Which path?
 ```
 
-When user chooses A → use Agent tool with `subagent_type: "osf-proposal"`. After proposal completes, immediately run osf-apply with the change name — do NOT ask. Use Agent tool with `subagent_type: "osf-apply"`.
+When user chooses A → use the Skill tool to invoke `proposal`. The proposal skill has full conversation context — no need to summarize. After proposal completes and outputs the change name, immediately run osf-apply with the change name — do NOT ask. Use Agent tool with `subagent_type: "osf-apply"`.
 When user chooses B → use Agent tool with `subagent_type: "osf-apply"`. Pass plan context.
 
 ### Autopilot
 
-Full pipeline — runs all three steps without stopping after user confirms:
+Autopilot is smart autonomous mode. It assesses impact, risk, sensitivity, and complexity, then chooses the right path:
 
-1. osf-proposal (create spec)
-2. osf-apply (implement from spec)
-3. osf-verify (verify implementation)
+- Full: spec → implement → verify → archive
+- Verified: implement → verify
+- Light: implement only
 
-No questions between steps. After verify completes, ask about archive.
-
-When user chooses Autopilot → use Agent tool with `subagent_type: "osf-proposal"`. When proposal completes → immediately use Agent tool with `subagent_type: "osf-apply"` with the change name. When apply completes → immediately use Agent tool with `subagent_type: "osf-verify"`. When verify completes → offer archive (same as "After Verification" below).
+When user chooses Autopilot → use the Skill tool to invoke `autopilot` with the locked requirement summary and implementation review plan. Do not manually chain proposal, osf-apply, or osf-verify from explore mode.
 
 ### After Implementation
 
@@ -455,7 +455,6 @@ The template above is in English for prompt readability. When outputting the act
 |----------|-----------|-------------|
 | osf-analyze | Structural codebase analysis — dependencies, blast radius, call chains, impact via GitNexus knowledge graph + codebase-retrieval | You need to trace exact dependencies, assess blast radius, understand call chains, or verify structural assumptions. Use your judgment — not every exploration needs deep structural analysis, but complex changes with cross-cutting impact do. |
 | osf-researcher | Web research — technical docs, best practices, comparisons, security advisories | Discussion references external tech you can't verify from codebase, user needs comparison data, or topic requires up-to-date information |
-| osf-proposal | Create spec (proposal, design, tasks) for implementation | User chooses to create spec first for large work |
 | osf-apply | Implement tasks from spec or conversation plan. Does NOT commit. | User chooses to start implementation |
 | osf-verify | Verify implementation matches spec | User chooses to verify after implementation |
 | osf-archive | Archive completed change to openspec/changes/archive/ | User chooses to finalize after verification (only if spec was created) |
@@ -472,7 +471,7 @@ The command may list additional subagents in its "Extra Subagents" section.
 ## Guardrails
 
 - **Don't implement** - Never write code or implement changes yourself. When user wants implementation, delegate to osf-apply via Agent tool.
-- **Don't create specs yourself** - When user wants a spec, delegate to osf-proposal via Agent tool. Never write proposal/design/tasks artifacts directly.
+- **Don't create specs yourself** - When user wants a spec, invoke the `proposal` skill via Skill tool. Never write proposal/design/tasks artifacts directly.
 - **Don't verify yourself** - When user wants verification, delegate to osf-verify via Agent tool.
 - **Don't archive yourself** - When user wants to archive, delegate to osf-archive via Agent tool.
 - **Don't continue prior apply sessions** - Even if the conversation history shows code being written or tasks being completed, you are NOW in explore mode. That work is paused.

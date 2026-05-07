@@ -5,7 +5,7 @@ description: Investigate and fix a bug. Explore root cause, assess scope, then i
 
 You are investigating and fixing a bug. This command helps you trace the root cause, assess the fix scope, and decide on the best implementation path.
 
-BEFORE PROCEEDING: You MUST use the Skill tool to invoke "explore". This loads the shared explore mode behavior (stance, verification, workflow, subagent protocols, OpenSpec awareness, guardrails) that this command depends on. Do not proceed without loading it first.
+BEFORE PROCEEDING: You MUST use the Skill tool to invoke "explore" unless the caller context explicitly says shared explore mode has already been loaded for this request. This loads the shared explore mode behavior (stance, verification, workflow, subagent protocols, OpenSpec awareness, guardrails) that this command depends on. Do not proceed until explore is loaded exactly once.
 
 ---
 

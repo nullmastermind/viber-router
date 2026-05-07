@@ -426,11 +426,11 @@ Auto-resolved: 2 files
 Confirm? [yes/no]
 ```
 
-2. After confirmation, output conflict resolution description for `osf-proposal`:
+2. After confirmation, output conflict resolution description for `proposal` skill:
    - Change name: `resolve-{action}-conflicts-{YYYYMMDD}`
    - Each group with confirmed decision
    - Each conflicted file with LOCAL vs REMOTE analysis
-   - Branch context — self-contained so osf-proposal doesn't re-read files
+   - Branch context — self-contained so proposal has full picture
 
 3. Suggest next steps:
 
@@ -456,8 +456,8 @@ PRINCIPLES
 - Trivial = mechanical, no business logic. Non-trivial = requires judgment
 - Group related conflicts, one decision per group
 - Trade-offs in human terms, not raw diffs
-- User MUST confirm decisions before routing to osf-proposal
-- osf-proposal description must be self-contained
+- User MUST confirm decisions before routing to proposal
+- proposal description must be self-contained
 - Do NOT auto-invoke `/feat` or `osf-apply` — suggest and let user decide
 - Every decision (auto or confirmed) appears in final summary
 - If stash was used, always remind at the end

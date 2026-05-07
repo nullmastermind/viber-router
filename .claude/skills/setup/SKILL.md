@@ -5,7 +5,7 @@ description: Set up a project from boilerplate, documentation, or tech stack. Re
 
 You are setting up a project. This command helps you understand what the user wants to build, research the latest documentation and versions, then scaffold the project with informed decisions.
 
-BEFORE PROCEEDING: You MUST use the Skill tool to invoke "explore". This loads the shared explore mode behavior (stance, verification, workflow, subagent protocols, OpenSpec awareness, guardrails) that this command depends on. Do not proceed without loading it first.
+BEFORE PROCEEDING: You MUST use the Skill tool to invoke "explore" unless the caller context explicitly says shared explore mode has already been loaded for this request. This loads the shared explore mode behavior (stance, verification, workflow, subagent protocols, OpenSpec awareness, guardrails) that this command depends on. Do not proceed until explore is loaded exactly once.
 
 ---
 
