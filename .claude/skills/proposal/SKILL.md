@@ -126,11 +126,19 @@ Once the request is clear:
 
 ## After Completion
 
-Output the change name clearly:
+Output ONLY this marker line with the change name:
 
 ```
 ✅ Spec created: <change-name>
-Ready for implementation.
 ```
 
-Then **return control to the caller**. The orchestrator or user will decide the next step (apply, autopilot, or manual). Do NOT launch osf-apply or any other subagent yourself.
+Then **stop your own execution immediately** and return control to the caller in the same turn.
+
+**Non-stop contract with the caller:**
+- You are running inside a caller (autopilot, explore, or direct user invocation). The caller already has its next step scheduled and will continue in the SAME turn as soon as you finish.
+- Do NOT write "Ready for implementation" as a closing line — the caller decides what "ready" means.
+- Do NOT suggest next commands (`/osf apply`, etc.) — the caller will route.
+- Do NOT write a closing summary, farewell, or "let me know if you want to continue" — these look like turn boundaries and cause the caller to stop.
+- Do NOT launch osf-apply or any other subagent yourself.
+
+The caller reads the `✅ Spec created: <change-name>` marker, extracts the change name, and proceeds immediately. Your job is done the moment that marker is printed.

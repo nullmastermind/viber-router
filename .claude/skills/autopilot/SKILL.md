@@ -137,37 +137,56 @@ Announce your assessment:
 
 ## Pipeline
 
+### PIPELINE IS NON-STOP (CRITICAL)
+
+All steps in the selected pipeline run as ONE continuous action in the SAME turn. You do NOT end your turn between steps. You do NOT wait for user confirmation between steps. You do NOT write "Step 1 complete — proceeding to Step 2" as a closing message and then stop.
+
+**Hand-off rule:** The moment a step's tool call returns, your VERY NEXT action is the next step's tool call. No closing text, no summaries, no "does this look good?" — just the next tool call.
+
+**Red flags that mean you are about to wrongly stop:**
+- You just saw `✅ Spec created: <change-name>` from the proposal skill and your draft reply looks like a status update → STOP drafting, call osf-apply NOW with the change name.
+- You just saw osf-apply finish and you're about to tell the user "implementation complete" → STOP, call osf-verify NOW.
+- You just saw osf-verify return 0 CRITICALs on Full pipeline → call osf-archive NOW.
+- Any time you catch yourself writing a paragraph that ends the turn while the pipeline still has steps left → STOP, make the next tool call instead.
+
+**Parse contract for proposal output:** The proposal skill prints `✅ Spec created: <change-name>`. Extract `<change-name>` from that line. That IS the completion signal. Do not wait for anything else, do not ask the user to confirm the change name.
+
+**Only legitimate stop points:**
+1. Verify-fix loop hits 3 rounds with CRITICALs remaining → stop and report (as documented in Step 4).
+2. A subagent returns a hard error you cannot route around → stop and report.
+3. Final pipeline step finished successfully → print the Done announcement.
+
 ### Full Pipeline (spec → implement → verify → archive)
 
 **Step 1: Create Spec**
-Use the Skill tool to invoke `proposal`. The proposal skill has full conversation context. Extract the change name from its output.
+Use the Skill tool to invoke `proposal`. The proposal skill has full conversation context. When proposal returns, read the `✅ Spec created: <change-name>` line to extract the change name. Do NOT write any closing text — immediately proceed to Step 2 in the same turn.
 
 **Step 2: Implement**
-Immediately use Agent tool with `subagent_type: "osf-apply"`. Pass the change name. Do NOT write or edit code yourself.
+Immediately use Agent tool with `subagent_type: "osf-apply"`. Pass the change name. Do NOT write or edit code yourself. When osf-apply returns, immediately proceed to Step 3 in the same turn.
 
 **Step 3: Independent Verify**
-Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass the change name.
+Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass the change name. When osf-verify returns, immediately proceed to Step 4 in the same turn.
 
 **Step 4: Verify-Fix Loop**
 After osf-verify returns its report, check for CRITICALs:
 
-- **0 CRITICALs** → proceed to Step 5.
-- **CRITICALs exist** → loop:
+- **0 CRITICALs** → immediately proceed to Step 5.
+- **CRITICALs exist** → loop in the same turn:
   1. Use Agent tool with `subagent_type: "osf-apply"` — pass the change name + CRITICAL issues as fix instructions. Do NOT fix code yourself.
   2. Use Agent tool with `subagent_type: "osf-verify"` — pass the change name. Do NOT skip re-verify.
   3. Check report again. If CRITICALs remain, repeat from 1.
   4. Max 3 rounds. If CRITICALs persist after 3 rounds, STOP and report to user.
 
 **Step 5: Archive**
-Immediately use Agent tool with `subagent_type: "osf-archive"`. Pass the change name.
+Immediately use Agent tool with `subagent_type: "osf-archive"`. Pass the change name. When osf-archive returns, print the Done announcement.
 
 ### Verified Pipeline (implement → verify)
 
 **Step 1: Implement**
-Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself.
+Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself. When osf-apply returns, immediately proceed to Step 2 in the same turn.
 
 **Step 2: Independent Verify**
-Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass plan context.
+Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass plan context. When osf-verify returns, immediately proceed to Step 3 in the same turn.
 
 **Step 3: Verify-Fix Loop**
 Same as Full pipeline Step 4:
@@ -175,12 +194,12 @@ Same as Full pipeline Step 4:
   2. Use Agent tool with `subagent_type: "osf-verify"` to re-verify. Do NOT skip re-verify.
   3. Repeat until 0 CRITICALs. Max 3 rounds.
 
-No archive step — Verified pipeline has no spec, so there is nothing to archive.
+When verify passes with 0 CRITICALs, print the Done announcement. No archive step — Verified pipeline has no spec, so there is nothing to archive.
 
 ### Light Pipeline (implement only)
 
 **Step 1: Implement**
-Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself.
+Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself. When osf-apply returns, print the Done announcement.
 
 osf-apply's internal auto-verify handles basic quality checks.
 
@@ -232,6 +251,7 @@ Options:
 ## Guardrails
 
 - **IDENTITY GATE applies at all times** — see ORCHESTRATOR IDENTITY GATE above. You explore and plan, osf-apply writes code. No exceptions, not even for 1-line changes. When osf-verify reports issues, delegate fixes to osf-apply via Agent tool, then re-verify via osf-verify. Never skip re-verify after fixing.
+- **PIPELINE IS NON-STOP** — see "PIPELINE IS NON-STOP" in the Pipeline section above. Never end your turn between pipeline steps. After proposal prints `✅ Spec created: <change-name>`, the NEXT action is osf-apply — not a status message, not a confirmation prompt.
 - Never stop to ask the user during the pipeline — run all selected pipeline steps without interruption; archive only exists in the Full pipeline
 - Cold start exploration must be thorough — same depth as interactive brainstorm
 - All autonomous decisions must be grounded in codebase patterns or web research, never guessed

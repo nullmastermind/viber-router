@@ -318,7 +318,7 @@ Is this work:
 A. Small/direct (1-3 tasks, single component, straightforward)
    → Implement directly without spec
 B. Spec-first (larger or design-sensitive work)
-   → Create OpenSpec change, then implement
+   → Create OpenSpec change, then implement (chained without stop)
 C. ★ Autopilot (smart autonomous mode)
    → Chooses Full, Verified, or Light based on impact and complexity
 D. Discuss more before implementation
@@ -326,6 +326,12 @@ D. Discuss more before implementation
 
 What's your call?
 ```
+
+**Routing the user's choice (non-stop contract):**
+- A (Small/direct) → use Agent tool with `subagent_type: "osf-apply"`. Pass plan context.
+- B (Spec-first) → In the SAME turn: (1) use Skill tool to invoke `proposal`, (2) read `✅ Spec created: <change-name>` from its output, (3) immediately use Agent tool with `subagent_type: "osf-apply"` passing the change name. Do NOT end your turn between proposal and osf-apply. Do NOT ask the user to confirm the spec before applying — the user already chose this chain.
+- C (Autopilot) → use Skill tool to invoke `autopilot` with the locked requirement summary and implementation review plan.
+- D (Discuss more) → continue exploring. No implementation.
 
 ---
 
@@ -347,13 +353,13 @@ When user says yes → use Agent tool with `subagent_type: "osf-apply"`. Pass pl
 ```
 This is substantial. Two paths:
 
-A. Create spec first (proposal skill)
+Path 1. Create spec first (proposal skill)
    - Generates proposal, design, tasks
-   - Then implement from spec (osf-apply)
+   - Then implement from spec (osf-apply) — chained without stop
    - Better for tracking, verification, team alignment
    - Takes longer upfront
 
-B. ★ Implement directly (osf-apply)
+Path 2. ★ Implement directly (osf-apply)
    - Start coding from this plan
    - Faster for experienced devs
    - Less formal tracking
@@ -362,8 +368,8 @@ B. ★ Implement directly (osf-apply)
 Which path?
 ```
 
-When user chooses A → use the Skill tool to invoke `proposal`. The proposal skill has full conversation context — no need to summarize. After proposal completes and outputs the change name, immediately run osf-apply with the change name — do NOT ask. Use Agent tool with `subagent_type: "osf-apply"`.
-When user chooses B → use Agent tool with `subagent_type: "osf-apply"`. Pass plan context.
+When user chooses Path 1 → in the SAME turn: (1) use the Skill tool to invoke `proposal`, (2) read `✅ Spec created: <change-name>` from its output, (3) immediately use Agent tool with `subagent_type: "osf-apply"` passing the change name. The proposal skill has full conversation context — no need to summarize. Do NOT end your turn between proposal and osf-apply. Do NOT ask the user to confirm the spec before applying.
+When user chooses Path 2 → use Agent tool with `subagent_type: "osf-apply"`. Pass plan context.
 
 ### Autopilot
 
@@ -472,6 +478,7 @@ The command may list additional subagents in its "Extra Subagents" section.
 
 - **Don't implement** - Never write code or implement changes yourself. When user wants implementation, delegate to osf-apply via Agent tool.
 - **Don't create specs yourself** - When user wants a spec, invoke the `proposal` skill via Skill tool. Never write proposal/design/tasks artifacts directly.
+- **Don't stop mid-chain after proposal** - When the user picks a path that creates a spec then implements (outer menu B, or Large Work Path 1), proposal → osf-apply is ONE chained action in the SAME turn. After proposal prints `✅ Spec created: <change-name>`, your next action is osf-apply — not a status message, not a confirmation prompt.
 - **Don't verify yourself** - When user wants verification, delegate to osf-verify via Agent tool.
 - **Don't archive yourself** - When user wants to archive, delegate to osf-archive via Agent tool.
 - **Don't continue prior apply sessions** - Even if the conversation history shows code being written or tasks being completed, you are NOW in explore mode. That work is paused.
