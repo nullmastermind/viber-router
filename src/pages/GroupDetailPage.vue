@@ -281,18 +281,7 @@
                           <div class="text-subtitle2">Subscriptions</div>
                           <q-space />
                           <q-btn flat dense icon="bolt" label="Add Bonus" color="secondary" class="q-mr-xs" @click.stop="onOpenAddBonus(props.row.id)" />
-                          <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
-                            <q-menu>
-                              <q-list dense style="min-width: 200px">
-                                <q-item v-for="plan in activePlans" :key="plan.id" clickable v-close-popup @click="onAssignSubscription(props.row.id, plan.id)">
-                                  <q-item-section>
-                                    <q-item-label>{{ plan.name }}</q-item-label>
-                                    <q-item-label caption>{{ getSubTypeLabel(plan.sub_type) }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
-                                  </q-item-section>
-                                </q-item>
-                              </q-list>
-                            </q-menu>
-                          </q-btn>
+                          <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary" @click="onOpenAssignSub(props.row.id)" />
                           <span v-else class="text-caption text-grey q-ml-sm">No active plans available</span>
                         </div>
                         <div v-if="keySubsLoading[props.row.id]" class="flex flex-center q-pa-sm q-mb-sm"><q-spinner size="sm" /></div>
@@ -669,18 +658,7 @@
                             <div class="text-subtitle2">Subscriptions</div>
                             <q-space />
                             <q-btn flat dense icon="bolt" label="Add Bonus" color="secondary" class="q-mr-xs" @click.stop="onOpenAddBonus(props.row.group_key_id ?? '')" />
-                            <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary">
-                              <q-menu>
-                                <q-list dense style="min-width: 200px">
-                                  <q-item v-for="plan in activePlans" :key="plan.id" clickable v-close-popup @click="onAssignSubscription(props.row.group_key_id ?? '', plan.id)">
-                                    <q-item-section>
-                                      <q-item-label>{{ plan.name }}</q-item-label>
-                                      <q-item-label caption>{{ getSubTypeLabel(plan.sub_type) }} &middot; ${{ plan.cost_limit_usd.toFixed(2) }}</q-item-label>
-                                    </q-item-section>
-                                  </q-item>
-                                </q-list>
-                              </q-menu>
-                            </q-btn>
+                            <q-btn v-if="activePlans.length > 0" flat dense icon="add" label="Add Subscription" color="primary" @click="onOpenAssignSub(props.row.group_key_id ?? '')" />
                             <span v-else class="text-caption text-grey q-ml-sm">No active plans available</span>
                           </div>
                           <div v-if="keySubsLoading[props.row.group_key_id ?? '']" class="flex flex-center q-pa-sm q-mb-sm"><q-spinner size="sm" /></div>
@@ -1140,6 +1118,57 @@
         </q-card>
       </q-dialog>
 
+      <!-- Assign Subscription Dialog -->
+      <q-dialog v-model="showAssignSubDialog" persistent>
+        <q-card style="min-width: 380px">
+          <q-card-section class="row items-center q-pb-none">
+            <div class="text-h6">Add Subscription</div>
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+          <q-card-section class="q-gutter-sm">
+            <q-select
+              v-model="assignSubPlanId"
+              :options="activePlans.map((p) => ({ label: `${p.name} · ${getSubTypeLabel(p.sub_type)} · $${p.cost_limit_usd.toFixed(2)}`, value: p.id }))"
+              label="Plan *"
+              emit-value
+              map-options
+              outlined
+              dense
+            />
+            <q-input
+              :model-value="assignSubExpiryDate"
+              label="Custom expiry date (optional)"
+              outlined
+              dense
+              readonly
+              clearable
+              @clear="clearAssignSubExpiry"
+            >
+              <template #append>
+                <q-icon name="event" class="cursor-pointer">
+                  <q-popup-proxy transition-show="scale" transition-hide="scale">
+                    <q-date
+                      :model-value="assignSubExpiryModel"
+                      @update:model-value="onAssignSubDatePick"
+                    />
+                  </q-popup-proxy>
+                </q-icon>
+              </template>
+            </q-input>
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn
+              label="Assign"
+              color="primary"
+              :disable="!assignSubPlanId"
+              @click="onAssignSubscription(assignSubKeyId, assignSubPlanId, assignSubExpiryDate)"
+            />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
       <!-- Bulk Create Keys Dialog -->
       <q-dialog v-model="showBulkCreate" persistent>
         <q-card style="min-width: 380px">
@@ -1158,6 +1187,26 @@
               outlined
               dense
             />
+            <q-input
+              :model-value="bulkCreateForm.custom_expires_at"
+              label="Custom expiry date (optional)"
+              outlined
+              dense
+              readonly
+              clearable
+              @clear="clearBulkCreateExpiry"
+            >
+              <template #append>
+                <q-icon name="event" class="cursor-pointer">
+                  <q-popup-proxy transition-show="scale" transition-hide="scale">
+                    <q-date
+                      :model-value="bulkCreateForm.custom_expires_model"
+                      @update:model-value="onBulkCreateDatePick"
+                    />
+                  </q-popup-proxy>
+                </q-icon>
+              </template>
+            </q-input>
             <q-input
               v-model.number="bulkCreateForm.count"
               label="Count *"
@@ -1548,7 +1597,7 @@ const newKeyName = ref('');
 const creatingKey = ref(false);
 
 const showBulkCreate = ref(false);
-const bulkCreateForm = ref({ plan_id: '', count: 10, name_prefix: '' });
+const bulkCreateForm = ref({ plan_id: '', count: 10, name_prefix: '', custom_expires_at: '', custom_expires_model: '' });
 const bulkCreating = ref(false);
 const bulkCreatedKeys = ref<GroupKey[]>([]);
 const showBulkResult = ref(false);
@@ -1591,6 +1640,13 @@ const keySubscriptions = ref<Record<string, { data: KeySubscription[]; total: nu
 const keySubsLoading = ref<Record<string, boolean>>({});
 const subPagination = ref<Record<string, { page: number; rowsPerPage: number; rowsNumber: number }>>({});
 const activePlans = ref<SubscriptionPlan[]>([]);
+
+// Add Subscription dialog state
+const showAssignSubDialog = ref(false);
+const assignSubKeyId = ref('');
+const assignSubPlanId = ref('');
+const assignSubExpiryDate = ref('');
+const assignSubExpiryModel = ref('');
 
 // Add Bonus dialog state
 const showAddBonusDialog = ref(false);
@@ -2087,19 +2143,34 @@ async function onCreateKey() {
 
 function openBulkCreate() {
   showBulkCreate.value = true;
+  bulkCreateForm.value.custom_expires_at = '';
+  bulkCreateForm.value.custom_expires_model = '';
   loadActivePlans();
+}
+
+function onBulkCreateDatePick(val: string) {
+  bulkCreateForm.value.custom_expires_model = val;
+  bulkCreateForm.value.custom_expires_at = val.replace(/\//g, '-');
+}
+
+function clearBulkCreateExpiry() {
+  bulkCreateForm.value.custom_expires_at = '';
+  bulkCreateForm.value.custom_expires_model = '';
 }
 
 async function onBulkCreate() {
   if (!group.value || !bulkCreateForm.value.plan_id || bulkCreateForm.value.count < 1) return;
   bulkCreating.value = true;
   try {
-    const payload: { count: number; plan_id: string; name_prefix?: string } = {
+    const payload: { count: number; plan_id: string; name_prefix?: string; custom_expires_at?: string } = {
       count: bulkCreateForm.value.count,
       plan_id: bulkCreateForm.value.plan_id,
     };
     if (bulkCreateForm.value.name_prefix.trim()) {
       payload.name_prefix = bulkCreateForm.value.name_prefix.trim();
+    }
+    if (bulkCreateForm.value.custom_expires_at) {
+      payload.custom_expires_at = bulkCreateForm.value.custom_expires_at;
     }
     bulkCreatedKeys.value = await groupsStore.bulkCreateGroupKeys(group.value.id, payload);
     showBulkCreate.value = false;
@@ -2629,10 +2700,34 @@ async function loadActivePlans() {
   } catch { /* ignore */ }
 }
 
-async function onAssignSubscription(keyId: string, planId: string) {
+function onOpenAssignSub(keyId: string) {
+  assignSubKeyId.value = keyId;
+  assignSubPlanId.value = '';
+  assignSubExpiryDate.value = '';
+  assignSubExpiryModel.value = '';
+  showAssignSubDialog.value = true;
+  loadActivePlans();
+}
+
+function clearAssignSubExpiry() {
+  assignSubExpiryDate.value = '';
+  assignSubExpiryModel.value = '';
+}
+
+function onAssignSubDatePick(val: string) {
+  assignSubExpiryModel.value = val;
+  assignSubExpiryDate.value = val.replace(/\//g, '-');
+}
+
+async function onAssignSubscription(keyId: string, planId: string, expiryDate?: string) {
   if (!group.value || !planId) return;
   try {
-    await api.post(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions`, { plan_id: planId });
+    const payload: { plan_id: string; custom_expires_at?: string } = { plan_id: planId };
+    if (expiryDate) {
+      payload.custom_expires_at = expiryDate;
+    }
+    await api.post(`/api/admin/groups/${group.value.id}/keys/${keyId}/subscriptions`, payload);
+    showAssignSubDialog.value = false;
     loadKeySubscriptions(keyId);
     $q.notify({ type: 'positive', message: 'Subscription assigned' });
   } catch (e: unknown) {

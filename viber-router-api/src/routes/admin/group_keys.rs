@@ -34,6 +34,7 @@ pub struct BulkCreateKeys {
     pub count: u32,
     pub plan_id: Uuid,
     pub name_prefix: Option<String>,
+    pub custom_expires_at: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -125,6 +126,12 @@ async fn bulk_create_keys(
         return Err(err(StatusCode::BAD_REQUEST, "Plan is not active"));
     }
 
+    // Parse optional custom expiry date
+    let custom_expires_utc = match input.custom_expires_at {
+        Some(ref date_str) => Some(crate::subscription::parse_custom_expiry(&state, date_str).await?),
+        None => None,
+    };
+
     let mut tx = state.db.begin().await.map_err(internal)?;
     let mut created_keys: Vec<GroupKey> = Vec::with_capacity(input.count as usize);
 
@@ -153,8 +160,8 @@ async fn bulk_create_keys(
         .map_err(internal)?;
 
         sqlx::query(
-            "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, weekly_cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+            "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, weekly_cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(key.id)
         .bind(plan.id)
@@ -167,6 +174,7 @@ async fn bulk_create_keys(
         .bind(plan.duration_days)
         .bind(plan.rpm_limit)
         .bind(plan.tpm_limit)
+        .bind(custom_expires_utc)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;

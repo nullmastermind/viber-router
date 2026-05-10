@@ -335,7 +335,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   async function bulkCreateGroupKeys(
     groupId: string,
-    input: { count: number; plan_id: string; name_prefix?: string },
+    input: { count: number; plan_id: string; name_prefix?: string; custom_expires_at?: string },
   ) {
     const { data } = await api.post<GroupKey[]>(`/api/admin/groups/${groupId}/keys/bulk`, input);
     return data;

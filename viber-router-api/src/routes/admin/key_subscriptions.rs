@@ -144,6 +144,14 @@ async fn assign_subscription(
     // Detect bonus creation path: has bonus fields, no plan_id
     if input.bonus_name.is_some() || input.bonus_base_url.is_some() || input.bonus_api_key.is_some()
     {
+        // Reject custom_expires_at for bonus subscriptions
+        if input.custom_expires_at.is_some() {
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "custom_expires_at is not supported for bonus subscriptions",
+            ));
+        }
+
         // Validate required bonus fields
         let bonus_name = input
             .bonus_name
@@ -204,9 +212,15 @@ async fn assign_subscription(
         return Err(err(StatusCode::BAD_REQUEST, "Plan is not active"));
     }
 
+    // Parse optional custom expiry date
+    let custom_expires_utc = match input.custom_expires_at {
+        Some(ref date_str) => Some(crate::subscription::parse_custom_expiry(&state, date_str).await?),
+        None => None,
+    };
+
     let sub = sqlx::query_as::<_, KeySubscription>(
-        "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, weekly_cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
+        "INSERT INTO key_subscriptions (group_key_id, plan_id, sub_type, cost_limit_usd, weekly_cost_limit_usd, model_limits, model_request_costs, reset_hours, duration_days, rpm_limit, tpm_limit, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
     )
     .bind(key_id)
     .bind(plan.id)
@@ -219,6 +233,7 @@ async fn assign_subscription(
     .bind(plan.duration_days)
     .bind(plan.rpm_limit)
     .bind(plan.tpm_limit)
+    .bind(custom_expires_utc)
     .fetch_one(&state.db)
     .await
     .map_err(internal)?;

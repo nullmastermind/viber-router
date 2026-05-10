@@ -33,6 +33,7 @@ pub struct KeySubscription {
 #[derive(Debug, Deserialize)]
 pub struct AssignSubscription {
     pub plan_id: Option<Uuid>,
+    pub custom_expires_at: Option<String>,
     pub bonus_name: Option<String>,
     pub bonus_base_url: Option<String>,
     pub bonus_api_key: Option<String>,

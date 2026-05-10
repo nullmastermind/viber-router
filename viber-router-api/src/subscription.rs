@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use chrono::{Datelike, Duration as ChronoDuration, LocalResult, NaiveTime, TimeZone, Utc};
+use axum::{Json, http::StatusCode};
+use chrono::{Datelike, Duration as ChronoDuration, LocalResult, NaiveDate, NaiveTime, TimeZone, Utc};
 use deadpool_redis::redis::{AsyncCommands, cmd};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -17,6 +18,35 @@ pub struct WeeklyWindow {
     pub monday_epoch: i64,
     pub ttl_seconds: i64,
     pub reset_at: chrono::DateTime<Utc>,
+}
+
+/// Parse a `YYYY-MM-DD` string into a UTC `DateTime` at end-of-day (23:59:59)
+/// in the system's configured timezone. Returns a 400 error if the date is
+/// invalid or in the past.
+pub async fn parse_custom_expiry(
+    state: &AppState,
+    date_str: &str,
+) -> Result<chrono::DateTime<Utc>, (StatusCode, Json<serde_json::Value>)> {
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .map_err(|_| err_response(StatusCode::BAD_REQUEST, "Invalid date format, expected YYYY-MM-DD"))?;
+    let tz = get_configured_timezone(state).await;
+    let end_of_day = NaiveTime::from_hms_opt(23, 59, 59).unwrap();
+    let local_dt = match tz.from_local_datetime(&date.and_time(end_of_day)) {
+        LocalResult::Single(dt) => dt,
+        LocalResult::Ambiguous(earliest, _) => earliest,
+        LocalResult::None => {
+            return Err(err_response(StatusCode::BAD_REQUEST, "Invalid date in the configured timezone"));
+        }
+    };
+    let utc_dt = local_dt.with_timezone(&Utc);
+    if utc_dt <= Utc::now() {
+        return Err(err_response(StatusCode::BAD_REQUEST, "Expiry date must be in the future"));
+    }
+    Ok(utc_dt)
+}
+
+fn err_response(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({"error": msg})))
 }
 
 pub async fn get_configured_timezone(state: &AppState) -> chrono_tz::Tz {
@@ -562,9 +592,10 @@ pub async fn ensure_activated(state: &AppState, sub_id: Uuid, duration_days: i32
 
         if let Ok(true) = set {
             // We won the race — update DB
+            // Use COALESCE to preserve a custom expires_at if already set
             let expires_at = now + chrono::Duration::days(duration_days as i64);
             let _ = sqlx::query(
-                "UPDATE key_subscriptions SET activated_at = $1, expires_at = $2 WHERE id = $3 AND activated_at IS NULL",
+                "UPDATE key_subscriptions SET activated_at = $1, expires_at = COALESCE(expires_at, $2) WHERE id = $3 AND activated_at IS NULL",
             )
             .bind(now)
             .bind(expires_at)
@@ -587,9 +618,10 @@ pub async fn ensure_activated(state: &AppState, sub_id: Uuid, duration_days: i32
         // The caller re-fetches the subscription from DB to get the stored activated_at.
     } else {
         // Redis unavailable — fall back to DB-only activation
+        // Use COALESCE to preserve a custom expires_at if already set
         let expires_at = now + chrono::Duration::days(duration_days as i64);
         let _ = sqlx::query(
-            "UPDATE key_subscriptions SET activated_at = $1, expires_at = $2 WHERE id = $3 AND activated_at IS NULL",
+            "UPDATE key_subscriptions SET activated_at = $1, expires_at = COALESCE(expires_at, $2) WHERE id = $3 AND activated_at IS NULL",
         )
         .bind(now)
         .bind(expires_at)
