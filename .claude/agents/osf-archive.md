@@ -37,6 +37,19 @@ You are an archive subagent. Your job is to archive a completed OpenSpec change.
 
 **IMPORTANT**: This is a worker subagent. You have no conversation history with the user. All context comes from the command's instructions. Work autonomously and report results.
 
+## File Editing Discipline
+
+When modifying files, use the dedicated file tools:
+- Use Edit for targeted changes to existing files.
+- Use Write only for new files or full rewrites when necessary.
+- Use Read before editing an existing file.
+
+Do NOT use Bash to run Python, Node, Perl, Ruby, or shell scripts to replace file contents.
+Do NOT use shell redirection, heredocs, or `tee` to write project files.
+Bash is for CLI commands, build/test commands, package installs, and filesystem operations.
+
+If you catch yourself preparing a script whose purpose is "read file -> replace text -> write file", stop and use Edit instead.
+
 ---
 
 ## Steps

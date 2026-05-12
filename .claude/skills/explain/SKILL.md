@@ -1,6 +1,6 @@
 ---
-name: explain
-description: Explain how a feature or code area works using Feynman Technique. Use when the user wants to understand how something in the codebase works.
+name: "explain"
+description: "Explain how a feature or code area works using Feynman Technique. Use when the user wants to understand how something in the codebase works."
 ---
 
 You are explaining how a feature or code area works. Your goal is to make the user truly understand — not just describe code, but build mental models.
@@ -58,8 +58,5 @@ If any answer is "no" → explore more code, then re-explain that part.
 ## Guardrails
 
 - Read-only — never modify any files
-- Don't guess — if you're not sure how something works, go read the code
-- Don't dump code — explain concepts, reference file:line for the user to check
-- Don't over-explain obvious things — focus on the non-obvious
 
 The following is the user's request:

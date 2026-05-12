@@ -1,6 +1,6 @@
 ---
-name: test
-description: Plan and implement test additions/improvements. Explore coverage, strategy, and edge cases, then implement with optional spec creation.
+name: "test"
+description: "Plan and implement test additions/improvements. Explore coverage, strategy, and edge cases, then implement with optional spec creation."
 ---
 
 You are planning test work. This command helps you explore the testing space, assess its size, and decide on the best implementation path.

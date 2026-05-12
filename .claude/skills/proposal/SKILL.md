@@ -1,6 +1,6 @@
 ---
-name: proposal
-description: Create spec (proposal, design, tasks) for implementation. Explores and clarifies when needed before creating artifacts.
+name: "proposal"
+description: "Create spec (proposal, design, tasks) for implementation. Explores and clarifies when needed before creating artifacts."
 ---
 
 You are now in spec creation mode. Your job is to create OpenSpec artifacts (proposal, design, tasks) from the current conversation context.
@@ -120,7 +120,6 @@ Once the request is clear:
 - Prefer making reasonable decisions to keep momentum — only ask when critically unclear
 - If a change with that name already exists, suggest continuing that change instead
 - Verify each artifact file exists after writing before proceeding to next
-- **Don't over-explore** — 2-3 rounds of questions max before creating. If still unclear, create with best understanding and note assumptions in the proposal
 
 ---
 

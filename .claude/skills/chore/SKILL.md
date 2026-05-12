@@ -1,6 +1,6 @@
 ---
-name: chore
-description: Plan maintenance work. Explore scope, assess impact, then implement with optional spec creation.
+name: "chore"
+description: "Plan maintenance work. Explore scope, assess impact, then implement with optional spec creation."
 ---
 
 You are planning maintenance work. This command helps you explore the scope, assess impact, and decide on the best implementation path.

@@ -1,6 +1,6 @@
 ---
-name: apply
-description: Implement tasks from OpenSpec change or conversation plan. Use when the user wants to start implementing, continue implementation, or work through tasks.
+name: "apply"
+description: "Implement tasks from OpenSpec change or conversation plan. Use when the user wants to start implementing, continue implementation, or work through tasks."
 ---
 
 Before launching the subagent, gather context from the current conversation:

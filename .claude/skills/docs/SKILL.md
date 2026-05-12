@@ -1,6 +1,6 @@
 ---
-name: docs
-description: Plan and implement documentation changes. Explore scope, audience, and format, then implement with optional spec creation.
+name: "docs"
+description: "Plan and implement documentation changes. Explore scope, audience, and format, then implement with optional spec creation."
 ---
 
 You are planning documentation work. This command helps you explore the documentation space, assess its size, and decide on the best implementation path.

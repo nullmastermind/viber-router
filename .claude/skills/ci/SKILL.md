@@ -1,6 +1,6 @@
 ---
-name: ci
-description: Plan and implement CI/CD pipeline changes. Explore scope, deployment strategy, and automation, then implement with optional spec creation.
+name: "ci"
+description: "Plan and implement CI/CD pipeline changes. Explore scope, deployment strategy, and automation, then implement with optional spec creation."
 ---
 
 You are planning CI/CD work. This command helps you explore the pipeline space, assess its size, and decide on the best implementation path.

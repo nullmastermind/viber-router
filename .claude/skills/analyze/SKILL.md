@@ -1,6 +1,6 @@
 ---
-name: analyze
-description: Analyze codebase using GitNexus knowledge graph + codebase-retrieval. Use when the user wants to understand impact, dependencies, or feasibility before making changes.
+name: "analyze"
+description: "Analyze codebase using GitNexus knowledge graph + codebase-retrieval. Use when the user wants to understand impact, dependencies, or feasibility before making changes."
 ---
 
 Before launching the subagent, gather context from the current conversation:

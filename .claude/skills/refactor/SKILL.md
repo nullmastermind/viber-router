@@ -1,6 +1,6 @@
 ---
-name: refactor
-description: Plan code refactoring. Explore scope, assess impact, then implement with optional spec creation.
+name: "refactor"
+description: "Plan code refactoring. Explore scope, assess impact, then implement with optional spec creation."
 ---
 
 You are planning code refactoring. This command helps you explore the refactoring scope, assess impact, and decide on the best implementation path.

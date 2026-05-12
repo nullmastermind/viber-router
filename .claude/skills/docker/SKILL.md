@@ -1,6 +1,6 @@
 ---
-name: docker
-description: Plan and implement Docker/containerization work. Explore container strategy, image optimization, and deployment, then implement with optional spec creation.
+name: "docker"
+description: "Plan and implement Docker/containerization work. Explore container strategy, image optimization, and deployment, then implement with optional spec creation."
 ---
 
 You are planning Docker/containerization work. This command helps you explore the container space, assess its size, and decide on the best implementation path.

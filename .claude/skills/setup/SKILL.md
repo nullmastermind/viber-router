@@ -1,6 +1,6 @@
 ---
-name: setup
-description: Set up a project from boilerplate, documentation, or tech stack. Researches latest docs and versions before scaffolding.
+name: "setup"
+description: "Set up a project from boilerplate, documentation, or tech stack. Researches latest docs and versions before scaffolding."
 ---
 
 You are setting up a project. This command helps you understand what the user wants to build, research the latest documentation and versions, then scaffold the project with informed decisions.

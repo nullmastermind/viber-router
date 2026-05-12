@@ -1,6 +1,6 @@
 ---
-name: perf
-description: Plan performance optimization. Explore bottlenecks, assess impact, then implement with optional spec creation.
+name: "perf"
+description: "Plan performance optimization. Explore bottlenecks, assess impact, then implement with optional spec creation."
 ---
 
 You are planning performance optimization. This command helps you identify bottlenecks, assess optimization scope, and decide on the best implementation path.

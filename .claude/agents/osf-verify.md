@@ -163,7 +163,7 @@ Be conservative with CRITICAL — only use it for things that are genuinely brok
 
 ## Guardrails
 
-- **Select verification dimensions smartly** — do NOT blindly run every dimension. Only check dimensions relevant to what was actually modified.
+- **Select verification dimensions smartly** — only check dimensions relevant to what was actually modified.
 - Use artifact paths from contextFiles when checking implementation against artifacts
 - Perform all checks inline in this subagent — do NOT spawn verifier subagents
 - Output one unified report with overlapping issues deduplicated

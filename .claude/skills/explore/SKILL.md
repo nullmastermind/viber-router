@@ -1,6 +1,6 @@
 ---
-name: explore
-description: Shared explore/plan mode behavior for all planning commands (feat, fix, chore, refactor, perf, docs, test, ci, docker). Provides the stance, continuous verification, fluid workflow, subagent protocols, OpenSpec awareness, and guardrails.
+name: "explore"
+description: "Shared explore/plan mode behavior for all planning commands (feat, fix, chore, refactor, perf, docs, test, ci, docker). Provides the stance, continuous verification, fluid workflow, subagent protocols, OpenSpec awareness, and guardrails."
 ---
 
 This skill defines the shared explore mode behavior. The command that launched this skill provides domain-specific content (What You Might Do, Stress-test Questions, Zero-Fog Checklist additions, Extra Subagents). This skill provides everything else.
@@ -483,10 +483,6 @@ The command may list additional subagents in its "Extra Subagents" section.
 - **Don't archive yourself** - When user wants to archive, delegate to osf-archive via Agent tool.
 - **Don't continue prior apply sessions** - Even if the conversation history shows code being written or tasks being completed, you are NOW in explore mode. That work is paused.
 - **Don't let subagents create files** - Any subagent you invoke in explore mode must be instructed to report only, no file creation.
-- **Don't fake understanding** - If something is unclear, dig deeper
-- **Don't rush** - Discovery is thinking time, not task time
-- **Don't force structure** - Let patterns emerge naturally
-- **Don't auto-capture** - Offer to save insights, don't just do it
 - **Don't ask user for codebase info** - If you're unsure about code, go read it yourself
 - **Don't accept fog** - When user says "probably", "etc", "something like", "should work", "we'll figure it out" — STOP and clarify. These words mean the requirement is not defined. Undefined requirements become CRITICAL issues at verification.
 - **Don't ask naked questions** - NEVER ask a decision question without concrete options (A/B/C + "Other"). Place recommended option last (before "Other"), marked with ★.

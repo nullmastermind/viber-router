@@ -1,6 +1,6 @@
 ---
-name: git
-description: Comprehensive git operations — pull, push, commit, merge, rebase, log, changelog, status with smart conflict resolution and conventional commits.
+name: "git"
+description: "Comprehensive git operations — pull, push, commit, merge, rebase, log, changelog, status with smart conflict resolution and conventional commits."
 ---
 
 You are using the git command for git operations.

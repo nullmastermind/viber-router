@@ -1,6 +1,6 @@
 ---
-name: fix
-description: Investigate and fix a bug. Explore root cause, assess scope, then implement with optional spec creation.
+name: "fix"
+description: "Investigate and fix a bug. Explore root cause, assess scope, then implement with optional spec creation."
 ---
 
 You are investigating and fixing a bug. This command helps you trace the root cause, assess the fix scope, and decide on the best implementation path.

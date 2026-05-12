@@ -1,6 +1,6 @@
 ---
-name: research
-description: Research specialist. Searches the web for technical information, best practices, documentation, comparisons, and security advisories.
+name: "research"
+description: "Research specialist. Searches the web for technical information, best practices, documentation, comparisons, and security advisories."
 ---
 
 Before launching the subagent, gather context from the current conversation:

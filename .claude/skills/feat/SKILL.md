@@ -1,6 +1,6 @@
 ---
-name: feat
-description: Plan and implement a new feature. Explore requirements, assess scope, then implement with optional spec creation.
+name: "feat"
+description: "Plan and implement a new feature. Explore requirements, assess scope, then implement with optional spec creation."
 ---
 
 You are planning a new feature. This command helps you explore the feature space, assess its size, and decide on the best implementation path.

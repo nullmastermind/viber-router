@@ -1,6 +1,6 @@
 ---
-name: uiux-design
-description: UI/UX design specialist. Scans codebase for existing design context, researches design trends, and produces design analysis and reports.
+name: "uiux-design"
+description: "UI/UX design specialist. Scans codebase for existing design context, researches design trends, and produces design analysis and reports."
 ---
 
 Before launching the subagent, gather context from the current conversation:

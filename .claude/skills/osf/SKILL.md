@@ -1,6 +1,6 @@
 ---
-name: osf
-description: Launch any kit skill by name. Usage: /osf [skill] [args]
+name: "osf"
+description: "Launch any kit skill by name. Usage: /osf [skill] [args]"
 ---
 
 Available skills: feat, fix, chore, refactor, perf, docs, test, ci, docker, git, autopilot, research, browser, explain, analyze, review, apply, archive, proposal, verify, uiux-design, setup
