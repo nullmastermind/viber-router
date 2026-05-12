@@ -28,6 +28,22 @@ pub fn router() -> Router<AppState> {
     Router::new().fallback(proxy_handler)
 }
 
+/// Merge custom_headers into the log-headers map so proxy_logs accurately reflects
+/// what was actually sent upstream (custom headers override existing log entries).
+fn merge_custom_headers_into_log(
+    log_headers: &mut serde_json::Map<String, Value>,
+    custom_headers: &Option<serde_json::Value>,
+) {
+    let Some(obj) = custom_headers.as_ref().and_then(|v| v.as_object()) else {
+        return;
+    };
+    for (name, value) in obj {
+        if let Some(s) = value.as_str() {
+            log_headers.insert(name.clone(), Value::String(s.to_string()));
+        }
+    }
+}
+
 /// Apply custom headers from server config to the request builder.
 /// Custom headers override any existing header with the same name.
 fn apply_custom_headers(
@@ -1617,6 +1633,7 @@ async fn proxy_handler(
                 "authorization".to_string(),
                 Value::String(format!("Bearer {}", resolved_key)),
             );
+            merge_custom_headers_into_log(&mut server_log_headers, &ct_server.custom_headers);
 
             for (name, value) in headers.iter() {
                 if name == "x-api-key"
@@ -1901,6 +1918,7 @@ async fn proxy_handler(
             "authorization".to_string(),
             Value::String(format!("Bearer {}", resolved_key)),
         );
+        merge_custom_headers_into_log(&mut server_log_headers, &server.custom_headers);
 
         // Forward headers, replacing x-api-key and authorization with resolved key
         for (name, value) in headers.iter() {
