@@ -28,6 +28,36 @@ pub fn router() -> Router<AppState> {
     Router::new().fallback(proxy_handler)
 }
 
+/// Apply custom headers from server config to the request builder.
+/// Custom headers override any existing header with the same name.
+fn apply_custom_headers(
+    req: reqwest::RequestBuilder,
+    custom_headers: &Option<serde_json::Value>,
+) -> reqwest::RequestBuilder {
+    let Some(headers_val) = custom_headers else {
+        return req;
+    };
+    let Some(obj) = headers_val.as_object() else {
+        return req;
+    };
+    let mut headers = reqwest::header::HeaderMap::new();
+    for (name, value) in obj {
+        let Some(val_str) = value.as_str() else {
+            continue;
+        };
+        let Ok(header_name) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = reqwest::header::HeaderValue::from_str(val_str) else {
+            continue;
+        };
+        headers.insert(header_name, header_value);
+    }
+    // RequestBuilder::headers() calls replace_headers, which inserts each entry
+    // (replacing any existing header with the same name) rather than appending.
+    req.headers(headers)
+}
+
 /// Returns true if the server is within its configured active hours window right now.
 /// Fail-open: returns true (treat as active) if any field is absent or the timezone is unparseable.
 fn is_server_active_now(server: &GroupServerDetail) -> bool {
@@ -215,7 +245,8 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
          gs.active_hours_start, gs.active_hours_end, gs.active_hours_timezone, \
-         gs.retry_status_codes, gs.retry_count, gs.retry_delay_seconds \
+         gs.retry_status_codes, gs.retry_count, gs.retry_delay_seconds, \
+         s.custom_headers \
          FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
          WHERE gs.group_id = $1 AND gs.is_enabled = true ORDER BY gs.priority",
     )
@@ -260,9 +291,10 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                 Option<String>,
                 Option<String>,
                 bool,
+                Option<serde_json::Value>,
             ),
         >(
-            "SELECT id, short_id, name, base_url, api_key, system_prompt, remove_thinking FROM servers WHERE id = $1"
+            "SELECT id, short_id, name, base_url, api_key, system_prompt, remove_thinking, custom_headers FROM servers WHERE id = $1"
         )
         .bind(ct_server_id)
         .fetch_optional(&state.db)
@@ -270,7 +302,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
         .ok()
         .flatten()
         .map(
-            |(server_id, short_id, server_name, base_url, api_key, system_prompt, remove_thinking)| {
+            |(server_id, short_id, server_name, base_url, api_key, system_prompt, remove_thinking, custom_headers)| {
                 CountTokensServer {
                     server_id,
                     short_id,
@@ -280,6 +312,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
                     system_prompt,
                     remove_thinking,
                     model_mappings: group.count_tokens_model_mappings.clone(),
+                    custom_headers,
                 }
             },
         )
@@ -1603,6 +1636,7 @@ async fn proxy_handler(
             }
             upstream_req = upstream_req.header("x-api-key", &resolved_key);
             upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
+            upstream_req = apply_custom_headers(upstream_req, &ct_server.custom_headers);
 
             let attempt_body: Option<serde_json::Value> =
                 serde_json::from_slice(&transformed_body).ok();
@@ -1886,6 +1920,7 @@ async fn proxy_handler(
         }
         upstream_req = upstream_req.header("x-api-key", &resolved_key);
         upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
+        upstream_req = apply_custom_headers(upstream_req, &server.custom_headers);
 
         // Prepare curl data for this attempt
         let attempt_body: Option<serde_json::Value> =
@@ -2000,6 +2035,7 @@ async fn proxy_handler(
                     retry_req = retry_req.header("x-api-key", &resolved_key);
                     retry_req =
                         retry_req.header("authorization", format!("Bearer {}", resolved_key));
+                    retry_req = apply_custom_headers(retry_req, &server.custom_headers);
                     retry_req = retry_req.body(transformed_body.clone());
                     match retry_req.send().await {
                         Ok(retry_resp) => {
@@ -2071,6 +2107,7 @@ async fn proxy_handler(
                 }
                 retry_req = retry_req.header("x-api-key", &resolved_key);
                 retry_req = retry_req.header("authorization", format!("Bearer {}", resolved_key));
+                retry_req = apply_custom_headers(retry_req, &server.custom_headers);
                 retry_req = retry_req.body(sanitized_body);
 
                 if let Ok(retry_resp) = retry_req.send().await {

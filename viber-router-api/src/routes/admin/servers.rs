@@ -12,6 +12,65 @@ use uuid::Uuid;
 use crate::models::{CreateServer, PaginatedResponse, Server, UpdateServer};
 use crate::routes::AppState;
 
+/// Blocked header names (case-insensitive) that cannot be set as custom headers.
+const BLOCKED_HEADER_NAMES: &[&str] = &[
+    "authorization",
+    "x-api-key",
+    "host",
+    "content-length",
+    "cookie",
+    "proxy-authorization",
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+];
+
+/// Validate custom_headers JSONB value.
+/// Returns Ok(()) if valid, Err(message) if invalid.
+fn validate_custom_headers(value: &serde_json::Value) -> Result<(), String> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "custom_headers must be a JSON object".to_string())?;
+
+    // RFC 7230 token regex for header names
+    let is_valid_token = |s: &str| -> bool {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| matches!(b, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z'))
+    };
+
+    for (name, val) in obj {
+        // Validate header name is a valid RFC 7230 token
+        if !is_valid_token(name) {
+            return Err(format!(
+                "Invalid header name '{}': must match RFC 7230 token format",
+                name
+            ));
+        }
+
+        // Check block-list (case-insensitive)
+        if BLOCKED_HEADER_NAMES.contains(&name.to_lowercase().as_str()) {
+            return Err(format!(
+                "Header name '{}' is not allowed as a custom header",
+                name
+            ));
+        }
+
+        // Validate header value is a string without CRLF
+        let val_str = val.as_str().ok_or_else(|| {
+            format!("Header value for '{}' must be a string", name)
+        })?;
+        if val_str.contains('\r') || val_str.contains('\n') {
+            return Err(format!(
+                "Header value for '{}' must not contain CR or LF characters",
+                name
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListParams {
     pub page: Option<i64>,
@@ -34,6 +93,7 @@ pub struct ServerResponse {
     pub password_hash: Option<String>,
     pub system_prompt: Option<String>,
     pub remove_thinking: bool,
+    pub custom_headers: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -56,6 +116,7 @@ impl ServerResponse {
             password_hash: server.password_hash,
             system_prompt: server.system_prompt,
             remove_thinking: server.remove_thinking,
+            custom_headers: server.custom_headers,
             created_at: server.created_at,
             updated_at: server.updated_at,
         }
@@ -76,6 +137,16 @@ async fn create_server(
     State(state): State<AppState>,
     Json(input): Json<CreateServer>,
 ) -> Result<(StatusCode, Json<ServerResponse>), (StatusCode, Json<serde_json::Value>)> {
+    // Validate custom_headers if provided
+    if let Some(ref headers) = input.custom_headers
+        && let Err(msg) = validate_custom_headers(headers)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        ));
+    }
+
     let password_hash = input.password.as_ref().map(|pw| {
         let mut hasher = Sha256::new();
         hasher.update(pw.as_bytes());
@@ -83,7 +154,7 @@ async fn create_server(
     });
 
     let server = sqlx::query_as::<_, Server>(
-        "INSERT INTO servers (name, base_url, api_key, password_hash, system_prompt, remove_thinking) VALUES ($1, $2, $3, $4, $5, COALESCE($6, false)) RETURNING *",
+        "INSERT INTO servers (name, base_url, api_key, password_hash, system_prompt, remove_thinking, custom_headers) VALUES ($1, $2, $3, $4, $5, COALESCE($6, false), $7) RETURNING *",
     )
     .bind(&input.name)
     .bind(&input.base_url)
@@ -91,6 +162,7 @@ async fn create_server(
     .bind(&password_hash)
     .bind(&input.system_prompt)
     .bind(input.remove_thinking)
+    .bind(&input.custom_headers)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -214,6 +286,16 @@ async fn update_server(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateServer>,
 ) -> Result<Json<ServerResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate custom_headers if provided
+    if let Some(Some(ref headers)) = input.custom_headers
+        && let Err(msg) = validate_custom_headers(headers)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        ));
+    }
+
     let password_hash = input.password.as_ref().map(|pw_opt| {
         pw_opt.as_ref().map(|pw| {
             let mut hasher = Sha256::new();
@@ -223,6 +305,13 @@ async fn update_server(
     });
 
     let remove_thinking = input.remove_thinking.flatten();
+
+    let mut tx = state.db.begin().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
 
     let server = match (&input.api_key, &input.password) {
         // None = don't change api_key, None = don't change password
@@ -241,7 +330,7 @@ async fn update_server(
             .bind(&input.system_prompt)
             .bind(remove_thinking)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         // api_key None + password Some(None) = keep api_key, clear password
@@ -261,7 +350,7 @@ async fn update_server(
             .bind(&input.system_prompt)
             .bind(remove_thinking)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         // api_key None + password Some(Some) = keep api_key, set password
@@ -282,7 +371,7 @@ async fn update_server(
             .bind(remove_thinking)
             .bind(&password_hash)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         // api_key Some(None) = set api_key to NULL, handle password
@@ -302,7 +391,7 @@ async fn update_server(
             .bind(&input.system_prompt)
             .bind(remove_thinking)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         (Some(None), Some(None)) => {
@@ -322,7 +411,7 @@ async fn update_server(
             .bind(&input.system_prompt)
             .bind(remove_thinking)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         (Some(None), Some(Some(_))) => {
@@ -343,7 +432,7 @@ async fn update_server(
             .bind(remove_thinking)
             .bind(&password_hash)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         // api_key Some(Some(v)) = set api_key, handle password
@@ -364,7 +453,7 @@ async fn update_server(
             .bind(remove_thinking)
             .bind(&input.api_key)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         (Some(Some(v)), Some(None)) => {
@@ -385,7 +474,7 @@ async fn update_server(
             .bind(remove_thinking)
             .bind(v)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
         (Some(Some(v)), Some(Some(_))) => {
@@ -407,7 +496,7 @@ async fn update_server(
             .bind(v)
             .bind(&password_hash)
             .bind(id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
         }
     }
@@ -421,6 +510,33 @@ async fn update_server(
         (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Server not found"})),
+        )
+    })?;
+
+    // Apply custom_headers update in the same transaction.
+    // Some(None) = set to NULL, Some(Some(v)) = set to value, None = leave unchanged.
+    let server = if let Some(ref custom_headers_update) = input.custom_headers {
+        sqlx::query_as::<_, Server>(
+            "UPDATE servers SET custom_headers = $1, updated_at = now() WHERE id = $2 RETURNING *",
+        )
+        .bind(custom_headers_update)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?
+    } else {
+        server
+    };
+
+    tx.commit().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
         )
     })?;
 

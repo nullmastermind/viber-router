@@ -67,6 +67,16 @@
           <q-input v-model="form.password" label="Protect Password (optional)" type="password" outlined class="q-mb-sm" />
           <q-input v-model="form.system_prompt" label="System Prompt (optional)" type="textarea" outlined />
           <q-toggle v-model="form.remove_thinking" label="Remove Thinking" class="q-mt-sm" />
+          <div class="text-subtitle2 q-mt-md q-mb-xs">Custom Headers</div>
+          <div v-for="(entry, idx) in customHeaders" :key="idx" class="row q-gutter-sm q-mb-sm">
+            <q-input v-model="entry.name" label="Header name" outlined dense style="flex:1" />
+            <q-input v-model="entry.value" label="Header value" outlined dense style="flex:1" />
+            <q-btn flat dense icon="close" @click="customHeaders.splice(idx, 1)" />
+          </div>
+          <div class="row q-gutter-sm">
+            <q-btn flat dense icon="add" label="Add header" @click="customHeaders.push({ name: '', value: '' })" />
+            <q-btn flat dense icon="add" label="anthropic-workspace-id" @click="addWorkspaceIdHeader" />
+          </div>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
@@ -88,6 +98,12 @@ const search = ref('');
 const showDialog = ref(false);
 const editingServer = ref<Server | null>(null);
 const form = ref({ name: '', base_url: '', api_key: '', password: '', system_prompt: '', remove_thinking: false });
+const customHeaders = ref<{ name: string; value: string }[]>([]);
+
+function addWorkspaceIdHeader() {
+  if (customHeaders.value.some((e) => e.name === 'anthropic-workspace-id')) return;
+  customHeaders.value.push({ name: 'anthropic-workspace-id', value: '' });
+}
 
 const columns = [
   { name: 'short_id', label: 'Short ID', field: 'short_id', align: 'left' as const, sortable: true },
@@ -155,6 +171,7 @@ async function openDialog(server?: Server) {
     if (!fresh) return;
     editingServer.value = fresh;
     form.value = { name: fresh.name, base_url: fresh.base_url || '', api_key: fresh.api_key || '', password: '', system_prompt: fresh.system_prompt || '', remove_thinking: fresh.remove_thinking ?? false };
+    customHeaders.value = fresh.custom_headers ? Object.entries(fresh.custom_headers).map(([name, value]) => ({ name, value })) : [];
     showDialog.value = true;
     return;
   }
@@ -163,6 +180,7 @@ async function openDialog(server?: Server) {
   form.value = server
     ? { name: server.name, base_url: server.base_url || '', api_key: server.api_key || '', password: '', system_prompt: server.system_prompt || '', remove_thinking: server.remove_thinking ?? false }
     : { name: '', base_url: '', api_key: '', password: '', system_prompt: '', remove_thinking: false };
+  customHeaders.value = server?.custom_headers ? Object.entries(server.custom_headers).map(([name, value]) => ({ name, value })) : [];
   showDialog.value = true;
 }
 
@@ -170,24 +188,33 @@ async function saveServer() {
   try {
     const apiKey = form.value.api_key || null;
     const systemPrompt = form.value.system_prompt || null;
+    // Convert custom headers array to object, filtering empty entries
+    const headersObj: Record<string, string> = {};
+    for (const e of customHeaders.value) {
+      if (e.name && e.value) headersObj[e.name] = e.value;
+    }
+    const customHeadersPayload = Object.keys(headersObj).length > 0 ? headersObj : null;
+
     if (editingServer.value) {
-      const input: { name: string; base_url: string; api_key: string | null; password?: string | null; system_prompt: string | null; remove_thinking: boolean } = {
+      const input: { name: string; base_url: string; api_key: string | null; password?: string | null; system_prompt: string | null; remove_thinking: boolean; custom_headers: Record<string, string> | null } = {
         name: form.value.name,
         base_url: form.value.base_url,
         api_key: apiKey,
         system_prompt: systemPrompt,
         remove_thinking: form.value.remove_thinking,
+        custom_headers: customHeadersPayload,
       };
       if (form.value.password) {
         input.password = form.value.password;
       }
       await store.updateServer(editingServer.value.id, input);
     } else {
-      const input: { name: string; base_url: string; api_key?: string; password?: string; system_prompt: string | null; remove_thinking: boolean } = {
+      const input: { name: string; base_url: string; api_key?: string; password?: string; system_prompt: string | null; remove_thinking: boolean; custom_headers?: Record<string, string> | null } = {
         name: form.value.name,
         base_url: form.value.base_url,
         system_prompt: systemPrompt,
         remove_thinking: form.value.remove_thinking,
+        custom_headers: customHeadersPayload,
       };
       if (form.value.api_key) input.api_key = form.value.api_key;
       if (form.value.password) input.password = form.value.password;

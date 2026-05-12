@@ -91,6 +91,9 @@ pub struct GroupServerDetail {
     #[sqlx(default)]
     #[serde(default)]
     pub retry_delay_seconds: Option<f64>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub custom_headers: Option<serde_json::Value>,
 }
 
 /// Admin-facing server detail with rate fields (not used in proxy cache)
@@ -137,6 +140,9 @@ pub struct AdminGroupServerDetail {
     #[sqlx(default)]
     #[serde(default)]
     pub retry_delay_seconds: Option<f64>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub custom_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +198,8 @@ pub struct CountTokensServer {
     pub system_prompt: Option<String>,
     pub remove_thinking: bool,
     pub model_mappings: serde_json::Value,
+    #[serde(default)]
+    pub custom_headers: Option<serde_json::Value>,
 }
 
 /// Full config used by the proxy engine (cached in Redis)

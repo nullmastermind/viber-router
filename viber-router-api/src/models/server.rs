@@ -12,6 +12,7 @@ pub struct Server {
     pub password_hash: Option<String>,
     pub system_prompt: Option<String>,
     pub remove_thinking: bool,
+    pub custom_headers: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -24,6 +25,7 @@ pub struct CreateServer {
     pub password: Option<String>,
     pub system_prompt: Option<String>,
     pub remove_thinking: Option<bool>,
+    pub custom_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,4 +36,5 @@ pub struct UpdateServer {
     pub password: Option<Option<String>>,
     pub system_prompt: Option<Option<String>>,
     pub remove_thinking: Option<Option<bool>>,
+    pub custom_headers: Option<Option<serde_json::Value>>,
 }

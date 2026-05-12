@@ -54,6 +54,7 @@ export interface GroupServerDetail {
   retry_status_codes: number[] | null;
   retry_count: number | null;
   retry_delay_seconds: number | null;
+  custom_headers: Record<string, string> | null;
 }
 
 export interface GroupWithServers extends Group {

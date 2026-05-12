@@ -11,6 +11,7 @@ export interface Server {
   password_hash: string | null;
   system_prompt: string | null;
   remove_thinking: boolean;
+  custom_headers: Record<string, string> | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,6 +58,7 @@ export const useServersStore = defineStore('servers', () => {
     password?: string;
     system_prompt?: string | null;
     remove_thinking?: boolean;
+    custom_headers?: Record<string, string> | null;
   }) {
     const { data } = await api.post<Server>('/api/admin/servers', input);
     return data;
@@ -71,6 +73,7 @@ export const useServersStore = defineStore('servers', () => {
       password?: string | null;
       system_prompt?: string | null;
       remove_thinking?: boolean;
+      custom_headers?: Record<string, string> | null;
     },
   ) {
     const { data } = await api.put<Server>(`/api/admin/servers/${id}`, input);
