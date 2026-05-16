@@ -188,6 +188,7 @@ pub struct BonusServer {
     pub api_key: String,
     pub name: String,
     pub allowed_models: Vec<String>,
+    pub custom_headers: Option<serde_json::Value>,
 }
 
 /// Result of the pre-request subscription check.
@@ -547,6 +548,7 @@ pub async fn check_subscriptions(
                 api_key,
                 name,
                 allowed_models,
+                custom_headers: sub.bonus_custom_headers,
             })
         })
         .collect();
@@ -898,6 +900,7 @@ mod tests {
             bonus_quota_headers: None,
             bonus_allowed_models: None,
             sort_order: 0,
+            bonus_custom_headers: None,
         };
 
         // Simulate the filter_map logic from check_subscriptions
@@ -907,6 +910,7 @@ mod tests {
             api_key: sub.bonus_api_key.clone().unwrap(),
             name: sub.bonus_name.clone().unwrap_or_default(),
             allowed_models: sub.bonus_allowed_models.clone().unwrap_or_default(),
+            custom_headers: sub.bonus_custom_headers.clone(),
         };
 
         assert_eq!(server.base_url, "https://api.anthropic.com");
@@ -941,6 +945,7 @@ mod tests {
             bonus_quota_headers: None,
             bonus_allowed_models: None,
             sort_order: 0,
+            bonus_custom_headers: None,
         };
 
         // Simulate the filter_map — should return None due to missing base_url
@@ -951,6 +956,7 @@ mod tests {
                 api_key: api_key.clone(),
                 name: sub.bonus_name.clone().unwrap_or_default(),
                 allowed_models: sub.bonus_allowed_models.clone().unwrap_or_default(),
+                custom_headers: sub.bonus_custom_headers.clone(),
             })
         });
 
@@ -983,6 +989,7 @@ mod tests {
             bonus_quota_headers: None,
             bonus_allowed_models: None,
             sort_order: 0,
+            bonus_custom_headers: None,
         };
 
         let name = sub.bonus_name.unwrap_or_default();

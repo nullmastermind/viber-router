@@ -12,6 +12,7 @@ pub struct UserEndpoint {
     pub model_mappings: serde_json::Value,
     pub quota_url: Option<String>,
     pub quota_headers: Option<serde_json::Value>,
+    pub custom_headers: Option<serde_json::Value>,
     pub priority_mode: String,
     pub is_enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -26,6 +27,7 @@ pub struct CreateUserEndpoint {
     pub model_mappings: Option<serde_json::Value>,
     pub quota_url: Option<String>,
     pub quota_headers: Option<serde_json::Value>,
+    pub custom_headers: Option<serde_json::Value>,
     pub priority_mode: Option<String>,
 }
 
@@ -37,6 +39,7 @@ pub struct UpdateUserEndpoint {
     pub model_mappings: Option<serde_json::Value>,
     pub quota_url: Option<Option<String>>,
     pub quota_headers: Option<Option<serde_json::Value>>,
+    pub custom_headers: Option<Option<serde_json::Value>>,
     pub priority_mode: Option<String>,
     pub is_enabled: Option<bool>,
 }
@@ -65,6 +68,7 @@ pub struct PublicUserEndpoint {
     pub model_mappings: serde_json::Value,
     pub quota_url: Option<String>,
     pub quota_headers: Option<serde_json::Value>,
+    pub custom_headers: Option<serde_json::Value>,
     pub priority_mode: String,
     pub is_enabled: bool,
     pub quotas: Option<Vec<EndpointQuotaInfo>>,
@@ -81,6 +85,7 @@ impl From<UserEndpoint> for PublicUserEndpoint {
             model_mappings: endpoint.model_mappings,
             quota_url: endpoint.quota_url,
             quota_headers: endpoint.quota_headers,
+            custom_headers: endpoint.custom_headers,
             priority_mode: endpoint.priority_mode,
             is_enabled: endpoint.is_enabled,
             quotas: None,
@@ -140,6 +145,7 @@ mod tests {
             model_mappings,
             quota_url: None,
             quota_headers: None,
+            custom_headers: None,
             priority_mode: "fallback".to_string(),
             is_enabled,
             created_at: chrono::Utc::now(),

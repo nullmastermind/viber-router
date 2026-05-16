@@ -113,14 +113,19 @@ pub async fn create_user_endpoint(
     {
         return err(StatusCode::BAD_REQUEST, &format!("quota_headers {msg}")).into_response();
     }
+    if let Some(headers) = &input.custom_headers
+        && let Err(msg) = validate_optional_json_object(&Some(headers.clone()))
+    {
+        return err(StatusCode::BAD_REQUEST, &format!("custom_headers {msg}")).into_response();
+    }
     let priority_mode = input.priority_mode.unwrap_or_else(|| "fallback".to_string());
     if !validate_priority_mode(&priority_mode) {
         return err(StatusCode::BAD_REQUEST, "priority_mode must be priority or fallback").into_response();
     }
 
     let created = sqlx::query_as::<_, UserEndpoint>(
-        "INSERT INTO user_endpoints (group_key_id, name, base_url, api_key, model_mappings, quota_url, quota_headers, priority_mode) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+        "INSERT INTO user_endpoints (group_key_id, name, base_url, api_key, model_mappings, quota_url, quota_headers, custom_headers, priority_mode) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
     )
     .bind(key_info.key_id)
     .bind(input.name.trim())
@@ -129,6 +134,7 @@ pub async fn create_user_endpoint(
     .bind(model_mappings)
     .bind(input.quota_url.and_then(non_empty_string))
     .bind(input.quota_headers)
+    .bind(input.custom_headers)
     .bind(priority_mode)
     .fetch_one(&state.db)
     .await;
@@ -164,6 +170,11 @@ pub async fn patch_user_endpoint(
     {
         return err(StatusCode::BAD_REQUEST, "quota_headers must be a JSON object").into_response();
     }
+    if let Some(Some(value)) = &input.custom_headers
+        && !value.is_object()
+    {
+        return err(StatusCode::BAD_REQUEST, "custom_headers must be a JSON object").into_response();
+    }
     if let Some(mode) = &input.priority_mode
         && !validate_priority_mode(mode)
     {
@@ -192,12 +203,13 @@ pub async fn patch_user_endpoint(
         None => current.quota_url,
     };
     let quota_headers = input.quota_headers.unwrap_or(current.quota_headers);
+    let custom_headers = input.custom_headers.unwrap_or(current.custom_headers);
     let priority_mode = input.priority_mode.unwrap_or(current.priority_mode);
     let is_enabled = input.is_enabled.unwrap_or(current.is_enabled);
 
     let updated = sqlx::query_as::<_, UserEndpoint>(
         "UPDATE user_endpoints SET name = $3, base_url = $4, api_key = $5, model_mappings = $6, \
-         quota_url = $7, quota_headers = $8, priority_mode = $9, is_enabled = $10, updated_at = now() \
+         quota_url = $7, quota_headers = $8, custom_headers = $9, priority_mode = $10, is_enabled = $11, updated_at = now() \
          WHERE id = $1 AND group_key_id = $2 RETURNING *",
     )
     .bind(id)
@@ -208,6 +220,7 @@ pub async fn patch_user_endpoint(
     .bind(model_mappings)
     .bind(quota_url)
     .bind(quota_headers)
+    .bind(custom_headers)
     .bind(priority_mode)
     .bind(is_enabled)
     .fetch_one(&state.db)

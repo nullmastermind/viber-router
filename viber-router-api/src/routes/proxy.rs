@@ -715,6 +715,7 @@ async fn try_user_endpoint_waterfall(
         }
         upstream_req = upstream_req.header("x-api-key", &endpoint.api_key);
         upstream_req = upstream_req.header("authorization", format!("Bearer {}", endpoint.api_key));
+        upstream_req = apply_custom_headers(upstream_req, &endpoint.custom_headers);
         upstream_req = upstream_req.body(transformed_body);
 
         let start = std::time::Instant::now();
@@ -1358,6 +1359,7 @@ async fn proxy_handler(
         }
         bonus_req = bonus_req.header("x-api-key", &bonus_server.api_key);
         bonus_req = bonus_req.header("authorization", format!("Bearer {}", bonus_server.api_key));
+        bonus_req = apply_custom_headers(bonus_req, &bonus_server.custom_headers);
         bonus_req = bonus_req.body(body_bytes.clone());
 
         let bonus_start = std::time::Instant::now();

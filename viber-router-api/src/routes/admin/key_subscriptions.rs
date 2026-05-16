@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::models::{
     AssignSubscription, CancelSubscription, KeySubscription, PaginatedResponse, SubscriptionPlan,
-    UpdateBonusSubscription,
+    UpdateBonusCustomHeaders, UpdateBonusQuotaConfig, UpdateBonusSubscription,
 };
 use crate::routes::AppState;
 
@@ -46,6 +46,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/{sub_id}/bonus-allowed-models",
             put(update_bonus_allowed_models),
+        )
+        .route(
+            "/{sub_id}/bonus-custom-headers",
+            put(update_bonus_custom_headers),
+        )
+        .route(
+            "/{sub_id}/bonus-quota-config",
+            put(update_bonus_quota_config),
         )
 }
 
@@ -173,8 +181,8 @@ async fn assign_subscription(
             "INSERT INTO key_subscriptions \
              (group_key_id, plan_id, sub_type, cost_limit_usd, model_limits, model_request_costs, \
               reset_hours, duration_days, rpm_limit, tpm_limit, bonus_name, bonus_base_url, bonus_api_key, \
-              bonus_quota_url, bonus_quota_headers, bonus_allowed_models) \
-             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, NULL, $2, $3, $4, $5, $6, $7) \
+              bonus_quota_url, bonus_quota_headers, bonus_allowed_models, bonus_custom_headers) \
+             VALUES ($1, NULL, 'bonus', 0, '{}', '{}', NULL, 36500, NULL, NULL, $2, $3, $4, $5, $6, $7, $8) \
              RETURNING *",
         )
         .bind(key_id)
@@ -184,6 +192,7 @@ async fn assign_subscription(
         .bind(&input.bonus_quota_url)
         .bind(&input.bonus_quota_headers)
         .bind(&input.bonus_allowed_models)
+        .bind(&input.bonus_custom_headers)
         .fetch_one(&state.db)
         .await
         .map_err(internal)?;
@@ -285,6 +294,83 @@ async fn update_bonus_allowed_models(
     .map_err(internal)?;
 
     // Invalidate subscription list cache
+    if let Ok(mut conn) = state.redis.get().await {
+        let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+    }
+
+    Ok(Json(sub))
+}
+
+async fn update_bonus_custom_headers(
+    State(state): State<AppState>,
+    Path((_group_id, key_id, sub_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<UpdateBonusCustomHeaders>,
+) -> Result<Json<KeySubscription>, ApiError> {
+    let current = sqlx::query_as::<_, KeySubscription>(
+        "SELECT * FROM key_subscriptions WHERE id = $1 AND group_key_id = $2",
+    )
+    .bind(sub_id)
+    .bind(key_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(internal)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Subscription not found"))?;
+
+    if current.sub_type != "bonus" {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only bonus subscriptions can update custom headers",
+        ));
+    }
+
+    let sub = sqlx::query_as::<_, KeySubscription>(
+        "UPDATE key_subscriptions SET bonus_custom_headers = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(&input.bonus_custom_headers)
+    .bind(sub_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(internal)?;
+
+    if let Ok(mut conn) = state.redis.get().await {
+        let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+    }
+
+    Ok(Json(sub))
+}
+
+async fn update_bonus_quota_config(
+    State(state): State<AppState>,
+    Path((_group_id, key_id, sub_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<UpdateBonusQuotaConfig>,
+) -> Result<Json<KeySubscription>, ApiError> {
+    let current = sqlx::query_as::<_, KeySubscription>(
+        "SELECT * FROM key_subscriptions WHERE id = $1 AND group_key_id = $2",
+    )
+    .bind(sub_id)
+    .bind(key_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(internal)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Subscription not found"))?;
+
+    if current.sub_type != "bonus" {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only bonus subscriptions can update quota config",
+        ));
+    }
+
+    let sub = sqlx::query_as::<_, KeySubscription>(
+        "UPDATE key_subscriptions SET bonus_quota_url = $1, bonus_quota_headers = $2 WHERE id = $3 RETURNING *",
+    )
+    .bind(&input.bonus_quota_url)
+    .bind(&input.bonus_quota_headers)
+    .bind(sub_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(internal)?;
+
     if let Ok(mut conn) = state.redis.get().await {
         let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
     }

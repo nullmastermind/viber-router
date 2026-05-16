@@ -376,6 +376,14 @@
                                 :loading="reorderingBonusSubs.has(sProps.row.id)"
                                 @click.stop="onMoveBonus(props.row.id, sProps.row.id, 'down')"
                               />
+                              <q-btn
+                                v-if="sProps.row.sub_type === 'bonus'"
+                                flat dense size="sm"
+                                icon="vpn_key"
+                                @click.stop="onOpenEditBonusHeaders(props.row.id, sProps.row)"
+                              >
+                                <q-tooltip>Edit headers</q-tooltip>
+                              </q-btn>
                               <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.id, sProps.row.id)" />
                             </q-td>
                           </template>
@@ -759,6 +767,14 @@
                                   :loading="reorderingBonusSubs.has(sProps.row.id)"
                                   @click.stop="onMoveBonus(props.row.group_key_id ?? '', sProps.row.id, 'down')"
                                 />
+                                <q-btn
+                                  v-if="sProps.row.sub_type === 'bonus'"
+                                  flat dense size="sm"
+                                  icon="vpn_key"
+                                  @click.stop="onOpenEditBonusHeaders(props.row.group_key_id ?? '', sProps.row)"
+                                >
+                                  <q-tooltip>Edit headers</q-tooltip>
+                                </q-btn>
                                 <q-btn v-if="sProps.row.status === 'active'" flat dense size="sm" label="Cancel" color="negative" @click.stop="onCancelSubscription(props.row.group_key_id ?? '', sProps.row.id)" />
                               </q-td>
                             </template>
@@ -1358,6 +1374,52 @@
         </q-card>
       </q-dialog>
 
+      <!-- Edit Bonus Headers Dialog -->
+      <q-dialog v-model="showEditBonusHeadersDialog" persistent>
+        <q-card style="width: 520px; max-width: 90vw">
+          <q-card-section>
+            <div class="text-h6">Edit Bonus Headers</div>
+            <div class="text-caption text-grey">Quota URL/headers (used for quota check) and custom headers (forwarded to upstream).</div>
+          </q-card-section>
+          <q-card-section class="q-gutter-sm">
+            <q-input
+              v-model="editBonusHeadersForm.bonus_quota_url"
+              label="Quota Check URL (optional)"
+              outlined
+              dense
+              placeholder="https://example.com/quota"
+            />
+            <div>
+              <div class="text-subtitle2 q-mb-xs">Quota Headers</div>
+              <div v-for="(entry, idx) in editBonusQuotaHeaders" :key="`eq-${idx}`" class="row q-gutter-sm q-mb-sm">
+                <q-input v-model="entry.name" label="Header name" outlined dense style="flex:1" />
+                <q-input v-model="entry.value" label="Header value" outlined dense style="flex:1" />
+                <q-btn flat dense icon="close" @click="editBonusQuotaHeaders.splice(idx, 1)" />
+              </div>
+              <q-btn flat dense icon="add" label="Add header" @click="editBonusQuotaHeaders.push({ name: '', value: '' })" />
+            </div>
+            <div>
+              <div class="text-subtitle2 q-mb-xs">Custom Headers (forwarded to upstream)</div>
+              <div v-for="(entry, idx) in editBonusCustomHeaders" :key="`ec-${idx}`" class="row q-gutter-sm q-mb-sm">
+                <q-input v-model="entry.name" label="Header name" outlined dense style="flex:1" />
+                <q-input v-model="entry.value" label="Header value" outlined dense style="flex:1" />
+                <q-btn flat dense icon="close" @click="editBonusCustomHeaders.splice(idx, 1)" />
+              </div>
+              <q-btn flat dense icon="add" label="Add header" @click="editBonusCustomHeaders.push({ name: '', value: '' })" />
+            </div>
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn
+              color="primary"
+              label="Save"
+              :loading="editBonusHeadersLoading"
+              @click="onSaveBonusHeaders"
+            />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
       <!-- Add Bonus Subscription Dialog -->
       <q-dialog v-model="showAddBonusDialog" persistent>
         <q-card style="width: 480px">
@@ -1394,15 +1456,24 @@
               dense
               placeholder="https://example.com/quota"
             />
-            <q-input
-              v-model="addBonusForm.bonus_quota_headers"
-              label="Quota Headers (optional JSON, e.g. {&quot;Authorization&quot;: &quot;Bearer token&quot;})"
-              outlined
-              dense
-              type="textarea"
-              placeholder="{}"
-              :rows="3"
-            />
+            <div>
+              <div class="text-subtitle2 q-mb-xs">Quota Headers (optional)</div>
+              <div v-for="(entry, idx) in addBonusQuotaHeaders" :key="`q-${idx}`" class="row q-gutter-sm q-mb-sm">
+                <q-input v-model="entry.name" label="Header name" outlined dense style="flex:1" />
+                <q-input v-model="entry.value" label="Header value" outlined dense style="flex:1" />
+                <q-btn flat dense icon="close" @click="addBonusQuotaHeaders.splice(idx, 1)" />
+              </div>
+              <q-btn flat dense icon="add" label="Add header" @click="addBonusQuotaHeaders.push({ name: '', value: '' })" />
+            </div>
+            <div>
+              <div class="text-subtitle2 q-mb-xs">Custom Headers (forwarded to upstream)</div>
+              <div v-for="(entry, idx) in addBonusCustomHeaders" :key="`c-${idx}`" class="row q-gutter-sm q-mb-sm">
+                <q-input v-model="entry.name" label="Header name" outlined dense style="flex:1" />
+                <q-input v-model="entry.value" label="Header value" outlined dense style="flex:1" />
+                <q-btn flat dense icon="close" @click="addBonusCustomHeaders.splice(idx, 1)" />
+              </div>
+              <q-btn flat dense icon="add" label="Add header" @click="addBonusCustomHeaders.push({ name: '', value: '' })" />
+            </div>
             <q-select
               v-model="addBonusForm.bonus_allowed_models"
               label="Allowed Models (optional)"
@@ -1643,6 +1714,7 @@ interface KeySubscription {
   bonus_quota_url: string | null;
   bonus_quota_headers: Record<string, string> | null;
   bonus_allowed_models?: string[] | null;
+  bonus_custom_headers: Record<string, string> | null;
   sort_order: number;
 }
 interface SubscriptionPlan {
@@ -1673,10 +1745,20 @@ const addBonusForm = ref({
   bonus_base_url: 'https://api.anthropic.com',
   bonus_api_key: '',
   bonus_quota_url: '',
-  bonus_quota_headers: '',
   bonus_allowed_models: [] as string[],
 });
+const addBonusQuotaHeaders = ref<{ name: string; value: string }[]>([]);
+const addBonusCustomHeaders = ref<{ name: string; value: string }[]>([]);
 const addBonusLoading = ref(false);
+
+// Edit Bonus Headers dialog state
+const showEditBonusHeadersDialog = ref(false);
+const editBonusHeadersKeyId = ref('');
+const editBonusHeadersSubId = ref('');
+const editBonusHeadersForm = ref({ bonus_quota_url: '' });
+const editBonusQuotaHeaders = ref<{ name: string; value: string }[]>([]);
+const editBonusCustomHeaders = ref<{ name: string; value: string }[]>([]);
+const editBonusHeadersLoading = ref(false);
 
 // Reorder bonus state
 const reorderingBonusSubs = ref<Set<string>>(new Set());
@@ -2770,10 +2852,19 @@ function onOpenAddBonus(keyId: string) {
     bonus_base_url: 'https://api.anthropic.com',
     bonus_api_key: '',
     bonus_quota_url: '',
-    bonus_quota_headers: '',
     bonus_allowed_models: [],
   };
+  addBonusQuotaHeaders.value = [];
+  addBonusCustomHeaders.value = [];
   showAddBonusDialog.value = true;
+}
+
+function headersToRecord(rows: { name: string; value: string }[]): Record<string, string> | null {
+  const obj: Record<string, string> = {};
+  for (const e of rows) {
+    if (e.name.trim() && e.value !== '') obj[e.name.trim()] = e.value;
+  }
+  return Object.keys(obj).length > 0 ? obj : null;
 }
 
 async function onSubmitAddBonus() {
@@ -2791,16 +2882,8 @@ async function onSubmitAddBonus() {
     return;
   }
 
-  // Parse quota headers JSON if provided
-  let bonus_quota_headers: Record<string, string> | null = null;
-  if (addBonusForm.value.bonus_quota_headers.trim()) {
-    try {
-      bonus_quota_headers = JSON.parse(addBonusForm.value.bonus_quota_headers.trim());
-    } catch {
-      $q.notify({ type: 'negative', message: 'Quota Headers must be valid JSON' });
-      return;
-    }
-  }
+  const bonus_quota_headers = headersToRecord(addBonusQuotaHeaders.value);
+  const bonus_custom_headers = headersToRecord(addBonusCustomHeaders.value);
 
   addBonusLoading.value = true;
   try {
@@ -2811,6 +2894,7 @@ async function onSubmitAddBonus() {
       bonus_quota_url: addBonusForm.value.bonus_quota_url.trim() || null,
       bonus_quota_headers,
       bonus_allowed_models: addBonusForm.value.bonus_allowed_models,
+      bonus_custom_headers,
     });
     showAddBonusDialog.value = false;
     addBonusForm.value.bonus_allowed_models = [];
@@ -2821,6 +2905,51 @@ async function onSubmitAddBonus() {
     $q.notify({ type: 'negative', message: msg });
   } finally {
     addBonusLoading.value = false;
+  }
+}
+
+function onOpenEditBonusHeaders(keyId: string, sub: KeySubscription) {
+  if (!keyId || sub.sub_type !== 'bonus') return;
+  editBonusHeadersKeyId.value = keyId;
+  editBonusHeadersSubId.value = sub.id;
+  editBonusHeadersForm.value = { bonus_quota_url: sub.bonus_quota_url ?? '' };
+  editBonusQuotaHeaders.value = sub.bonus_quota_headers
+    ? Object.entries(sub.bonus_quota_headers).map(([name, value]) => ({ name, value }))
+    : [];
+  editBonusCustomHeaders.value = sub.bonus_custom_headers
+    ? Object.entries(sub.bonus_custom_headers).map(([name, value]) => ({ name, value }))
+    : [];
+  showEditBonusHeadersDialog.value = true;
+}
+
+async function onSaveBonusHeaders() {
+  if (!group.value || !editBonusHeadersKeyId.value || !editBonusHeadersSubId.value) return;
+  editBonusHeadersLoading.value = true;
+  const groupId = group.value.id;
+  const keyId = editBonusHeadersKeyId.value;
+  const subId = editBonusHeadersSubId.value;
+  try {
+    await api.put(
+      `/api/admin/groups/${groupId}/keys/${keyId}/subscriptions/${subId}/bonus-quota-config`,
+      {
+        bonus_quota_url: editBonusHeadersForm.value.bonus_quota_url.trim() || null,
+        bonus_quota_headers: headersToRecord(editBonusQuotaHeaders.value),
+      },
+    );
+    await api.put(
+      `/api/admin/groups/${groupId}/keys/${keyId}/subscriptions/${subId}/bonus-custom-headers`,
+      { bonus_custom_headers: headersToRecord(editBonusCustomHeaders.value) },
+    );
+    showEditBonusHeadersDialog.value = false;
+    editBonusHeadersKeyId.value = '';
+    editBonusHeadersSubId.value = '';
+    loadKeySubscriptions(keyId);
+    $q.notify({ type: 'positive', message: 'Bonus headers updated' });
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to update bonus headers';
+    $q.notify({ type: 'negative', message: msg });
+  } finally {
+    editBonusHeadersLoading.value = false;
   }
 }
 

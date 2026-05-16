@@ -150,11 +150,38 @@ pub async fn public_usage(
     .await
     .unwrap_or_default();
 
+    let now = chrono::Utc::now();
     let mut subscriptions = Vec::with_capacity(subs.len());
     for sub in &subs {
         let is_bonus = sub.sub_type == "bonus";
 
-        let cost_used = if sub.status == "active" && !is_bonus {
+        // Treat as expired in the response if expires_at has passed but DB still says 'active'.
+        // The proxy flips status to 'expired' lazily on the next request (see subscription.rs);
+        // mirror that here so the usage page doesn't show a stale 'active' badge.
+        let is_expired = sub.status == "active"
+            && sub.expires_at.is_some_and(|exp| now > exp);
+        let effective_status = if is_expired {
+            // Fire-and-forget DB + cache invalidation, matching subscription.rs.
+            let db = state.db.clone();
+            let redis = state.redis.clone();
+            let sub_id = sub.id;
+            let key_id = sub.group_key_id;
+            tokio::spawn(async move {
+                let _ = sqlx::query("UPDATE key_subscriptions SET status = 'expired' WHERE id = $1 AND status = 'active'")
+                    .bind(sub_id)
+                    .execute(&db)
+                    .await;
+                if let Ok(mut conn) = redis.get().await {
+                    use deadpool_redis::redis::AsyncCommands;
+                    let _: Result<(), _> = conn.del(format!("key_subs:{key_id}")).await;
+                }
+            });
+            "expired".to_string()
+        } else {
+            sub.status.clone()
+        };
+
+        let cost_used = if effective_status == "active" && !is_bonus {
             subscription::get_total_cost(&state, sub).await
         } else {
             0.0
@@ -220,7 +247,7 @@ pub async fn public_usage(
             weekly_reset_at,
             rpm_limit: sub.rpm_limit,
             tpm_limit: sub.tpm_limit,
-            status: sub.status.clone(),
+            status: effective_status,
             cost_used,
             window_reset_at,
             activated_at: sub.activated_at,

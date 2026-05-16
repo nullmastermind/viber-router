@@ -602,10 +602,61 @@
           <q-input v-model="endpointForm.name" label="Name" outlined dense :error="!!endpointErrors.name" :error-message="endpointErrors.name" />
           <q-input v-model="endpointForm.base_url" label="Base URL" outlined dense :error="!!endpointErrors.base_url" :error-message="endpointErrors.base_url" />
           <q-input v-model="endpointForm.api_key" label="API Key" outlined dense :error="!!endpointErrors.api_key" :error-message="endpointErrors.api_key" />
-          <q-input v-model="endpointForm.model_mappings" label="Model Mappings JSON" outlined dense type="textarea" autogrow :error="!!endpointErrors.model_mappings" :error-message="endpointErrors.model_mappings" />
+
+          <div>
+            <div class="row items-center q-mb-xs">
+              <span class="text-caption text-weight-medium">Model Mappings</span>
+              <q-space />
+              <q-btn flat dense no-caps icon="add" label="Add" size="sm" @click="addKvRow('model_mappings')" />
+            </div>
+            <div v-if="endpointForm.model_mappings.length === 0" class="text-caption q-mb-xs" style="color: var(--vr-text-secondary)">
+              No mappings. Leave empty to accept all models.
+            </div>
+            <div v-for="(row, idx) in endpointForm.model_mappings" :key="`mm-${idx}`" class="row q-col-gutter-xs items-center q-mb-xs no-wrap">
+              <div class="col"><q-input v-model="row.key" placeholder="Source model" outlined dense /></div>
+              <div class="col"><q-input v-model="row.value" placeholder="Target model" outlined dense /></div>
+              <q-btn flat dense round icon="close" size="sm" aria-label="Remove row" @click="removeKvRow('model_mappings', idx)" />
+            </div>
+            <div v-if="endpointErrors.model_mappings" class="text-negative" style="font-size: 12px">{{ endpointErrors.model_mappings }}</div>
+          </div>
+
           <q-select v-model="endpointForm.priority_mode" label="Priority Mode" outlined dense :options="priorityModeOptions" emit-value map-options />
+
+          <div>
+            <div class="row items-center q-mb-xs">
+              <span class="text-caption text-weight-medium">Custom Headers</span>
+              <q-space />
+              <q-btn flat dense no-caps icon="add" label="Add" size="sm" @click="addKvRow('custom_headers')" />
+            </div>
+            <div v-if="endpointForm.custom_headers.length === 0" class="text-caption q-mb-xs" style="color: var(--vr-text-secondary)">
+              Forwarded to the upstream endpoint on every request.
+            </div>
+            <div v-for="(row, idx) in endpointForm.custom_headers" :key="`ch-${idx}`" class="row q-col-gutter-xs items-center q-mb-xs no-wrap">
+              <div class="col"><q-input v-model="row.key" placeholder="Header name" outlined dense /></div>
+              <div class="col"><q-input v-model="row.value" placeholder="Header value" outlined dense /></div>
+              <q-btn flat dense round icon="close" size="sm" aria-label="Remove row" @click="removeKvRow('custom_headers', idx)" />
+            </div>
+            <div v-if="endpointErrors.custom_headers" class="text-negative" style="font-size: 12px">{{ endpointErrors.custom_headers }}</div>
+          </div>
+
           <q-input v-model="endpointForm.quota_url" label="Quota URL" outlined dense />
-          <q-input v-model="endpointForm.quota_headers" label="Quota Headers JSON" outlined dense type="textarea" autogrow :error="!!endpointErrors.quota_headers" :error-message="endpointErrors.quota_headers" />
+
+          <div>
+            <div class="row items-center q-mb-xs">
+              <span class="text-caption text-weight-medium">Quota Headers</span>
+              <q-space />
+              <q-btn flat dense no-caps icon="add" label="Add" size="sm" @click="addKvRow('quota_headers')" />
+            </div>
+            <div v-if="endpointForm.quota_headers.length === 0" class="text-caption q-mb-xs" style="color: var(--vr-text-secondary)">
+              Sent only when fetching the quota URL.
+            </div>
+            <div v-for="(row, idx) in endpointForm.quota_headers" :key="`qh-${idx}`" class="row q-col-gutter-xs items-center q-mb-xs no-wrap">
+              <div class="col"><q-input v-model="row.key" placeholder="Header name" outlined dense /></div>
+              <div class="col"><q-input v-model="row.value" placeholder="Header value" outlined dense /></div>
+              <q-btn flat dense round icon="close" size="sm" aria-label="Remove row" @click="removeKvRow('quota_headers', idx)" />
+            </div>
+            <div v-if="endpointErrors.quota_headers" class="text-negative" style="font-size: 12px">{{ endpointErrors.quota_headers }}</div>
+          </div>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" :disable="endpointSaving" v-close-popup />
@@ -699,20 +750,27 @@ interface UserEndpoint {
   model_mappings: Record<string, string>;
   quota_url: string | null;
   quota_headers: Record<string, string> | null;
+  custom_headers: Record<string, string> | null;
   priority_mode: 'priority' | 'fallback';
   is_enabled: boolean;
   quotas: QuotaInfo[] | null;
   usage: BonusModelUsage[];
 }
 
+interface KvRow {
+  key: string;
+  value: string;
+}
+
 interface EndpointForm {
   name: string;
   base_url: string;
   api_key: string;
-  model_mappings: string;
+  model_mappings: KvRow[];
   priority_mode: 'priority' | 'fallback';
   quota_url: string;
-  quota_headers: string;
+  quota_headers: KvRow[];
+  custom_headers: KvRow[];
 }
 
 interface Subscription {
@@ -793,10 +851,11 @@ const endpointForm = ref<EndpointForm>({
   name: '',
   base_url: '',
   api_key: '',
-  model_mappings: '{}',
+  model_mappings: [],
   priority_mode: 'fallback',
   quota_url: '',
-  quota_headers: '{}',
+  quota_headers: [],
+  custom_headers: [],
 });
 const endpointErrors = ref<Record<string, string>>({});
 const priorityModeOptions = [
@@ -979,6 +1038,35 @@ const nonBonusSubscriptions = computed(() =>
 const endpointLimitReached = computed(() => (data.value?.user_endpoints.length ?? 0) >= 10);
 
 
+function recordToKvRows(record: Record<string, string> | null | undefined): KvRow[] {
+  if (!record) return [];
+  return Object.entries(record).map(([key, value]) => ({ key, value: String(value) }));
+}
+
+function kvRowsToRecord(rows: KvRow[], field: string): Record<string, string> | null {
+  const result: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (seen.has(key)) {
+      endpointErrors.value[field] = `Duplicate key: ${key}`;
+      return null;
+    }
+    seen.add(key);
+    result[key] = row.value;
+  }
+  return result;
+}
+
+function addKvRow(field: 'model_mappings' | 'quota_headers' | 'custom_headers') {
+  endpointForm.value[field].push({ key: '', value: '' });
+}
+
+function removeKvRow(field: 'model_mappings' | 'quota_headers' | 'custom_headers', index: number) {
+  endpointForm.value[field].splice(index, 1);
+}
+
 function openEndpointDialog(endpoint?: UserEndpoint) {
   if (!endpoint && endpointLimitReached.value) {
     $q.notify({ message: 'Maximum of 10 custom endpoints reached', type: 'negative' });
@@ -990,28 +1078,13 @@ function openEndpointDialog(endpoint?: UserEndpoint) {
     name: endpoint?.name ?? '',
     base_url: endpoint?.base_url ?? '',
     api_key: endpoint?.api_key ?? '',
-    model_mappings: JSON.stringify(endpoint?.model_mappings ?? {}, null, 2),
+    model_mappings: recordToKvRows(endpoint?.model_mappings ?? null),
     priority_mode: endpoint?.priority_mode ?? 'fallback',
     quota_url: endpoint?.quota_url ?? '',
-    quota_headers: JSON.stringify(endpoint?.quota_headers ?? {}, null, 2),
+    quota_headers: recordToKvRows(endpoint?.quota_headers ?? null),
+    custom_headers: recordToKvRows(endpoint?.custom_headers ?? null),
   };
   showEndpointDialog.value = true;
-}
-
-function parseJsonObjectField(value: string, field: string): Record<string, unknown> | null {
-  const trimmed = value.trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-      endpointErrors.value[field] = 'Must be a JSON object';
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    endpointErrors.value[field] = 'Invalid JSON';
-    return null;
-  }
 }
 
 function validateEndpointForm() {
@@ -1021,10 +1094,17 @@ function validateEndpointForm() {
     if (!endpointForm.value.base_url.trim()) endpointErrors.value.base_url = 'Base URL is required';
     if (!endpointForm.value.api_key.trim()) endpointErrors.value.api_key = 'API Key is required';
   }
-  const modelMappings = parseJsonObjectField(endpointForm.value.model_mappings, 'model_mappings');
-  const quotaHeaders = parseJsonObjectField(endpointForm.value.quota_headers, 'quota_headers');
-  if (Object.keys(endpointErrors.value).length > 0 || modelMappings === null || quotaHeaders === null) return null;
-  return { modelMappings, quotaHeaders };
+  const modelMappings = kvRowsToRecord(endpointForm.value.model_mappings, 'model_mappings');
+  const quotaHeaders = kvRowsToRecord(endpointForm.value.quota_headers, 'quota_headers');
+  const customHeaders = kvRowsToRecord(endpointForm.value.custom_headers, 'custom_headers');
+  if (
+    Object.keys(endpointErrors.value).length > 0 ||
+    modelMappings === null ||
+    quotaHeaders === null ||
+    customHeaders === null
+  )
+    return null;
+  return { modelMappings, quotaHeaders, customHeaders };
 }
 
 async function saveEndpoint() {
@@ -1042,6 +1122,7 @@ async function saveEndpoint() {
       priority_mode: endpointForm.value.priority_mode,
       quota_url: endpointForm.value.quota_url.trim() || null,
       quota_headers: Object.keys(parsed.quotaHeaders).length ? parsed.quotaHeaders : null,
+      custom_headers: Object.keys(parsed.customHeaders).length ? parsed.customHeaders : null,
     };
     if (editingEndpointId.value) {
       await api.patch(`/api/public/user-endpoints/${editingEndpointId.value}`, payload, { params: { key } });

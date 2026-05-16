@@ -28,6 +28,7 @@ pub struct KeySubscription {
     pub bonus_allowed_models: Option<Vec<String>>,
     #[serde(default)]
     pub sort_order: i32,
+    pub bonus_custom_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +41,7 @@ pub struct AssignSubscription {
     pub bonus_quota_url: Option<String>,
     pub bonus_quota_headers: Option<serde_json::Value>,
     pub bonus_allowed_models: Option<Vec<String>>,
+    pub bonus_custom_headers: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +52,17 @@ pub struct CancelSubscription {
 #[derive(Debug, Deserialize)]
 pub struct UpdateBonusSubscription {
     pub bonus_allowed_models: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateBonusCustomHeaders {
+    pub bonus_custom_headers: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateBonusQuotaConfig {
+    pub bonus_quota_url: Option<String>,
+    pub bonus_quota_headers: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
