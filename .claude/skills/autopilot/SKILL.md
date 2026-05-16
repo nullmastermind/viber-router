@@ -135,7 +135,34 @@ Announce your assessment:
 
 ---
 
+## Pre-commit the chain (MANDATORY before Pipeline)
+
+Before invoking the first pipeline step, use the TodoWrite tool to lay out every step of the selected pipeline as a todo list. This list is your forward-momentum anchor.
+
+For **Full Pipeline**:
+- Create spec (in_progress)
+- Implement
+- Verify
+- Resolve CRITICALs if any
+- Archive
+
+For **Verified Pipeline**:
+- Implement (in_progress)
+- Verify
+- Resolve CRITICALs if any
+
+For **Light Pipeline**:
+- Implement (in_progress)
+
+After every skill/agent return, your next response MUST start with a TodoWrite call updating this list AND a tool call invoking the next step. Never end your turn while items remain pending.
+
+---
+
 ## Pipeline
+
+### YOUR GOAL IS THE WHOLE PIPELINE
+
+Your goal is NOT "create a spec". Your goal is the entire selected pipeline. Each step's completion marker (`✅ Spec created`, `Implementation complete`, etc.) is a hand-off, not a finish line. The user's request is met only when the FINAL step of the pipeline returns successfully.
 
 ### PIPELINE IS NON-STOP (CRITICAL)
 
@@ -159,47 +186,76 @@ All steps in the selected pipeline run as ONE continuous action in the SAME turn
 ### Full Pipeline (spec → implement → verify → archive)
 
 **Step 1: Create Spec**
-Use the Skill tool to invoke `proposal`. The proposal skill has full conversation context. When proposal returns, read the `✅ Spec created: <change-name>` line to extract the change name. Do NOT write any closing text — immediately proceed to Step 2 in the same turn.
+Use the Skill tool to invoke `proposal`. The proposal skill has full conversation context.
+
+When proposal returns with `✅ Spec created: <change-name>`:
+- Extract `<change-name>` from that line.
+- Your very next response must contain exactly two tool calls and **zero text before them**:
+  1. TodoWrite — mark "Create spec" completed, mark "Implement" in_progress.
+  2. Agent (`subagent_type: "osf-apply"`) — pass the change name.
+- If you find yourself drafting any text (status update, "now implementing...", "spec is ready", summary, transition sentence), STOP the draft and emit the two tool calls instead.
 
 **Step 2: Implement**
-Immediately use Agent tool with `subagent_type: "osf-apply"`. Pass the change name. Do NOT write or edit code yourself. When osf-apply returns, immediately proceed to Step 3 in the same turn.
+Do NOT write or edit code yourself. The Agent call above IS Step 2.
+
+When osf-apply returns, your very next response must contain exactly two tool calls and **zero text before them**:
+  1. TodoWrite — mark "Implement" completed, mark "Verify" in_progress.
+  2. Agent (`subagent_type: "osf-verify"`) — pass the change name.
 
 **Step 3: Independent Verify**
-Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass the change name. When osf-verify returns, immediately proceed to Step 4 in the same turn.
+The Agent call above IS Step 3. When osf-verify returns, immediately proceed to Step 4 in the same turn.
 
 **Step 4: Verify-Fix Loop**
 After osf-verify returns its report, check for CRITICALs:
 
-- **0 CRITICALs** → immediately proceed to Step 5.
+- **0 CRITICALs** → your next response must contain exactly two tool calls and **zero text before them**:
+  1. TodoWrite — mark "Verify" completed, mark "Resolve CRITICALs" completed (or remove), mark "Archive" in_progress.
+  2. Agent (`subagent_type: "osf-archive"`) — pass the change name.
 - **CRITICALs exist** → loop in the same turn:
-  1. Use Agent tool with `subagent_type: "osf-apply"` — pass the change name + CRITICAL issues as fix instructions. Do NOT fix code yourself.
-  2. Use Agent tool with `subagent_type: "osf-verify"` — pass the change name. Do NOT skip re-verify.
-  3. Check report again. If CRITICALs remain, repeat from 1.
-  4. Max 3 rounds. If CRITICALs persist after 3 rounds, STOP and report to user.
+  1. Update TodoWrite — mark "Resolve CRITICALs" in_progress.
+  2. Use Agent tool with `subagent_type: "osf-apply"` — pass the change name + CRITICAL issues as fix instructions. Do NOT fix code yourself.
+  3. Use Agent tool with `subagent_type: "osf-verify"` — pass the change name. Do NOT skip re-verify.
+  4. Check report again. If CRITICALs remain, repeat from 2.
+  5. Max 3 rounds. If CRITICALs persist after 3 rounds, STOP and report to user.
 
 **Step 5: Archive**
-Immediately use Agent tool with `subagent_type: "osf-archive"`. Pass the change name. When osf-archive returns, print the Done announcement.
+The Agent call above IS Step 5. When osf-archive returns, your next response must contain:
+  1. TodoWrite — mark "Archive" completed.
+  2. The Done announcement.
 
 ### Verified Pipeline (implement → verify)
 
 **Step 1: Implement**
-Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself. When osf-apply returns, immediately proceed to Step 2 in the same turn.
+Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself.
+
+When osf-apply returns, your very next response must contain exactly two tool calls and **zero text before them**:
+  1. TodoWrite — mark "Implement" completed, mark "Verify" in_progress.
+  2. Agent (`subagent_type: "osf-verify"`) — pass plan context.
 
 **Step 2: Independent Verify**
-Immediately use Agent tool with `subagent_type: "osf-verify"`. Pass plan context. When osf-verify returns, immediately proceed to Step 3 in the same turn.
+The Agent call above IS Step 2. When osf-verify returns, immediately proceed to Step 3 in the same turn.
 
 **Step 3: Verify-Fix Loop**
-Same as Full pipeline Step 4:
-  1. Use Agent tool with `subagent_type: "osf-apply"` to fix CRITICALs. Do NOT fix code yourself.
-  2. Use Agent tool with `subagent_type: "osf-verify"` to re-verify. Do NOT skip re-verify.
-  3. Repeat until 0 CRITICALs. Max 3 rounds.
+Same as Full pipeline Step 4 — but no archive at the end:
+  1. Update TodoWrite — mark "Resolve CRITICALs" in_progress (if CRITICALs exist).
+  2. Use Agent tool with `subagent_type: "osf-apply"` to fix CRITICALs. Do NOT fix code yourself.
+  3. Use Agent tool with `subagent_type: "osf-verify"` to re-verify. Do NOT skip re-verify.
+  4. Repeat until 0 CRITICALs. Max 3 rounds.
 
-When verify passes with 0 CRITICALs, print the Done announcement. No archive step — Verified pipeline has no spec, so there is nothing to archive.
+When verify passes with 0 CRITICALs, your next response must contain:
+  1. TodoWrite — mark "Verify" completed.
+  2. The Done announcement.
+
+No archive step — Verified pipeline has no spec, so there is nothing to archive.
 
 ### Light Pipeline (implement only)
 
 **Step 1: Implement**
-Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself. When osf-apply returns, print the Done announcement.
+Use Agent tool with `subagent_type: "osf-apply"`. Pass plan context (no spec — use direct plan mode). Do NOT write or edit code yourself.
+
+When osf-apply returns, your next response must contain:
+  1. TodoWrite — mark "Implement" completed.
+  2. The Done announcement.
 
 osf-apply's internal auto-verify handles basic quality checks.
 
