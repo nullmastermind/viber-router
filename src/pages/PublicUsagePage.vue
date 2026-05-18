@@ -99,12 +99,46 @@
         <!-- Setup -->
         <div class="text-subtitle1 q-mb-sm">Setup</div>
         <q-card bordered flat class="q-mb-lg">
-          <q-tabs v-model="setupTab" dense no-caps active-color="primary" align="left" class="text-caption">
-            <q-tab name="claude-code" label="Claude Code" />
-          </q-tabs>
-          <q-separator />
+          <div class="vr-setup-layout">
+            <q-tabs v-model="setupTab" :vertical="toolTabsVertical" dense no-caps active-color="primary" indicator-color="primary" class="text-caption vr-tool-tabs">
+              <q-tab name="claude-code">
+                <template #default>
+                  <div class="row items-center q-gutter-xs">
+                    <img src="/claude.png" alt="" style="width: 16px; height: 16px" />
+                    <span>Claude Code</span>
+                  </div>
+                </template>
+              </q-tab>
+              <q-tab name="codex">
+                <template #default>
+                  <div class="row items-center q-gutter-xs">
+                    <img src="/codex.png" alt="" style="width: 16px; height: 16px" />
+                    <span>Codex</span>
+                  </div>
+                </template>
+              </q-tab>
+            </q-tabs>
+            <q-separator :vertical="toolTabsVertical" />
+            <div class="col">
+              <div class="q-px-sm q-pt-xs">
+                <q-tabs v-model="setupOs" dense no-caps active-color="primary" indicator-color="primary" align="left" class="text-caption vr-os-tabs">
+                  <q-tab name="windows" label="Windows" />
+              <q-tab name="linux" label="macOS / Linux" />
+            </q-tabs>
+          </div>
           <q-tab-panels v-model="setupTab" animated>
             <q-tab-panel name="claude-code" class="q-pa-sm">
+              <q-banner dense class="q-mb-sm vr-info-banner" style="font-size: 12px">
+                <template #avatar>
+                  <q-icon name="info" size="xs" />
+                </template>
+                <div class="text-weight-medium">Step 1: Install Claude Code</div>
+                <div class="q-mb-xs">If Claude Code is not installed yet, run this command in your terminal:</div>
+                <div class="row items-center no-wrap">
+                  <code style="font-size: 11px; flex: 1; min-width: 0; word-break: break-all">{{ claudeInstallCmd }}</code>
+                  <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy Claude Code install command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(claudeInstallCmd)" />
+                </div>
+              </q-banner>
               <div class="row q-col-gutter-sm q-mb-sm">
                 <div class="col-6 col-sm-3">
                   <q-select
@@ -145,10 +179,58 @@
               </div>
               <div class="row items-start no-wrap" @mouseenter="setupHovered = true" @mouseleave="setupHovered = false">
                 <code style="font-size: 12px; flex: 1; min-width: 0; word-break: break-all; white-space: pre-wrap">{{ setupHovered ? claudeCodeCmd : maskedClaudeCodeCmd }}</code>
-                <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy setup command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(claudeCodeCmd)" />
+                <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy Claude Code setup command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(claudeCodeCmd)" />
+              </div>
+            </q-tab-panel>
+            <q-tab-panel name="codex" class="q-pa-sm">
+              <q-banner dense class="q-mb-sm vr-info-banner" style="font-size: 12px">
+                <template #avatar>
+                  <q-icon name="info" size="xs" />
+                </template>
+                <div class="text-weight-medium">Requirements</div>
+                <div class="q-mb-xs">Codex CLI requires Node.js 22+ and npm. The setup script will install Codex CLI automatically if missing.</div>
+                <div class="row items-center no-wrap">
+                  <code style="font-size: 11px; flex: 1; min-width: 0; word-break: break-all">{{ codexInstallCmd }}</code>
+                  <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy Codex install command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(codexInstallCmd)" />
+                </div>
+              </q-banner>
+              <div class="row q-col-gutter-sm q-mb-sm">
+                <div class="col-6 col-sm-4">
+                  <q-select
+                    v-model="selectedCodexSmall"
+                    :options="data?.allowed_models ?? []"
+                    label="Small"
+                    dense outlined
+                    aria-label="Select Codex small model"
+                  />
+                </div>
+                <div class="col-6 col-sm-4">
+                  <q-select
+                    v-model="selectedCodexMedium"
+                    :options="data?.allowed_models ?? []"
+                    label="Medium"
+                    dense outlined
+                    aria-label="Select Codex medium model"
+                  />
+                </div>
+                <div class="col-6 col-sm-4">
+                  <q-select
+                    v-model="selectedCodexLarge"
+                    :options="data?.allowed_models ?? []"
+                    label="Large"
+                    dense outlined
+                    aria-label="Select Codex large model"
+                  />
+                </div>
+              </div>
+              <div class="row items-start no-wrap" @mouseenter="codexHovered = true" @mouseleave="codexHovered = false">
+                <code style="font-size: 12px; flex: 1; min-width: 0; word-break: break-all; white-space: pre-wrap">{{ codexHovered ? codexCmd : maskedCodexCmd }}</code>
+                <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy Codex setup command" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(codexCmd)" />
               </div>
             </q-tab-panel>
           </q-tab-panels>
+            </div>
+          </div>
         </q-card>
 
         <!-- Subscriptions -->
@@ -927,7 +1009,21 @@ const setupTab = ref('claude-code');
 const selectedOpus = ref('');
 const selectedSonnet = ref('');
 const selectedHaiku = ref('');
+const selectedCodexSmall = ref('');
+const selectedCodexMedium = ref('');
+const selectedCodexLarge = ref('');
 const selectedSubAgent = ref('');
+function detectOs(): 'windows' | 'linux' {
+  if (typeof navigator === 'undefined') return 'linux';
+  const ua = navigator.userAgent || '';
+  const platform = (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform
+    || navigator.platform
+    || '';
+  if (/Windows|Win32|Win64|WOW64/i.test(ua) || /Win/i.test(platform)) return 'windows';
+  return 'linux';
+}
+const setupOs = ref<'windows' | 'linux'>(detectOs());
+const toolTabsVertical = computed(() => $q.screen.gt.xs);
 const showQr = ref(false);
 const qrDataUrl = ref('');
 const showEndpointDialog = ref(false);
@@ -971,7 +1067,6 @@ watch(data, (d) => {
   const defaultOpus = models.find((m) => m.includes('opus')) ?? models[0] ?? '';
   const defaultSonnet = models.find((m) => m.includes('sonnet')) ?? models[0] ?? '';
   const defaultHaiku = models.find((m) => m.includes('haiku')) ?? models[0] ?? '';
-  const defaultSubAgent = models.find((m) => m.includes('sonnet')) ?? models[0] ?? '';
   const stored = localStorage.getItem(`model-selections-${d.api_key}`);
   if (stored) {
     try {
@@ -980,11 +1075,17 @@ watch(data, (d) => {
         sonnet?: string;
         haiku?: string;
         subAgent?: string;
+        codexSmall?: string;
+        codexMedium?: string;
+        codexLarge?: string;
       };
       selectedOpus.value = models.includes(parsed.opus ?? '') ? parsed.opus ?? '' : defaultOpus;
       selectedSonnet.value = models.includes(parsed.sonnet ?? '') ? parsed.sonnet ?? '' : defaultSonnet;
       selectedHaiku.value = models.includes(parsed.haiku ?? '') ? parsed.haiku ?? '' : defaultHaiku;
-      selectedSubAgent.value = models.includes(parsed.subAgent ?? '') ? parsed.subAgent ?? '' : defaultSubAgent;
+      selectedSubAgent.value = models.includes(parsed.subAgent ?? '') ? parsed.subAgent ?? '' : defaultSonnet;
+      selectedCodexSmall.value = models.includes(parsed.codexSmall ?? '') ? parsed.codexSmall ?? '' : defaultHaiku;
+      selectedCodexMedium.value = models.includes(parsed.codexMedium ?? '') ? parsed.codexMedium ?? '' : defaultSonnet;
+      selectedCodexLarge.value = models.includes(parsed.codexLarge ?? '') ? parsed.codexLarge ?? '' : defaultOpus;
       return;
     } catch {
       // Ignore invalid stored model selections.
@@ -993,7 +1094,10 @@ watch(data, (d) => {
   selectedOpus.value = defaultOpus;
   selectedSonnet.value = defaultSonnet;
   selectedHaiku.value = defaultHaiku;
-  selectedSubAgent.value = defaultSubAgent;
+  selectedSubAgent.value = defaultSonnet;
+  selectedCodexSmall.value = defaultHaiku;
+  selectedCodexMedium.value = defaultSonnet;
+  selectedCodexLarge.value = defaultOpus;
 });
 
 function saveModelSelections() {
@@ -1003,10 +1107,13 @@ function saveModelSelections() {
     sonnet: selectedSonnet.value,
     haiku: selectedHaiku.value,
     subAgent: selectedSubAgent.value,
+    codexSmall: selectedCodexSmall.value,
+    codexMedium: selectedCodexMedium.value,
+    codexLarge: selectedCodexLarge.value,
   }));
 }
 
-watch([selectedOpus, selectedSonnet, selectedHaiku, selectedSubAgent], saveModelSelections);
+watch([selectedOpus, selectedSonnet, selectedHaiku, selectedSubAgent, selectedCodexSmall, selectedCodexMedium, selectedCodexLarge], saveModelSelections);
 
 const routeKey = computed(() => storedKey.value || undefined);
 
@@ -1019,25 +1126,67 @@ const maskedKey = computed(() => {
   return `${key.slice(0, key.indexOf('-', 3) + 1)}****${key.slice(-4)}`;
 });
 
-const claudeCodeCmd = computed(() => {
-  if (!data.value) return '';
-  const opus = selectedOpus.value || 'claude-opus-4-6';
-  const sonnet = selectedSonnet.value || 'claude-sonnet-4-6';
-  const haiku = selectedHaiku.value || 'claude-haiku-4-5-20251001';
-  const subAgent = selectedSubAgent.value || sonnet;
-  return `npx -y superclaude-cli@latest ${data.value.api_key} ${baseUrl.value} --opus-model ${opus} --sonnet-model ${sonnet} --haiku-model ${haiku} --sub-agent-model ${subAgent}`;
-});
+function wrapOsCommand(url: string): string {
+  return setupOs.value === 'windows'
+    ? `irm "${url}" | iex`
+    : `curl -fsSL "${url}" | sh`;
+}
 
-const maskedClaudeCodeCmd = computed(() => {
-  if (!data.value) return '';
+function buildClaudeCodeUrl(key: string): string {
   const opus = selectedOpus.value || 'claude-opus-4-6';
   const sonnet = selectedSonnet.value || 'claude-sonnet-4-6';
-  const haiku = selectedHaiku.value || 'claude-haiku-4-5-20251001';
-  const subAgent = selectedSubAgent.value || sonnet;
-  return `npx -y superclaude-cli@latest ${maskedKey.value} ${baseUrl.value} --opus-model ${opus} --sonnet-model ${sonnet} --haiku-model ${haiku} --sub-agent-model ${subAgent}`;
-});
+  const haiku = selectedHaiku.value || 'claude-haiku-4-5';
+  const subagent = selectedSubAgent.value || sonnet;
+  const params = new URLSearchParams({
+    key,
+    os: setupOs.value,
+    endpoint: baseUrl.value,
+    haiku,
+    sonnet,
+    opus,
+    subagent,
+  });
+  return `${baseUrl.value}/api/v1/llm/setup-claudecode?${params.toString()}`;
+}
+
+function buildCodexUrl(key: string): string {
+  const small = selectedCodexSmall.value || 'claude-haiku-4-5';
+  const medium = selectedCodexMedium.value || 'claude-sonnet-4-6';
+  const large = selectedCodexLarge.value || 'claude-opus-4-6';
+  const endpoint = data.value?.openai_compat_base_url || baseUrl.value;
+  const params = new URLSearchParams({
+    key,
+    os: setupOs.value,
+    endpoint,
+    small,
+    medium,
+    large,
+  });
+  return `${baseUrl.value}/api/v1/llm/setup-codex?${params.toString()}`;
+}
+
+const claudeCodeCmd = computed(() =>
+  data.value ? wrapOsCommand(buildClaudeCodeUrl(data.value.api_key)) : '',
+);
+const maskedClaudeCodeCmd = computed(() =>
+  data.value ? wrapOsCommand(buildClaudeCodeUrl(maskedKey.value)) : '',
+);
+const codexCmd = computed(() =>
+  data.value ? wrapOsCommand(buildCodexUrl(data.value.api_key)) : '',
+);
+const maskedCodexCmd = computed(() =>
+  data.value ? wrapOsCommand(buildCodexUrl(maskedKey.value)) : '',
+);
 
 const setupHovered = ref(false);
+const codexHovered = ref(false);
+
+const claudeInstallCmd = computed(() =>
+  setupOs.value === 'windows'
+    ? 'irm https://claude.ai/install.ps1 | iex'
+    : 'curl -fsSL https://claude.ai/install.sh | bash',
+);
+const codexInstallCmd = computed(() => 'npm install -g @openai/codex');
 
 function copyText(text: string) {
   copyToClipboard(text).then(() =>
@@ -1685,6 +1834,57 @@ onUnmounted(() => {
 :deep(.usage-total-row) > td {
   background-color: var(--vr-bg-elevated, rgba(255, 255, 255, 0.04));
   border-top: 1px solid var(--vr-border, rgba(255, 255, 255, 0.12));
+}
+
+.vr-info-banner {
+  background-color: var(--vr-bg-elevated, rgba(0, 0, 0, 0.04));
+  color: var(--vr-text-primary, inherit);
+  border: 1px solid var(--vr-border, rgba(0, 0, 0, 0.12));
+  border-radius: 4px;
+}
+
+.vr-os-tabs {
+  min-height: 28px;
+}
+.vr-os-tabs :deep(.q-tab) {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.vr-setup-layout {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.vr-setup-layout > .col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 599px) {
+  .vr-setup-layout {
+    flex-direction: column;
+  }
+  .vr-tool-tabs {
+    min-width: 0 !important;
+  }
+  .vr-tool-tabs :deep(.q-tab) {
+    justify-content: center;
+    padding: 6px 12px;
+  }
+}
+
+.vr-tool-tabs {
+  min-width: 140px;
+}
+.vr-tool-tabs :deep(.q-tab) {
+  justify-content: flex-start;
+  padding: 8px 12px;
+  min-height: 36px;
+}
+.vr-tool-tabs :deep(.q-tab__content) {
+  min-width: 0;
 }
 
 .usage-table-wrap {

@@ -12,6 +12,7 @@ use uuid::Uuid;
 mod admin;
 mod health;
 pub mod key_parser;
+mod llm;
 mod proxy;
 mod public;
 
@@ -115,6 +116,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", axum::routing::get(health::health_check))
         .nest("/api/admin", admin::router(state.clone()))
         .nest("/api/public", public::router())
+        .nest("/api/v1/llm", llm::router())
         .nest("/v1", proxy::router().layer(cors))
         .with_state(state)
         .fallback_service(serve_spa)
