@@ -25,6 +25,15 @@
           :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
           @click="toggleDark"
         />
+        <q-btn
+          v-if="routeKey"
+          flat dense round
+          icon="logout"
+          aria-label="Sign out — clear key and return to entry"
+          @click="goToForm"
+        >
+          <q-tooltip>Sign out</q-tooltip>
+        </q-btn>
       </div>
 
       <!-- Key input form (when no key in route or not yet loaded) -->
