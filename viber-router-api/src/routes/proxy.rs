@@ -737,10 +737,45 @@ async fn try_user_endpoint_waterfall(
         upstream_req = upstream_req.body(transformed_body);
 
         let start = std::time::Instant::now();
-        match upstream_req.send().await {
+        tracing::debug!(
+            endpoint_id = %endpoint.id,
+            endpoint_name = %endpoint.name,
+            mode,
+            "User endpoint waterfall: attempting upstream"
+        );
+        // Per-attempt header timeout. The shared http_client has an 8h overall timeout
+        // suitable for long LLM streams, but we don't want a slow/hanging upstream
+        // to stall the whole fallback chain. Apply timeout only to receiving response
+        // headers — the body stream then proceeds without artificial cap.
+        const HEADER_TIMEOUT_SECS: u64 = 30;
+        let send_fut = upstream_req.send();
+        let send_result =
+            match tokio::time::timeout(std::time::Duration::from_secs(HEADER_TIMEOUT_SECS), send_fut).await {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::warn!(
+                        endpoint_id = %endpoint.id,
+                        endpoint_name = %endpoint.name,
+                        mode,
+                        timeout_secs = HEADER_TIMEOUT_SECS,
+                        latency_ms = start.elapsed().as_millis() as i32,
+                        "User endpoint header timeout, trying next"
+                    );
+                    continue;
+                }
+            };
+        match send_result {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if resp.status().is_success() {
+                    tracing::debug!(
+                        endpoint_id = %endpoint.id,
+                        endpoint_name = %endpoint.name,
+                        mode,
+                        status,
+                        latency_ms = start.elapsed().as_millis() as i32,
+                        "User endpoint upstream succeeded"
+                    );
                     return Some(
                         build_user_endpoint_success_response(
                             state,
@@ -769,6 +804,7 @@ async fn try_user_endpoint_waterfall(
                     endpoint_name = %endpoint.name,
                     mode,
                     error = %error,
+                    latency_ms = start.elapsed().as_millis() as i32,
                     "User endpoint connection error, trying next"
                 );
             }
@@ -927,6 +963,13 @@ async fn fallback_or_error(
     error_type: &str,
     message: &str,
 ) -> Response {
+    let fallback_start = std::time::Instant::now();
+    tracing::info!(
+        error_type,
+        path = %original_uri.path(),
+        endpoint_count = endpoints.iter().filter(|ep| ep.priority_mode == "fallback").count(),
+        "Entering fallback waterfall"
+    );
     if let Some(resp) = try_user_endpoint_waterfall(
         state,
         endpoints,
@@ -941,9 +984,18 @@ async fn fallback_or_error(
     )
     .await
     {
+        tracing::info!(
+            elapsed_ms = fallback_start.elapsed().as_millis() as i64,
+            "Fallback waterfall returned a response"
+        );
         return resp;
     }
 
+    tracing::warn!(
+        elapsed_ms = fallback_start.elapsed().as_millis() as i64,
+        error_type,
+        "Fallback waterfall exhausted, returning error"
+    );
     api_error(original_uri.path(), StatusCode::TOO_MANY_REQUESTS, error_type, message)
 }
 
@@ -1012,10 +1064,34 @@ async fn fallback_or_subscription_error(
 }
 
 async fn proxy_handler(
+    state: State<AppState>,
+    original_uri: OriginalUri,
+    req: Request,
+) -> Response {
+    let start = std::time::Instant::now();
+    let path = original_uri.0.path().to_string();
+    let method = req.method().to_string();
+    tracing::info!(%method, path = %path, "proxy: request start");
+    let resp = proxy_handler_inner(state, original_uri, req).await;
+    let status = resp.status().as_u16();
+    let elapsed_ms = start.elapsed().as_millis() as i64;
+    if elapsed_ms > 1000 {
+        tracing::warn!(%method, path = %path, status, elapsed_ms, "proxy: SLOW request");
+    } else {
+        tracing::info!(%method, path = %path, status, elapsed_ms, "proxy: request done");
+    }
+    resp
+}
+
+async fn proxy_handler_inner(
     State(state): State<AppState>,
     OriginalUri(original_uri): OriginalUri,
     req: Request,
 ) -> Response {
+    let t0 = std::time::Instant::now();
+    let log_step = |label: &'static str, t: &std::time::Instant| {
+        tracing::info!(label, elapsed_ms = t.elapsed().as_millis() as i64, "proxy: checkpoint");
+    };
     // Check blocked paths first — before any auth
     let request_path = original_uri.path();
     let blocked = match cache::get_blocked_paths(&state.redis).await {
@@ -1077,6 +1153,7 @@ async fn proxy_handler(
     let parsed = parse_api_key(&raw_key);
 
     // Look up group config using the extracted group key
+    log_step("auth_parsed", &t0);
     let config = match resolve_group_config(&state, &parsed.group_key).await {
         Some(c) => c,
         None => {
@@ -1168,6 +1245,7 @@ async fn proxy_handler(
     }
 
     // Capture request parts
+    log_step("config_resolved", &t0);
     let method = req.method().clone();
     let headers = req.headers().clone();
     let body_bytes = match axum::body::to_bytes(req.into_body(), 100 * 1024 * 1024).await {
@@ -1183,6 +1261,7 @@ async fn proxy_handler(
     };
 
     let client = &state.http_client;
+    log_step("body_read", &t0);
     let mut any_server_attempted = false;
     let mut any_rate_limited = false;
 
@@ -1202,6 +1281,13 @@ async fn proxy_handler(
 
     // Estimate input tokens once before the failover loop (used for max_input_tokens skip)
     let estimated_tokens: Option<usize> = estimate_input_tokens(&body_bytes);
+    tracing::debug!(
+        path = %request_path,
+        ?request_model,
+        body_bytes = body_bytes.len(),
+        group_id = %config.group_id,
+        "proxy: parsed request, entering server selection"
+    );
 
     // Model allowlist validation
     if !config.allowed_models.is_empty() {
@@ -1969,8 +2055,23 @@ async fn proxy_handler(
         upstream_req = upstream_req.body(transformed_body.clone());
 
         let server_start = std::time::Instant::now();
+        tracing::info!(
+            server = %server.server_name,
+            url = %upstream_url,
+            t_elapsed_ms = t0.elapsed().as_millis() as i64,
+            "proxy: sending to upstream"
+        );
         let upstream_resp = match upstream_req.send().await {
-            Ok(resp) => resp,
+            Ok(resp) => {
+                tracing::info!(
+                    server = %server.server_name,
+                    status = resp.status().as_u16(),
+                    upstream_ms = server_start.elapsed().as_millis() as i64,
+                    t_elapsed_ms = t0.elapsed().as_millis() as i64,
+                    "proxy: upstream headers received"
+                );
+                resp
+            }
             Err(_) => {
                 // Connection error → record attempt and try next server
                 let is_first = failover_chain.is_empty();

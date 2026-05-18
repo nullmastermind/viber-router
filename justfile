@@ -7,6 +7,9 @@ dev-ui:
 dev-api:
     cd {{justfile_directory()}}/viber-router-api && cargo run
 
+dev-api-watch:
+    cd {{justfile_directory()}}/viber-router-api && cargo watch -x run
+
 check:
     cd {{justfile_directory()}} && bun run vue-tsc --noEmit
     cd {{justfile_directory()}} && bun run biome lint ./src

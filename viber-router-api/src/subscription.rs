@@ -1047,9 +1047,21 @@ pub async fn wait_for_tpm(state: &AppState, sub_id: Uuid, tpm: Option<f64>) -> R
         };
 
         if attempt == 5 {
+            tracing::warn!(
+                %sub_id,
+                tpm_limit = tpm,
+                "wait_for_tpm: budget exhausted after 5 retries, giving up"
+            );
             return Err(());
         }
 
+        tracing::warn!(
+            %sub_id,
+            tpm_limit = tpm,
+            attempt,
+            sleep_secs = ttl,
+            "wait_for_tpm: TPM budget exhausted, sleeping until window resets"
+        );
         tokio::time::sleep(Duration::from_secs(ttl as u64)).await;
     }
 

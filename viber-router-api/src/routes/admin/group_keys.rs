@@ -41,7 +41,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_keys).post(create_key))
         .route("/bulk", post(bulk_create_keys))
-        .route("/{key_id}", patch(update_key))
+        .route("/{key_id}", patch(update_key).delete(delete_key))
         .route("/{key_id}/regenerate", post(regenerate_key))
         .nest(
             "/{key_id}/allowed-models",
@@ -312,4 +312,27 @@ async fn regenerate_key(
     // Invalidate old key's cache
     crate::cache::invalidate_group_config(&state.redis, &old_key.api_key).await;
     Ok(Json(key))
+}
+
+async fn delete_key(
+    State(state): State<AppState>,
+    Path((group_id, key_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    let key =
+        sqlx::query_as::<_, GroupKey>("SELECT * FROM group_keys WHERE id = $1 AND group_id = $2")
+            .bind(key_id)
+            .bind(group_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Key not found"))?;
+
+    sqlx::query("DELETE FROM group_keys WHERE id = $1")
+        .bind(key_id)
+        .execute(&state.db)
+        .await
+        .map_err(internal)?;
+
+    crate::cache::invalidate_group_config(&state.redis, &key.api_key).await;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -242,6 +242,9 @@
                       <q-btn flat dense round size="sm" icon="autorenew" aria-label="Regenerate key" @click.stop="onRegenerateSubKey(props.row)">
                         <q-tooltip>Regenerate</q-tooltip>
                       </q-btn>
+                      <q-btn flat dense round size="sm" icon="delete" color="negative" aria-label="Delete key" @click.stop="onDeleteSubKey(props.row)">
+                        <q-tooltip>Delete</q-tooltip>
+                      </q-btn>
                     </q-td>
                   </q-tr>
                   <q-tr v-if="props.expand" :props="props">
@@ -2322,6 +2325,21 @@ async function onRegenerateSubKey(row: GroupKey) {
         $q.notify({ type: 'positive', message: 'Key regenerated' });
       } catch {
         $q.notify({ type: 'negative', message: 'Failed to regenerate key' });
+      }
+    });
+}
+
+async function onDeleteSubKey(row: GroupKey) {
+  if (!group.value) return;
+  $q.dialog({ title: 'Delete Key', message: `Delete key "${row.name}"? This action cannot be undone.`, cancel: true })
+    .onOk(async () => {
+      if (!group.value) return;
+      try {
+        await groupsStore.deleteGroupKey(group.value.id, row.id);
+        loadSubKeys();
+        $q.notify({ type: 'positive', message: 'Key deleted' });
+      } catch {
+        $q.notify({ type: 'negative', message: 'Failed to delete key' });
       }
     });
 }
