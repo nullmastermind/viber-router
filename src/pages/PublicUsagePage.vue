@@ -66,6 +66,11 @@
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ baseUrl }}</code>
               <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy base URL" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(baseUrl)" />
             </div>
+            <div v-if="data.openai_compat_base_url" class="row items-center no-wrap q-mb-xs">
+              <span class="text-caption text-weight-medium" style="min-width: 70px; flex-shrink: 0">OpenAI URL</span>
+              <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ data.openai_compat_base_url }}</code>
+              <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy OpenAI base URL" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(data.openai_compat_base_url ?? '')" />
+            </div>
             <div class="row items-center no-wrap">
               <span class="text-caption text-weight-medium" style="min-width: 70px; flex-shrink: 0">API Key</span>
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ maskedKey }}</code>
@@ -300,6 +305,7 @@
 
 
         <!-- Custom Endpoints -->
+        <template v-if="data.user_endpoints_enabled !== false">
         <div class="row items-center q-mb-sm">
           <div class="text-subtitle1">Custom Endpoints</div>
           <q-space />
@@ -407,6 +413,7 @@
             </q-card-section>
           </q-card>
         </div>
+        </template>
 
         <!-- Usage table -->
         <div class="row items-center q-mb-sm">
@@ -799,6 +806,8 @@ interface UsageData {
   usage: ModelUsage[];
   subscriptions: Subscription[];
   user_endpoints: UserEndpoint[];
+  user_endpoints_enabled?: boolean;
+  openai_compat_base_url?: string | null;
 }
 
 interface TtftDataPoint {

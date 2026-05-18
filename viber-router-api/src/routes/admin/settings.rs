@@ -26,6 +26,8 @@ fn default_settings() -> Settings {
         ct_always_estimate: false,
         ct_anthropic_base_url: None,
         ct_anthropic_api_key: None,
+        user_endpoints_enabled: true,
+        openai_compat_base_url: None,
     }
 }
 
@@ -34,7 +36,7 @@ async fn get_settings(
 ) -> Result<Json<Settings>, (StatusCode, Json<Value>)> {
     let row = sqlx::query_as::<_, Settings>(
         "SELECT telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url \
          FROM settings WHERE id = 1",
     )
     .fetch_optional(&state.db)
@@ -60,6 +62,8 @@ pub struct UpdateSettings {
     pub ct_always_estimate: Option<bool>,
     pub ct_anthropic_base_url: Option<Option<String>>,
     pub ct_anthropic_api_key: Option<Option<String>>,
+    pub user_endpoints_enabled: Option<bool>,
+    pub openai_compat_base_url: Option<Option<String>>,
 }
 
 async fn put_settings(
@@ -69,7 +73,7 @@ async fn put_settings(
     // Fetch current (or defaults) to merge with partial update
     let current = sqlx::query_as::<_, Settings>(
         "SELECT telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url \
          FROM settings WHERE id = 1",
     )
     .fetch_optional(&state.db)
@@ -114,11 +118,26 @@ async fn put_settings(
         Some(v) => v,
         None => current.ct_anthropic_api_key,
     };
+    let user_endpoints_enabled_changed = input.user_endpoints_enabled.is_some();
+    let new_user_endpoints_enabled = input
+        .user_endpoints_enabled
+        .unwrap_or(current.user_endpoints_enabled);
+    let new_openai_compat_base_url = match input.openai_compat_base_url {
+        Some(v) => v.and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+        None => current.openai_compat_base_url,
+    };
 
     let updated = sqlx::query_as::<_, Settings>(
         "INSERT INTO settings (id, telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key) \
-         VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9) \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url) \
+         VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
          ON CONFLICT (id) DO UPDATE SET \
            telegram_bot_token = EXCLUDED.telegram_bot_token, \
            telegram_chat_ids = EXCLUDED.telegram_chat_ids, \
@@ -128,9 +147,11 @@ async fn put_settings(
            timezone = EXCLUDED.timezone, \
            ct_always_estimate = EXCLUDED.ct_always_estimate, \
            ct_anthropic_base_url = EXCLUDED.ct_anthropic_base_url, \
-           ct_anthropic_api_key = EXCLUDED.ct_anthropic_api_key \
+           ct_anthropic_api_key = EXCLUDED.ct_anthropic_api_key, \
+           user_endpoints_enabled = EXCLUDED.user_endpoints_enabled, \
+           openai_compat_base_url = EXCLUDED.openai_compat_base_url \
          RETURNING telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key",
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url",
     )
     .bind(&new_token)
     .bind(&new_chat_ids)
@@ -141,6 +162,8 @@ async fn put_settings(
     .bind(new_ct_always_estimate)
     .bind(&new_ct_anthropic_base_url)
     .bind(&new_ct_anthropic_api_key)
+    .bind(new_user_endpoints_enabled)
+    .bind(&new_openai_compat_base_url)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -156,6 +179,9 @@ async fn put_settings(
     if timezone_changed {
         cache::invalidate_timezone(&state.redis).await;
     }
+    if user_endpoints_enabled_changed {
+        cache::invalidate_user_endpoints_enabled(&state.redis).await;
+    }
 
     Ok(Json(updated))
 }
@@ -165,7 +191,7 @@ async fn post_test_alert(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let settings = sqlx::query_as::<_, Settings>(
         "SELECT telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url \
          FROM settings WHERE id = 1",
     )
     .fetch_optional(&state.db)
@@ -237,7 +263,7 @@ async fn get_telegram_chats(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let settings = sqlx::query_as::<_, Settings>(
         "SELECT telegram_bot_token, telegram_chat_ids, alert_status_codes, alert_cooldown_mins, blocked_paths, \
-         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key \
+         timezone, ct_always_estimate, ct_anthropic_base_url, ct_anthropic_api_key, user_endpoints_enabled, openai_compat_base_url \
          FROM settings WHERE id = 1",
     )
     .fetch_optional(&state.db)

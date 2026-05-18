@@ -160,6 +160,28 @@ pub async fn invalidate_blocked_paths(redis: &Pool) {
     }
 }
 
+const USER_ENDPOINTS_ENABLED_KEY: &str = "settings:user_endpoints_enabled";
+
+/// Returns Ok(Some(enabled)) on cache hit, Ok(None) on miss, Err(()) on Redis failure.
+pub async fn get_user_endpoints_enabled(redis: &Pool) -> Result<Option<bool>, ()> {
+    let mut conn = redis.get().await.map_err(|_| ())?;
+    let data: Option<String> = conn.get(USER_ENDPOINTS_ENABLED_KEY).await.map_err(|_| ())?;
+    Ok(data.map(|d| d == "1"))
+}
+
+pub async fn set_user_endpoints_enabled(redis: &Pool, enabled: bool) {
+    if let Ok(mut conn) = redis.get().await {
+        let val = if enabled { "1" } else { "0" };
+        let _: Result<(), _> = conn.set(USER_ENDPOINTS_ENABLED_KEY, val).await;
+    }
+}
+
+pub async fn invalidate_user_endpoints_enabled(redis: &Pool) {
+    if let Ok(mut conn) = redis.get().await {
+        let _: Result<(), _> = conn.del(USER_ENDPOINTS_ENABLED_KEY).await;
+    }
+}
+
 /// Add a user-agent to the group's seen-UA set.
 /// Returns Ok(true) if the UA is new (SADD returned 1), Ok(false) if already present.
 pub async fn add_group_ua(

@@ -15,6 +15,8 @@ fn default_settings() -> Settings {
         ct_always_estimate: false,
         ct_anthropic_base_url: None,
         ct_anthropic_api_key: None,
+        user_endpoints_enabled: true,
+        openai_compat_base_url: None,
     }
 }
 

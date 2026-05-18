@@ -19,4 +19,11 @@ pub struct Settings {
     pub ct_always_estimate: bool,
     pub ct_anthropic_base_url: Option<String>,
     pub ct_anthropic_api_key: Option<String>,
+    #[serde(default = "default_user_endpoints_enabled")]
+    pub user_endpoints_enabled: bool,
+    pub openai_compat_base_url: Option<String>,
+}
+
+fn default_user_endpoints_enabled() -> bool {
+    true
 }

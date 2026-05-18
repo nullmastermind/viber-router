@@ -658,6 +658,10 @@ async fn load_user_endpoints(state: &AppState, group_key_id: Option<uuid::Uuid>)
         return vec![];
     };
 
+    if !user_endpoints_feature_enabled(state).await {
+        return vec![];
+    }
+
     if let Some(endpoints) = cache::get_user_endpoints(&state.redis, group_key_id).await {
         return endpoints;
     }
@@ -671,6 +675,20 @@ async fn load_user_endpoints(state: &AppState, group_key_id: Option<uuid::Uuid>)
     .unwrap_or_default();
     cache::set_user_endpoints(&state.redis, group_key_id, &endpoints).await;
     endpoints
+}
+
+pub async fn user_endpoints_feature_enabled(state: &AppState) -> bool {
+    if let Ok(Some(v)) = cache::get_user_endpoints_enabled(&state.redis).await {
+        return v;
+    }
+    let row: Option<(bool,)> =
+        sqlx::query_as("SELECT user_endpoints_enabled FROM settings WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
+    let enabled = row.map(|(v,)| v).unwrap_or(true);
+    cache::set_user_endpoints_enabled(&state.redis, enabled).await;
+    enabled
 }
 
 #[allow(clippy::too_many_arguments)]

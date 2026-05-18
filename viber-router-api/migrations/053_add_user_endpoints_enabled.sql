@@ -1,0 +1,2 @@
+ALTER TABLE settings
+ADD COLUMN IF NOT EXISTS user_endpoints_enabled BOOLEAN NOT NULL DEFAULT TRUE;

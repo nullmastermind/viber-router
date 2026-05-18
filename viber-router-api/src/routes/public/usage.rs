@@ -27,6 +27,8 @@ pub struct PublicUsageResponse {
     usage: Vec<ModelUsage>,
     subscriptions: Vec<PublicSubscription>,
     user_endpoints: Vec<crate::models::PublicUserEndpoint>,
+    user_endpoints_enabled: bool,
+    openai_compat_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -284,9 +286,22 @@ pub async fn public_usage(
         group_models.into_iter().map(|(n,)| n).collect()
     };
 
-    let user_endpoints = list_endpoint_responses(&state, key_info.key_id)
-        .await
-        .unwrap_or_default();
+    let user_endpoints_enabled = crate::routes::proxy::user_endpoints_feature_enabled(&state).await;
+    let user_endpoints = if user_endpoints_enabled {
+        list_endpoint_responses(&state, key_info.key_id)
+            .await
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    let openai_compat_base_url: Option<String> =
+        sqlx::query_scalar("SELECT openai_compat_base_url FROM settings WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
 
     Json(PublicUsageResponse {
         key_name: key_info.key_name,
@@ -296,6 +311,8 @@ pub async fn public_usage(
         usage,
         subscriptions,
         user_endpoints,
+        user_endpoints_enabled,
+        openai_compat_base_url,
     })
     .into_response()
 }

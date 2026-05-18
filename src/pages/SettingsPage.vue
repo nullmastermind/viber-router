@@ -15,6 +15,16 @@
           map-options
           class="q-mb-md"
         />
+        <q-input
+          v-model="form.openai_compat_base_url"
+          label="OpenAI-compatible Base URL"
+          outlined
+          dense
+          clearable
+          placeholder="https://example.com/v1"
+          hint="When set, this URL is shown on the public usage page with a copy button"
+          class="q-mb-md"
+        />
         <div v-if="saveError" class="text-negative text-caption q-mb-sm">{{ saveError }}</div>
         <q-btn color="primary" label="Save Settings" :loading="saving" @click="saveSettings" />
       </q-card-section>
@@ -119,6 +129,24 @@
             @keyup.enter="addBlockedPath"
           />
           <q-btn outline dense label="Add" @click="addBlockedPath" />
+        </div>
+
+        <div v-if="saveError" class="text-negative text-caption q-mb-sm">{{ saveError }}</div>
+        <q-btn color="primary" label="Save Settings" :loading="saving" @click="saveSettings" />
+      </q-card-section>
+    </q-card>
+
+    <q-card flat bordered style="max-width: 640px" class="q-mt-md">
+      <q-card-section>
+        <div class="text-subtitle1 q-mb-md">User Custom Endpoints</div>
+
+        <q-toggle
+          v-model="form.user_endpoints_enabled"
+          label="Enable user custom endpoints"
+          class="q-mb-sm"
+        />
+        <div class="text-caption text-grey-7 q-mb-md">
+          When disabled, custom endpoint routing is bypassed and the section is hidden from users.
         </div>
 
         <div v-if="saveError" class="text-negative text-caption q-mb-sm">{{ saveError }}</div>
@@ -278,6 +306,8 @@ interface Settings {
   ct_always_estimate: boolean;
   ct_anthropic_base_url: string | null;
   ct_anthropic_api_key: string | null;
+  user_endpoints_enabled: boolean;
+  openai_compat_base_url: string | null;
 }
 
 interface TelegramChat {
@@ -298,6 +328,8 @@ const form = ref<Settings>({
   ct_always_estimate: false,
   ct_anthropic_base_url: null,
   ct_anthropic_api_key: null,
+  user_endpoints_enabled: true,
+  openai_compat_base_url: null,
 });
 
 const alertStatusCodesStr = computed({
@@ -378,6 +410,8 @@ async function saveSettings() {
       ct_always_estimate: form.value.ct_always_estimate,
       ct_anthropic_base_url: form.value.ct_anthropic_base_url || null,
       ct_anthropic_api_key: form.value.ct_anthropic_api_key || null,
+      user_endpoints_enabled: form.value.user_endpoints_enabled,
+      openai_compat_base_url: form.value.openai_compat_base_url || null,
     });
     form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });
