@@ -483,8 +483,8 @@
             <template v-else-if="uptimeData">
               <div class="row items-center q-mb-sm">
                 <q-badge
-                  :color="statusBadgeColor(uptimeData.status)"
-                  :label="statusBadgeLabel(uptimeData.status)"
+                  :color="statusBadgeColor(overallLatestStatus)"
+                  :label="statusBadgeLabel(overallLatestStatus)"
                   class="text-capitalize"
                 />
               </div>
@@ -509,8 +509,8 @@
                       />
                       <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
                       <q-badge
-                        :color="statusBadgeColor(m.status)"
-                        :label="statusBadgeLabel(m.status)"
+                        :color="statusBadgeColor(modelLatestStatus(m.model, m.status))"
+                        :label="statusBadgeLabel(modelLatestStatus(m.model, m.status))"
                         class="text-capitalize"
                       />
                     </div>
@@ -748,8 +748,8 @@
               />
               <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
               <q-badge
-                :color="statusBadgeColor(m.status)"
-                :label="statusBadgeLabel(m.status)"
+                :color="statusBadgeColor(modelLatestStatus(m.model, m.status))"
+                :label="statusBadgeLabel(modelLatestStatus(m.model, m.status))"
                 class="text-capitalize"
               />
             </div>
@@ -1332,6 +1332,26 @@ const uptimeBuckets = computed<Bucket[]>(() => {
     success: b.successful_requests,
   }));
 });
+
+function statusFromBuckets(buckets: Bucket[], fallback: string): string {
+  for (let i = buckets.length - 1; i >= 0; i--) {
+    const b = buckets[i];
+    if (!b || b.total === 0) continue;
+    const rate = b.success / b.total;
+    if (rate > 0.95) return 'operational';
+    if (rate >= 0.5) return 'degraded';
+    return 'down';
+  }
+  return fallback;
+}
+
+const overallLatestStatus = computed(() =>
+  statusFromBuckets(uptimeBuckets.value, uptimeData.value?.status ?? 'unknown'),
+);
+
+function modelLatestStatus(model: string, fallback: string): string {
+  return statusFromBuckets(modelBucketsMap.value[model] ?? [], fallback);
+}
 
 const modelBucketsMap = computed<Record<string, Bucket[]>>(() => {
   if (!uptimeData.value?.models) return {};
