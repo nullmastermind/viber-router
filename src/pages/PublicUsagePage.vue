@@ -489,23 +489,42 @@
                 />
               </div>
               <UptimeBars :buckets="uptimeBuckets" />
-              <!-- Per-model status rows -->
+              <!-- Starred model rows shown inline; rest available via dialog -->
               <template v-if="uptimeData.models && uptimeData.models.length > 0">
-                <q-separator class="q-my-md" />
-                <div
-                  v-for="m in uptimeData.models"
-                  :key="m.model"
-                  class="q-mb-sm"
-                >
-                  <div class="row items-center q-mb-xs">
-                    <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
-                    <q-badge
-                      :color="statusBadgeColor(m.status)"
-                      :label="statusBadgeLabel(m.status)"
-                      class="text-capitalize"
-                    />
+                <template v-if="starredModelRows.length > 0">
+                  <q-separator class="q-my-md" />
+                  <div
+                    v-for="m in starredModelRows"
+                    :key="m.model"
+                    class="q-mb-sm"
+                  >
+                    <div class="row items-center q-mb-xs">
+                      <q-btn
+                        flat dense round size="sm"
+                        :icon="isStarred(m.model) ? 'star' : 'star_outline'"
+                        :color="isStarred(m.model) ? 'amber' : undefined"
+                        aria-label="Unstar model"
+                        class="q-mr-xs"
+                        @click="toggleStar(m.model)"
+                      />
+                      <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
+                      <q-badge
+                        :color="statusBadgeColor(m.status)"
+                        :label="statusBadgeLabel(m.status)"
+                        class="text-capitalize"
+                      />
+                    </div>
+                    <UptimeBars :buckets="modelBucketsMap[m.model] ?? []" />
                   </div>
-                  <UptimeBars :buckets="modelBucketsMap[m.model] ?? []" />
+                </template>
+                <div class="q-mt-md">
+                  <q-btn
+                    flat dense no-caps
+                    icon="o_expand_more"
+                    label="View all models"
+                    size="sm"
+                    @click="showAllModelsDialog = true"
+                  />
                 </div>
               </template>
             </template>
@@ -699,6 +718,43 @@
         <q-card-section class="text-center">
           <div class="text-subtitle1 q-mb-sm">Scan to open on mobile</div>
           <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR code" style="width: 200px; height: 200px" />
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+
+    <!-- All Models Dialog -->
+    <q-dialog v-model="showAllModelsDialog">
+      <q-card style="min-width: min(640px, 92vw); max-width: 92vw">
+        <q-card-section class="row items-center q-pb-sm">
+          <div class="text-subtitle1">All Models</div>
+          <q-space />
+          <q-btn flat dense round icon="close" v-close-popup aria-label="Close" />
+        </q-card-section>
+        <q-separator />
+        <q-card-section style="max-height: 70vh; overflow: auto">
+          <div
+            v-for="m in (uptimeData?.models ?? [])"
+            :key="m.model"
+            class="q-mb-md"
+          >
+            <div class="row items-center q-mb-xs">
+              <q-btn
+                flat dense round size="sm"
+                :icon="isStarred(m.model) ? 'star' : 'star_outline'"
+                :color="isStarred(m.model) ? 'amber' : undefined"
+                :aria-label="isStarred(m.model) ? 'Unstar model' : 'Star model'"
+                class="q-mr-xs"
+                @click="toggleStar(m.model)"
+              />
+              <span class="text-caption text-weight-medium q-mr-sm">{{ m.model }}</span>
+              <q-badge
+                :color="statusBadgeColor(m.status)"
+                :label="statusBadgeLabel(m.status)"
+                class="text-capitalize"
+              />
+            </div>
+            <UptimeBars :buckets="modelBucketsMap[m.model] ?? []" />
+          </div>
         </q-card-section>
       </q-card>
     </q-dialog>
@@ -1368,6 +1424,45 @@ interface UptimeApiResponse {
 const uptimeData = ref<UptimeApiResponse | null>(null);
 const uptimeLoading = ref(false);
 const uptimeError = ref('');
+
+const showAllModelsDialog = ref(false);
+const starredModels = ref<string[]>([]);
+
+function starredStorageKey(): string | null {
+  const k = data.value?.api_key;
+  return k ? `starred-models-${k}` : null;
+}
+function loadStarredModels() {
+  const key = starredStorageKey();
+  if (!key) { starredModels.value = []; return; }
+  try {
+    const raw = localStorage.getItem(key);
+    starredModels.value = raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    starredModels.value = [];
+  }
+}
+function saveStarredModels() {
+  const key = starredStorageKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(starredModels.value));
+}
+function isStarred(model: string): boolean {
+  return starredModels.value.includes(model);
+}
+function toggleStar(model: string) {
+  const idx = starredModels.value.indexOf(model);
+  if (idx === -1) starredModels.value.push(model);
+  else starredModels.value.splice(idx, 1);
+  saveStarredModels();
+}
+
+const starredModelRows = computed(() => {
+  const models = uptimeData.value?.models ?? [];
+  return models.filter((m) => starredModels.value.includes(m.model));
+});
+
+watch(() => data.value?.api_key, () => loadStarredModels(), { immediate: true });
 
 async function fetchUptime(key: string) {
   uptimeLoading.value = true;
