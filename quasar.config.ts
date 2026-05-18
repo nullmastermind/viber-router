@@ -19,6 +19,7 @@ export default defineConfig((/* ctx */) => {
 		// https://github.com/quasarframework/quasar/tree/dev/extras
 		extras: [
 			'material-icons',
+			'material-icons-outlined',
 		],
 
 		// Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#build

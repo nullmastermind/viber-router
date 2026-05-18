@@ -416,49 +416,52 @@
         </template>
 
         <!-- Usage table -->
-        <div class="row items-center q-mb-sm">
-          <div class="text-subtitle1">Usage ({{ usagePeriodLabels[usagePeriod] }})</div>
-          <q-space />
-          <q-btn-toggle
-            v-model="usagePeriod"
-            flat dense no-caps
-            toggle-color="primary"
-            :options="[
-              { label: 'Today', value: 'today' },
-              { label: 'Yesterday', value: 'yesterday' },
-              { label: 'Week', value: 'week' },
-              { label: 'Month', value: 'month' },
-            ]"
-          />
-          <template v-if="!meterRunning">
-            <q-btn flat dense no-caps icon="timer" label="Meter" size="sm" @click="startMeter" />
-          </template>
-          <template v-else>
-            <span class="q-mr-xs" style="font-family: monospace; font-size: 12px; font-weight: 500">{{ formatElapsed(meterElapsed) }}</span>
-            <span class="meter-pulse q-mr-xs" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--q-positive)" />
-            <q-btn flat dense label="Stop" color="negative" size="sm" @click="stopMeter" />
-          </template>
+        <div class="usage-header q-mb-sm">
+          <div class="text-subtitle1 usage-header-title">Usage ({{ usagePeriodLabels[usagePeriod] }})</div>
+          <div class="usage-header-controls">
+            <q-btn-toggle
+              v-model="usagePeriod"
+              flat dense no-caps
+              class="period-toggle"
+              toggle-color="primary"
+              :options="[
+                { label: 'Today', value: 'today' },
+                { label: 'Yesterday', value: 'yesterday' },
+                { label: 'Week', value: 'week' },
+                { label: 'Month', value: 'month' },
+              ]"
+            />
+            <template v-if="!meterRunning">
+              <q-btn flat dense no-caps icon="o_timer" label="Meter" size="sm" @click="startMeter" />
+            </template>
+            <template v-else>
+              <span class="q-mr-xs" style="font-family: monospace; font-size: 12px; font-weight: 500">{{ formatElapsed(meterElapsed) }}</span>
+              <span class="meter-pulse q-mr-xs" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--q-positive)" />
+              <q-btn flat dense label="Stop" color="negative" size="sm" @click="stopMeter" />
+            </template>
+          </div>
         </div>
         <div v-if="!data.usage.length" class="text-caption" style="color: var(--vr-text-secondary)">No usage data</div>
-        <q-table
-          v-else
-          flat bordered dense
-          :rows="data.usage"
-          :columns="usageColumns"
-          row-key="model"
-          :pagination="{ rowsPerPage: 0 }"
-          hide-pagination
-        >
-          <template #bottom-row>
-            <q-tr class="usage-total-row">
-              <q-td class="text-weight-bold">Total</q-td>
-              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.input) }}</q-td>
-              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.output) }}</q-td>
-              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.requests) }}</q-td>
-              <q-td class="text-right text-weight-bold">${{ usageTotals.cost.toFixed(4) }}</q-td>
-            </q-tr>
-          </template>
-        </q-table>
+        <div v-else class="usage-table-wrap">
+          <q-table
+            flat bordered dense
+            :rows="data.usage"
+            :columns="usageColumns"
+            row-key="model"
+            :pagination="{ rowsPerPage: 0 }"
+            hide-pagination
+          >
+            <template #bottom-row>
+              <q-tr class="usage-total-row">
+                <q-td class="text-weight-bold">Total</q-td>
+                <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.input) }}</q-td>
+                <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.output) }}</q-td>
+                <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.requests) }}</q-td>
+                <q-td class="text-right text-weight-bold">${{ usageTotals.cost.toFixed(4) }}</q-td>
+              </q-tr>
+            </template>
+          </q-table>
+        </div>
 
         <!-- Status -->
         <div class="text-subtitle1 q-mb-sm q-mt-lg">Status</div>
@@ -1558,5 +1561,63 @@ onUnmounted(() => {
 :deep(.usage-total-row) > td {
   background-color: var(--vr-bg-elevated, rgba(255, 255, 255, 0.04));
   border-top: 1px solid var(--vr-border, rgba(255, 255, 255, 0.12));
+}
+
+.usage-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.usage-table-wrap :deep(.q-table) {
+  min-width: 520px;
+}
+
+.usage-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.usage-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.usage-header-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+@media (max-width: 599px) {
+  .usage-header-title { flex: 1 0 100%; }
+  .usage-header-controls { flex: 0 0 100%; justify-content: flex-start; }
+}
+
+.period-toggle {
+  display: inline-flex;
+  border: 1px solid var(--vr-border, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
+}
+.period-toggle :deep(.q-btn) {
+  font-size: 12px;
+  padding: 4px 12px;
+  min-height: 28px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  color: var(--vr-text-secondary, rgba(255, 255, 255, 0.6));
+  background: transparent;
+}
+.period-toggle :deep(.q-btn + .q-btn) {
+  border-left: 1px solid var(--vr-border, rgba(255, 255, 255, 0.14));
+}
+.period-toggle :deep(.q-btn--active) {
+  color: var(--q-primary);
+  background: rgba(25, 118, 210, 0.12);
+}
+.period-toggle :deep(.q-btn__content) {
+  font-weight: 500;
 }
 </style>

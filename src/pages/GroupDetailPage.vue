@@ -540,6 +540,7 @@
             <q-btn-toggle
               v-model="tokenUsagePeriod"
               flat dense no-caps
+              class="period-toggle"
               toggle-color="primary"
               :options="[
                 { label: 'Today', value: 'today' },
@@ -3356,7 +3357,7 @@ async function loadTtftKeys() {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .disabled-server {
   opacity: 0.5;
 }
@@ -3371,5 +3372,30 @@ async function loadTtftKeys() {
   font: inherit;
   padding: 0;
   text-align: left;
+}
+
+.period-toggle {
+  display: inline-flex;
+  border: 1px solid var(--vr-border, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
+}
+.period-toggle :deep(.q-btn) {
+  font-size: 12px;
+  padding: 4px 12px;
+  min-height: 28px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  color: var(--vr-text-secondary, rgba(255, 255, 255, 0.6));
+  background: transparent;
+}
+.period-toggle :deep(.q-btn + .q-btn) {
+  border-left: 1px solid var(--vr-border, rgba(255, 255, 255, 0.14));
+}
+.period-toggle :deep(.q-btn--active) {
+  color: var(--q-primary);
+  background: rgba(25, 118, 210, 0.12);
 }
 </style>
