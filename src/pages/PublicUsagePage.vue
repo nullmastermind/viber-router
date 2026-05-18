@@ -71,17 +71,17 @@
         <q-card bordered flat class="q-mb-md">
           <q-card-section class="q-py-sm">
             <div class="row items-center no-wrap q-mb-xs">
-              <span class="text-caption text-weight-medium" style="min-width: 70px; flex-shrink: 0">Base URL</span>
+              <span class="text-caption text-weight-medium" style="width: 90px; flex-shrink: 0">Base URL</span>
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ baseUrl }}</code>
               <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy base URL" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(baseUrl)" />
             </div>
             <div v-if="data.openai_compat_base_url" class="row items-center no-wrap q-mb-xs">
-              <span class="text-caption text-weight-medium" style="min-width: 70px; flex-shrink: 0">OpenAI URL</span>
+              <span class="text-caption text-weight-medium" style="width: 90px; flex-shrink: 0">OpenAI URL</span>
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ data.openai_compat_base_url }}</code>
               <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy OpenAI base URL" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(data.openai_compat_base_url ?? '')" />
             </div>
             <div class="row items-center no-wrap">
-              <span class="text-caption text-weight-medium" style="min-width: 70px; flex-shrink: 0">API Key</span>
+              <span class="text-caption text-weight-medium" style="width: 90px; flex-shrink: 0">API Key</span>
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ maskedKey }}</code>
               <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy API key" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(data.api_key)" />
             </div>
