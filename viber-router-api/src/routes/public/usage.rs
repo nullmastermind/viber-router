@@ -16,6 +16,8 @@ use crate::subscription;
 pub struct UsageParams {
     key: Option<String>,
     period: Option<String>,
+    start: Option<chrono::DateTime<chrono::Utc>>,
+    end: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -125,23 +127,43 @@ pub async fn public_usage(
         _ => "30 days",
     };
 
-    // Query usage aggregated by model (no server info), for the selected period
-    let usage = sqlx::query_as::<_, ModelUsage>(
-        &format!(
+    // If explicit start/end provided, use them; otherwise use the period interval.
+    let usage = if let (Some(start), Some(end)) = (params.start, params.end) {
+        sqlx::query_as::<_, ModelUsage>(
             "SELECT model, \
              (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_creation_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0))::bigint as effective_input_tokens, \
              COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens, \
              COUNT(*)::bigint as request_count, \
              SUM(cost_usd) as cost_usd \
              FROM token_usage_logs \
-             WHERE group_key_id = $1 AND created_at >= now() - interval '{interval}' \
-             GROUP BY model ORDER BY model"
-        ),
-    )
-    .bind(key_info.key_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+             WHERE group_key_id = $1 AND created_at >= $2 AND created_at <= $3 \
+             GROUP BY model ORDER BY model",
+        )
+        .bind(key_info.key_id)
+        .bind(start)
+        .bind(end)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        // Query usage aggregated by model (no server info), for the selected period
+        sqlx::query_as::<_, ModelUsage>(
+            &format!(
+                "SELECT model, \
+                 (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_creation_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0))::bigint as effective_input_tokens, \
+                 COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens, \
+                 COUNT(*)::bigint as request_count, \
+                 SUM(cost_usd) as cost_usd \
+                 FROM token_usage_logs \
+                 WHERE group_key_id = $1 AND created_at >= now() - interval '{interval}' \
+                 GROUP BY model ORDER BY model"
+            ),
+        )
+        .bind(key_info.key_id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    };
 
     // Query subscriptions and enrich with cost_used + window_reset_at
     let subs = sqlx::query_as::<_, crate::models::KeySubscription>(

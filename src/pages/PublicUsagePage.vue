@@ -424,11 +424,10 @@
             flat dense no-caps
             toggle-color="primary"
             :options="[
-              { label: '1h', value: '1h' },
-              { label: '6h', value: '6h' },
-              { label: '24h', value: '24h' },
-              { label: '7d', value: '7d' },
-              { label: '30d', value: '30d' },
+              { label: 'Today', value: 'today' },
+              { label: 'Yesterday', value: 'yesterday' },
+              { label: 'Week', value: 'week' },
+              { label: 'Month', value: 'month' },
             ]"
           />
           <template v-if="!meterRunning">
@@ -449,7 +448,17 @@
           row-key="model"
           :pagination="{ rowsPerPage: 0 }"
           hide-pagination
-        />
+        >
+          <template #bottom-row>
+            <q-tr class="usage-total-row">
+              <q-td class="text-weight-bold">Total</q-td>
+              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.input) }}</q-td>
+              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.output) }}</q-td>
+              <q-td class="text-right text-weight-bold">{{ formatCompact(usageTotals.requests) }}</q-td>
+              <q-td class="text-right text-weight-bold">${{ usageTotals.cost.toFixed(4) }}</q-td>
+            </q-tr>
+          </template>
+        </q-table>
 
         <!-- Status -->
         <div class="text-subtitle1 q-mb-sm q-mt-lg">Status</div>
@@ -993,7 +1002,7 @@ async function stopMeter() {
   const elapsed = meterElapsed.value;
   const snapshot = meterSnapshot.value;
   try {
-    const res = await api.get<UsageData>('/api/public/usage', { params: { key: routeKey.value, period: usagePeriod.value } });
+    const res = await api.get<UsageData>('/api/public/usage', { params: { key: routeKey.value, ...usagePeriodParams() } });
     const fresh = res.data.usage;
     const allRows: MeterDeltaRow[] = fresh.map((row) => {
       const snap = snapshot.find((s) => s.model === row.model);
@@ -1209,6 +1218,20 @@ const usageColumns = [
   { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
 ];
 
+const usageTotals = computed(() => {
+  const rows = data.value?.usage ?? [];
+  return rows.reduce(
+    (acc, r) => {
+      acc.input += r.effective_input_tokens ?? 0;
+      acc.output += r.total_output_tokens ?? 0;
+      acc.requests += r.request_count ?? 0;
+      acc.cost += r.cost_usd ?? 0;
+      return acc;
+    },
+    { input: 0, output: 0, requests: 0, cost: 0 },
+  );
+});
+
 function subStatusColor(status: string) {
   if (status === 'active') return 'positive';
   if (status === 'exhausted') return 'negative';
@@ -1279,14 +1302,38 @@ const ttftLoading = ref(false);
 const ttftData = ref<TtftResponse | null>(null);
 
 // Usage period state
-const usagePeriod = ref('30d');
+const usagePeriod = ref('today');
 const usagePeriodLabels: Record<string, string> = {
-  '1h': 'Last 1 Hour',
-  '6h': 'Last 6 Hours',
-  '24h': 'Last 24 Hours',
-  '7d': 'Last 7 Days',
-  '30d': 'Last 30 Days',
+  today: 'Today',
+  yesterday: 'Yesterday',
+  week: 'This Week',
+  month: 'This Month',
 };
+
+function usagePeriodParams(): Record<string, string> {
+  const now = new Date();
+  let start: Date;
+  let end: Date;
+  if (usagePeriod.value === 'yesterday') {
+    start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
+    end = new Date(start); end.setHours(23, 59, 59, 999);
+  } else if (usagePeriod.value === 'week') {
+    start = new Date(now);
+    const dow = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - dow);
+    start.setHours(0, 0, 0, 0);
+    end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+  } else if (usagePeriod.value === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else {
+    start = new Date(now); start.setHours(0, 0, 0, 0);
+    end = new Date(now); end.setHours(23, 59, 59, 999);
+  }
+  return { start: start.toISOString(), end: end.toISOString() };
+}
 
 // Uptime state
 interface UptimeBucketRaw {
@@ -1405,7 +1452,7 @@ async function fetchUsage(key: string, silent = false) {
     data.value = null;
   }
   try {
-    const res = await api.get<UsageData>('/api/public/usage', { params: { key, period: usagePeriod.value } });
+    const res = await api.get<UsageData>('/api/public/usage', { params: { key, ...usagePeriodParams() } });
     data.value = res.data;
     fetchTtft(key);
     fetchUptime(key);
@@ -1506,5 +1553,10 @@ onUnmounted(() => {
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+:deep(.usage-total-row) > td {
+  background-color: var(--vr-bg-elevated, rgba(255, 255, 255, 0.04));
+  border-top: 1px solid var(--vr-border, rgba(255, 255, 255, 0.12));
 }
 </style>

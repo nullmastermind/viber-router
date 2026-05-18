@@ -542,11 +542,10 @@
               flat dense no-caps
               toggle-color="primary"
               :options="[
-                { label: '1h', value: '1h' },
-                { label: '6h', value: '6h' },
-                { label: '24h', value: '24h' },
-                { label: '7d', value: '7d' },
-                { label: '30d', value: '30d' },
+                { label: 'Today', value: 'today' },
+                { label: 'Yesterday', value: 'yesterday' },
+                { label: 'Week', value: 'week' },
+                { label: 'Month', value: 'month' },
               ]"
             />
           </div>
@@ -1644,7 +1643,7 @@ let circuitPollTimer: ReturnType<typeof setInterval> | null = null;
 const tokenUsageStats = ref<TokenUsageStats | null>(null);
 const tokenUsageLoading = ref(false);
 const tokenUsageError = ref('');
-const tokenUsagePeriod = ref('24h');
+const tokenUsagePeriod = ref('today');
 const tokenUsageServerFilter = ref<string | null>(null);
 const tokenUsageDynamicKeyFilter = ref(false);
 const tokenUsageKeyHashFilter = ref('');
@@ -2068,14 +2067,49 @@ async function loadUptime() {
   }
 }
 
+function computeLocalRange(period: string): { start: string; end: string } | null {
+  const now = new Date();
+  if (period === 'today') {
+    const start = new Date(now); start.setHours(0, 0, 0, 0);
+    const end = new Date(now); end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  if (period === 'yesterday') {
+    const start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  if (period === 'week') {
+    const start = new Date(now);
+    const dow = (start.getDay() + 6) % 7; // Monday=0
+    start.setDate(start.getDate() - dow);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  if (period === 'month') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  return null;
+}
+
 async function loadTokenUsage() {
   if (!group.value) return;
   tokenUsageLoading.value = true;
   tokenUsageError.value = '';
   try {
-    const params: { period?: string; is_dynamic_key?: boolean; key_hash?: string } = {
-      period: tokenUsagePeriod.value,
-    };
+    const params: { period?: string; start?: string; end?: string; is_dynamic_key?: boolean; key_hash?: string } = {};
+    const range = computeLocalRange(tokenUsagePeriod.value);
+    if (range) {
+      params.start = range.start;
+      params.end = range.end;
+    } else {
+      params.period = tokenUsagePeriod.value;
+    }
     if (tokenUsageDynamicKeyFilter.value) params.is_dynamic_key = true;
     if (tokenUsageKeyHashFilter.value?.trim()) params.key_hash = tokenUsageKeyHashFilter.value.trim();
     tokenUsageStats.value = await groupsStore.fetchTokenUsageStats(group.value.id, params);
