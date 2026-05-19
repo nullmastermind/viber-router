@@ -623,6 +623,36 @@ fn transform_request_body(
         }
     }
 
+    // Strip thinking blocks with missing/empty signatures from assistant messages.
+    // Upstream Anthropic rejects these with "Invalid `signature` in `thinking` block";
+    // some intermediary proxies strip the signature in their responses, and clients then
+    // echo the now-invalid block back on the next turn.
+    if let Some(messages) = json.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        let mut stripped = 0usize;
+        for msg in messages.iter_mut() {
+            if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
+                continue;
+            }
+            if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                let before = content.len();
+                content.retain(|block| {
+                    if block.get("type").and_then(|t| t.as_str()) != Some("thinking") {
+                        return true;
+                    }
+                    let sig = block.get("signature").and_then(|s| s.as_str()).unwrap_or("");
+                    !sig.is_empty()
+                });
+                stripped += before - content.len();
+            }
+        }
+        if stripped > 0 {
+            tracing::info!(
+                stripped_blocks = stripped,
+                "Stripped thinking blocks with empty signature from request"
+            );
+        }
+    }
+
     // Inject stream_options.include_usage for OpenAI streaming requests so
     // usage data is included in the SSE stream.
     if is_openai_endpoint(request_path)
@@ -2031,13 +2061,26 @@ async fn proxy_handler_inner(
             );
         }
 
-        let transformed_body = transform_request_body(
+        let mut transformed_body = transform_request_body(
             &body_bytes,
             &server.model_mappings,
             server.system_prompt.as_deref(),
             &request_path,
             server.remove_thinking,
         );
+
+        // On failover (any attempt after the first), strip ALL thinking blocks from
+        // assistant messages. Thinking signatures are bound to the producing account/key;
+        // a signature from server A is invalid at server B even if the model is the same.
+        if !failover_chain.is_empty()
+            && let Some(sanitized) = strip_thinking_blocks(&transformed_body)
+        {
+            tracing::info!(
+                server_name = %server.server_name,
+                "Stripped thinking blocks on failover attempt"
+            );
+            transformed_body = sanitized;
+        }
 
         // Build upstream URL: server.base_url + original path + query
         let path = original_uri.path();
@@ -3855,5 +3898,122 @@ mod tests {
         );
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         assert_eq!(parsed["system"], "You are helpful");
+    }
+
+    #[test]
+    fn test_transform_request_body_strips_empty_signature_thinking() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "stale", "signature": ""},
+                    {"type": "text", "text": "Hello"}
+                ]},
+                {"role": "user", "content": "again"}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1, "empty-signature thinking must be stripped");
+        assert_eq!(assistant[0]["type"], "text");
+    }
+
+    #[test]
+    fn test_transform_request_body_strips_missing_signature_thinking() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "no sig at all"},
+                    {"type": "text", "text": "Hi"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1);
+        assert_eq!(assistant[0]["type"], "text");
+    }
+
+    #[test]
+    fn test_transform_request_body_keeps_valid_signature_thinking() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "valid", "signature": "abc123"},
+                    {"type": "text", "text": "Hi"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2, "valid-signature thinking must be preserved (cache-friendly)");
+    }
+
+    #[test]
+    fn test_transform_request_body_does_not_touch_user_thinking_like_blocks() {
+        // A user message echoing a thinking-shaped block (rare, but must not be mutated).
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "thinking", "thinking": "verbatim", "signature": ""}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["messages"][0]["content"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_transform_request_body_strips_mixed_signatures() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "first", "signature": "good"},
+                    {"type": "thinking", "thinking": "second", "signature": ""},
+                    {"type": "text", "text": "done"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0]["signature"], "good");
+        assert_eq!(assistant[1]["type"], "text");
+    }
+
+    #[test]
+    fn test_strip_thinking_blocks_full_strip_simulates_failover_path() {
+        // Failover path reuses strip_thinking_blocks to remove all thinking blocks,
+        // including those with valid signatures (signatures are account-bound).
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "from account A", "signature": "validForA"},
+                    {"type": "text", "text": "response"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = strip_thinking_blocks(&body).expect("should strip on failover");
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1);
+        assert_eq!(assistant[0]["type"], "text");
     }
 }
