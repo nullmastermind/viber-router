@@ -120,6 +120,16 @@
       <div class="col-auto self-center">
         <q-btn
           flat dense round
+          icon="bug_report"
+          color="primary"
+          @click="openJsonDebug"
+        >
+          <q-tooltip>JSON Debug Tool</q-tooltip>
+        </q-btn>
+      </div>
+      <div class="col-auto self-center">
+        <q-btn
+          flat dense round
           icon="refresh"
           color="primary"
           :loading="loading"
@@ -129,6 +139,33 @@
         </q-btn>
       </div>
     </div>
+
+    <q-dialog v-model="jsonDebugOpen">
+      <q-card style="min-width: 720px; max-width: 90vw">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">JSON Debug Tool</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+        <q-card-section>
+          <div class="text-caption text-grey q-mb-sm">
+            Paste an Anthropic request JSON. "Remove text" sets every <code>messages[].content[].text</code> to an empty string for easier inspection of structure-related bugs.
+          </div>
+          <textarea
+            v-model="jsonDebugText"
+            class="json-debug-textarea"
+            spellcheck="false"
+            placeholder="Paste JSON here..."
+          />
+          <div v-if="jsonDebugError" class="text-negative text-caption q-mt-xs">{{ jsonDebugError }}</div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat no-caps icon="content_paste_off" label="Remove text" color="warning" @click="removeJsonText" />
+          <q-btn flat no-caps icon="content_copy" label="Copy" @click="copyJsonText" />
+          <q-btn flat no-caps label="Close" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <q-banner v-if="error" class="bg-negative text-white q-mb-md">
       Failed to load logs
@@ -605,6 +642,57 @@ async function loadFilterOptions() {
   }
 }
 
+const jsonDebugOpen = ref(false);
+const jsonDebugText = ref('');
+const jsonDebugError = ref('');
+
+function openJsonDebug() {
+  jsonDebugError.value = '';
+  jsonDebugOpen.value = true;
+}
+
+function removeJsonText() {
+  jsonDebugError.value = '';
+  if (!jsonDebugText.value.trim()) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonDebugText.value);
+  } catch (e) {
+    jsonDebugError.value = `Invalid JSON: ${(e as Error).message}`;
+    return;
+  }
+  const stripped = stripText(parsed);
+  jsonDebugText.value = JSON.stringify(stripped, null, 2);
+}
+
+function stripText(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(stripText);
+  }
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'string' && /\s/.test(v)) {
+        out[k] = '';
+      } else {
+        out[k] = stripText(v);
+      }
+    }
+    return out;
+  }
+  return node;
+}
+
+async function copyJsonText() {
+  try {
+    await navigator.clipboard.writeText(jsonDebugText.value);
+    $q.notify({ type: 'positive', message: 'Copied', timeout: 1000 });
+  } catch {
+    $q.notify({ type: 'negative', message: 'Copy failed' });
+  }
+}
+
 onMounted(() => {
   fetchLogs();
   loadFilterOptions();
@@ -642,5 +730,29 @@ onMounted(() => {
 .server-chain {
   display: inline-flex;
   align-items: center;
+}
+.json-debug-textarea {
+  width: 100%;
+  min-height: 400px;
+  max-height: 60vh;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 4px;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  background: inherit;
+  color: inherit;
+}
+.json-debug-textarea:focus {
+  border-color: var(--q-primary);
+}
+body.body--dark .json-debug-textarea {
+  background: #1d1d1d;
+  color: #e0e0e0;
+  border-color: rgba(255, 255, 255, 0.28);
 }
 </style>

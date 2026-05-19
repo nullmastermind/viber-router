@@ -653,6 +653,14 @@ fn transform_request_body(
         }
     }
 
+    // Strip `context_management` — not a valid Anthropic API field; some clients
+    // (e.g. Claude Code) send it but upstream rejects with "Extra inputs are not permitted".
+    if let Some(obj) = json.as_object_mut()
+        && obj.remove("context_management").is_some()
+    {
+        tracing::debug!("Stripped unsupported `context_management` field from request body");
+    }
+
     // Inject stream_options.include_usage for OpenAI streaming requests so
     // usage data is included in the SSE stream.
     if is_openai_endpoint(request_path)
