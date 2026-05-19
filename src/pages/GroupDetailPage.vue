@@ -2566,6 +2566,11 @@ async function saveMappings() {
 }
 
 async function unlockDialog(serverId: string): Promise<void> {
+  if (await serversStore.tryUnlockFromCache(serverId)) {
+    await loadGroup();
+    $q.notify({ type: 'positive', message: 'Server unlocked' });
+    return;
+  }
   await new Promise<void>((resolve) => {
     $q.dialog({
       title: 'Unlock Server',
@@ -2590,28 +2595,32 @@ async function unlockDialog(serverId: string): Promise<void> {
 
 async function openEditServer(s: GroupServerDetail) {
   if (serversStore.isProtected(s.server_id) && !serversStore.isUnlocked(s.server_id)) {
-    let cancelled = true;
-    await new Promise<void>((resolve) => {
-      $q.dialog({
-        title: 'Unlock Server',
-        message: 'Enter the server password to edit:',
-        prompt: { model: '', type: 'password' as const },
-        cancel: true,
-      }).onOk(async (pw: string) => {
-        try {
-          await serversStore.unlockServer(s.server_id, pw);
-          // Re-fetch so API returns real credentials
-          await loadGroup();
-          cancelled = false;
-          resolve();
-        } catch (e: unknown) {
-          const msg = (e as Error).message || 'Failed to unlock';
-          $q.notify({ type: 'negative', message: msg });
-          resolve();
-        }
-      }).onCancel(() => resolve());
-    });
-    if (cancelled) return;
+    if (await serversStore.tryUnlockFromCache(s.server_id)) {
+      await loadGroup();
+    } else {
+      let cancelled = true;
+      await new Promise<void>((resolve) => {
+        $q.dialog({
+          title: 'Unlock Server',
+          message: 'Enter the server password to edit:',
+          prompt: { model: '', type: 'password' as const },
+          cancel: true,
+        }).onOk(async (pw: string) => {
+          try {
+            await serversStore.unlockServer(s.server_id, pw);
+            // Re-fetch so API returns real credentials
+            await loadGroup();
+            cancelled = false;
+            resolve();
+          } catch (e: unknown) {
+            const msg = (e as Error).message || 'Failed to unlock';
+            $q.notify({ type: 'negative', message: msg });
+            resolve();
+          }
+        }).onCancel(() => resolve());
+      });
+      if (cancelled) return;
+    }
     // Get fresh server data with real credentials
     const fresh = servers.value.find((x) => x.server_id === s.server_id);
     if (!fresh) return;

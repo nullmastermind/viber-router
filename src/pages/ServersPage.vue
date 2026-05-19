@@ -120,6 +120,11 @@ function onSearch() {
 }
 
 async function unlockDialog(serverId: string): Promise<void> {
+  if (await store.tryUnlockFromCache(serverId)) {
+    await store.fetchServers(search.value ? { search: search.value } : {});
+    $q.notify({ type: 'positive', message: 'Server unlocked' });
+    return;
+  }
   await new Promise<void>((resolve) => {
     $q.dialog({
       title: 'Unlock Server',
@@ -144,7 +149,10 @@ async function unlockDialog(serverId: string): Promise<void> {
 
 async function openDialog(server?: Server) {
   if (server && store.isProtected(server.id) && !store.isUnlocked(server.id)) {
-    let cancelled = true;
+    if (await store.tryUnlockFromCache(server.id)) {
+      await store.fetchServers(search.value ? { search: search.value } : {});
+    } else {
+      let cancelled = true;
     await new Promise<void>((resolve) => {
       $q.dialog({
         title: 'Unlock Server',
@@ -166,6 +174,7 @@ async function openDialog(server?: Server) {
       }).onCancel(() => resolve());
     });
     if (cancelled) return;
+    }
     // Get fresh server data with real credentials from store
     const fresh = store.servers.find((s) => s.id === server.id);
     if (!fresh) return;

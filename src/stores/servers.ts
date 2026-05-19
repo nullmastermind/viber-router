@@ -92,24 +92,65 @@ export const useServersStore = defineStore('servers', () => {
     return unlockedServers.value.has(id);
   }
 
+  const PW_STORAGE_PREFIX = 'viber-router:server-pw:';
+
+  function getCachedPassword(id: string): string | null {
+    try {
+      return localStorage.getItem(PW_STORAGE_PREFIX + id);
+    } catch {
+      return null;
+    }
+  }
+
+  function setCachedPassword(id: string, password: string): void {
+    try {
+      localStorage.setItem(PW_STORAGE_PREFIX + id, password);
+    } catch {
+      // ignore quota / disabled storage
+    }
+  }
+
+  function clearCachedPassword(id: string): void {
+    try {
+      localStorage.removeItem(PW_STORAGE_PREFIX + id);
+    } catch {
+      // ignore
+    }
+  }
+
   async function unlockServer(id: string, password: string): Promise<UnlockResult> {
     try {
       const { data } = await api.post<UnlockResult>(`/api/admin/servers/${id}/verify-password`, {
         password,
       });
       unlockedServers.value.add(id);
+      setCachedPassword(id, password);
       return data;
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status;
       if (status === 401) {
+        clearCachedPassword(id);
         throw new Error('Incorrect password');
       }
       throw e;
     }
   }
 
+  async function tryUnlockFromCache(id: string): Promise<boolean> {
+    if (unlockedServers.value.has(id)) return true;
+    const pw = getCachedPassword(id);
+    if (!pw) return false;
+    try {
+      await unlockServer(id, pw);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function lockServer(id: string): void {
     unlockedServers.value.delete(id);
+    clearCachedPassword(id);
   }
 
   return {
@@ -125,6 +166,7 @@ export const useServersStore = defineStore('servers', () => {
     isProtected,
     isUnlocked,
     unlockServer,
+    tryUnlockFromCache,
     lockServer,
   };
 });

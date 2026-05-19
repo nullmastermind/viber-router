@@ -545,7 +545,13 @@ function generateCurl(attempt: FailoverAttempt, method: string, firstAttempt?: F
 
 function downloadCurl(attempt: FailoverAttempt, log: ProxyLog) {
   if (serversStore.isProtected(attempt.server_id) && !serversStore.isUnlocked(attempt.server_id)) {
-    unlockDialog(attempt.server_id, () => doDownloadCurl(attempt, log));
+    void (async () => {
+      if (await serversStore.tryUnlockFromCache(attempt.server_id)) {
+        doDownloadCurl(attempt, log);
+        return;
+      }
+      unlockDialog(attempt.server_id, () => doDownloadCurl(attempt, log));
+    })();
     return;
   }
   doDownloadCurl(attempt, log);
