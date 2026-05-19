@@ -116,6 +116,9 @@
                       <q-badge v-if="s.max_requests != null && s.rate_window_seconds != null" outline color="purple" class="q-ml-sm" :aria-label="`Rate limit: ${s.max_requests} requests per ${s.rate_window_seconds} seconds`">
                         {{ s.max_requests }}/{{ s.rate_window_seconds }}s
                       </q-badge>
+                      <q-badge v-if="s.per_key_max_requests != null && s.per_key_rate_window_seconds != null" outline color="deep-purple" class="q-ml-sm" :aria-label="`Per-key rate limit: ${s.per_key_max_requests} requests per key per ${s.per_key_rate_window_seconds} seconds`">
+                        {{ s.per_key_max_requests }}/key/{{ formatDurationSecs(s.per_key_rate_window_seconds) }}
+                      </q-badge>
                       <q-badge v-if="s.max_input_tokens != null" outline color="teal" class="q-ml-sm" :aria-label="`Max input tokens: ${s.max_input_tokens}`">
                         ≤{{ formatTokenThreshold(s.max_input_tokens) }} tokens
                       </q-badge>
@@ -1030,6 +1033,32 @@
               class="q-mb-sm"
               @clear="onRlFieldClear()"
             />
+            <div class="text-subtitle2 q-mt-md q-mb-xs">Per-Key Rate Limit</div>
+            <div class="text-caption text-grey q-mb-sm">
+              Limit requests per sub-key to this server within a time window. Window accepts shorthand like 1s, 1m, 1h, 1d, 1w. Leave both empty to disable.
+            </div>
+            <q-input
+              v-model.number="editServerPkRlForm.per_key_max_requests"
+              label="Max Requests per Key"
+              type="number"
+              :min="1"
+              outlined
+              dense
+              clearable
+              class="q-mb-sm"
+              @clear="onPkRlFieldClear()"
+            />
+            <q-input
+              v-model="editServerPkRlForm.per_key_window_str"
+              label="Window (e.g. 1h, 30m, 1d)"
+              outlined
+              dense
+              clearable
+              class="q-mb-sm"
+              :error="!!editServerPkRlForm.per_key_window_error"
+              :error-message="editServerPkRlForm.per_key_window_error"
+              @clear="onPkRlFieldClear()"
+            />
             <div class="text-subtitle2 q-mt-md q-mb-xs">Max Input Tokens</div>
             <div class="text-caption text-grey q-mb-sm">
               Skip this server when the estimated input token count exceeds this limit (approximate). Leave empty to disable.
@@ -1563,6 +1592,11 @@ const editServerCbForm = ref({
 const editServerRlForm = ref({
   max_requests: null as number | null,
   rate_window_seconds: null as number | null,
+});
+const editServerPkRlForm = ref({
+  per_key_max_requests: null as number | null,
+  per_key_window_str: '' as string,
+  per_key_window_error: '' as string,
 });
 const editServerTokenForm = ref({
   max_input_tokens: null as number | null,
@@ -2412,6 +2446,29 @@ function onRlFieldClear() {
   editServerRlForm.value.rate_window_seconds = null;
 }
 
+function parseDurationStr(s: string): number | null {
+  const m = /^(\d+)\s*(s|m|h|d|w)$/i.exec(s.trim());
+  if (!m || !m[1] || !m[2]) return null;
+  const mult: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 };
+  const unit = mult[m[2].toLowerCase()];
+  if (unit === undefined) return null;
+  return parseInt(m[1], 10) * unit;
+}
+
+function formatDurationSecs(secs: number): string {
+  const units: [number, string][] = [[604800, 'w'], [86400, 'd'], [3600, 'h'], [60, 'm'], [1, 's']];
+  for (const [n, u] of units) {
+    if (secs % n === 0) return `${secs / n}${u}`;
+  }
+  return `${secs}s`;
+}
+
+function onPkRlFieldClear() {
+  editServerPkRlForm.value.per_key_max_requests = null;
+  editServerPkRlForm.value.per_key_window_str = '';
+  editServerPkRlForm.value.per_key_window_error = '';
+}
+
 async function saveGroup() {
   if (!group.value) return;
   const codes = failoverCodesStr.value
@@ -2646,6 +2703,11 @@ function doOpenEditServer(s: GroupServerDetail) {
     max_requests: s.max_requests,
     rate_window_seconds: s.rate_window_seconds,
   };
+  editServerPkRlForm.value = {
+    per_key_max_requests: s.per_key_max_requests,
+    per_key_window_str: s.per_key_rate_window_seconds != null ? formatDurationSecs(s.per_key_rate_window_seconds) : '',
+    per_key_window_error: '',
+  };
   editServerTokenForm.value = {
     max_input_tokens: s.max_input_tokens,
     min_input_tokens: s.min_input_tokens,
@@ -2693,6 +2755,30 @@ async function onSaveEditServer() {
     return;
   }
 
+  // Validate per-key rate limit fields: all-or-nothing
+  const pkMax = editServerPkRlForm.value.per_key_max_requests;
+  const pkWindowStr = editServerPkRlForm.value.per_key_window_str.trim();
+  let pkWindowSecs: number | null = null;
+  editServerPkRlForm.value.per_key_window_error = '';
+  const pkMaxSet = pkMax !== null && pkMax !== undefined;
+  const pkWindowSet = pkWindowStr !== '';
+  if (pkMaxSet !== pkWindowSet) {
+    $q.notify({ type: 'negative', message: 'Per-key rate limit requires both fields or none.' });
+    return;
+  }
+  if (pkMaxSet && pkWindowSet) {
+    if ((pkMax as number) < 1) {
+      $q.notify({ type: 'negative', message: 'Per-key max requests must be >= 1.' });
+      return;
+    }
+    pkWindowSecs = parseDurationStr(pkWindowStr);
+    if (pkWindowSecs === null || pkWindowSecs < 1) {
+      editServerPkRlForm.value.per_key_window_error = 'Use a value like 1s, 1m, 1h, 1d, 1w';
+      $q.notify({ type: 'negative', message: 'Per-key window is invalid. Use 1s/1m/1h/1d/1w.' });
+      return;
+    }
+  }
+
   savingServer.value = true;
   try {
     // Convert custom headers array to object, filtering empty entries
@@ -2721,6 +2807,8 @@ async function onSaveEditServer() {
         cb_cooldown_seconds: editServerCbForm.value.cb_cooldown_seconds,
         max_requests: editServerRlForm.value.max_requests,
         rate_window_seconds: editServerRlForm.value.rate_window_seconds,
+        per_key_max_requests: pkMaxSet ? (pkMax as number) : null,
+        per_key_rate_window_seconds: pkMaxSet ? pkWindowSecs : null,
         max_input_tokens: editServerTokenForm.value.max_input_tokens,
         min_input_tokens: editServerTokenForm.value.min_input_tokens,
         supported_models: editServerSupportedModels.value,

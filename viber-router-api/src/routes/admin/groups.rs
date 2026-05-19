@@ -186,6 +186,7 @@ async fn get_group(
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, s.password_hash, \
+         gs.per_key_max_requests, gs.per_key_rate_window_seconds, \
          gs.active_hours_start, gs.active_hours_end, gs.active_hours_timezone, \
          gs.retry_status_codes, gs.retry_count, gs.retry_delay_seconds, \
          s.custom_headers \

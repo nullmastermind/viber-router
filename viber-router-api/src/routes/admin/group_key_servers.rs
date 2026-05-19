@@ -33,7 +33,8 @@ async fn list_key_servers(
         "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, s.remove_thinking, gs.priority, gs.model_mappings, gs.is_enabled, \
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models \
+         gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
+         gs.per_key_max_requests, gs.per_key_rate_window_seconds \
          FROM group_key_servers gks \
          JOIN group_servers gs ON gs.server_id = gks.server_id AND gs.group_id = (SELECT group_id FROM group_keys WHERE id = $1) \
          JOIN servers s ON s.id = gks.server_id \
@@ -115,7 +116,8 @@ async fn assign_key_servers(
             "SELECT gs.server_id, s.short_id, s.name as server_name, s.base_url, s.api_key, s.system_prompt, s.remove_thinking, gs.priority, gs.model_mappings, gs.is_enabled, \
              gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
              gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
-             gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models \
+             gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
+             gs.per_key_max_requests, gs.per_key_rate_window_seconds \
              FROM group_servers gs JOIN servers s ON s.id = gs.server_id \
              WHERE gs.group_id = $1 AND gs.server_id = $2",
         )

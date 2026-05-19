@@ -43,6 +43,8 @@ export interface GroupServerDetail {
   rate_cache_read: number | null;
   max_requests: number | null;
   rate_window_seconds: number | null;
+  per_key_max_requests: number | null;
+  per_key_rate_window_seconds: number | null;
   normalize_cache_read: boolean;
   max_input_tokens: number | null;
   min_input_tokens: number | null;
@@ -239,6 +241,8 @@ export const useGroupsStore = defineStore('groups', () => {
       rate_cache_read?: number | null;
       max_requests?: number | null;
       rate_window_seconds?: number | null;
+      per_key_max_requests?: number | null;
+      per_key_rate_window_seconds?: number | null;
       normalize_cache_read?: boolean;
       max_input_tokens?: number | null;
       min_input_tokens?: number | null;

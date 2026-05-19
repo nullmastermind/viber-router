@@ -260,6 +260,7 @@ async fn resolve_group_config(state: &AppState, api_key: &str) -> Option<GroupCo
          gs.cb_max_failures, gs.cb_window_seconds, gs.cb_cooldown_seconds, \
          gs.rate_input, gs.rate_output, gs.rate_cache_write, gs.rate_cache_read, \
          gs.max_requests, gs.rate_window_seconds, gs.normalize_cache_read, gs.max_input_tokens, gs.min_input_tokens, gs.supported_models, \
+         gs.per_key_max_requests, gs.per_key_rate_window_seconds, \
          gs.active_hours_start, gs.active_hours_end, gs.active_hours_timezone, \
          gs.retry_status_codes, gs.retry_count, gs.retry_delay_seconds, \
          s.custom_headers \
@@ -1940,6 +1941,23 @@ async fn proxy_handler_inner(
             continue; // Skip rate-limited server
         }
 
+        // Per-key rate limiter: skip server if this sub-key has reached its limit
+        if let (Some(max_req), Some(_), Some(key_id)) = (
+            server.per_key_max_requests,
+            server.per_key_rate_window_seconds,
+            config.group_key_id,
+        ) && rate_limiter::is_rate_limited_per_key(
+            &state.redis,
+            key_id,
+            server.server_id,
+            max_req,
+        )
+        .await
+        {
+            any_rate_limited = true;
+            continue;
+        }
+
         // Max input tokens: skip server if estimated tokens exceed configured threshold
         if let Some(limit) = server.max_input_tokens
             && let Some(est) = estimated_tokens
@@ -1984,6 +2002,21 @@ async fn proxy_handler_inner(
             rate_limiter::increment_rate_limit(
                 &state.redis,
                 config.group_id,
+                server.server_id,
+                window_sec,
+            )
+            .await;
+        }
+
+        // Increment per-key rate limit counter (only when request came via a sub-key)
+        if let (Some(_), Some(window_sec), Some(key_id)) = (
+            server.per_key_max_requests,
+            server.per_key_rate_window_seconds,
+            config.group_key_id,
+        ) {
+            rate_limiter::increment_rate_limit_per_key(
+                &state.redis,
+                key_id,
                 server.server_id,
                 window_sec,
             )

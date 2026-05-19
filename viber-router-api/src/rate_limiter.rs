@@ -47,3 +47,47 @@ pub async fn increment_rate_limit(
             .await;
     }
 }
+
+/// Per-key rate limit check (sub-key + server pair).
+/// Returns true if the server should be skipped for this sub-key.
+/// Fails open on Redis errors.
+pub async fn is_rate_limited_per_key(
+    redis: &Pool,
+    group_key_id: Uuid,
+    server_id: Uuid,
+    max_requests: i32,
+) -> bool {
+    let key = format!("rl:k:{group_key_id}:{server_id}");
+    let Ok(mut conn) = redis.get().await else {
+        return false;
+    };
+    let count: Option<i64> = match cmd("GET").arg(&key).query_async(&mut conn).await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    count.unwrap_or(0) >= max_requests as i64
+}
+
+/// Per-key rate limit increment with TTL on first hit.
+pub async fn increment_rate_limit_per_key(
+    redis: &Pool,
+    group_key_id: Uuid,
+    server_id: Uuid,
+    window_seconds: i32,
+) {
+    let key = format!("rl:k:{group_key_id}:{server_id}");
+    let Ok(mut conn) = redis.get().await else {
+        return;
+    };
+    let count: i64 = match cmd("INCR").arg(&key).query_async(&mut conn).await {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if count == 1 {
+        let _: Result<(), _> = cmd("EXPIRE")
+            .arg(&key)
+            .arg(window_seconds)
+            .query_async(&mut conn)
+            .await;
+    }
+}

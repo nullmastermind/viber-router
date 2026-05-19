@@ -344,6 +344,42 @@ async fn update_assignment(
     // Validate rate limit fields
     validate_rate_limit_fields(input.max_requests, input.rate_window_seconds)?;
 
+    // Validate per-key rate limit fields (same all-or-nothing rule)
+    {
+        let provided: Vec<&Option<i32>> = [&input.per_key_max_requests, &input.per_key_rate_window_seconds]
+            .into_iter()
+            .filter_map(|f| f.as_ref())
+            .collect();
+        if !provided.is_empty() {
+            if provided.len() != 2 {
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "Per-key rate limit fields must be all set or all null",
+                ));
+            }
+            let all_null = provided.iter().all(|v| v.is_none());
+            let all_some = provided.iter().all(|v| v.is_some());
+            if !all_null && !all_some {
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "Per-key rate limit fields must be all set or all null",
+                ));
+            }
+            if all_some {
+                for v in &provided {
+                    if let Some(val) = v
+                        && *val < 1
+                    {
+                        return Err(err(
+                            StatusCode::BAD_REQUEST,
+                            "Per-key rate limit values must be >= 1",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // Validate non-negative rate fields
     for (field, val) in [
         ("rate_input", &input.rate_input),
@@ -413,6 +449,15 @@ async fn update_assignment(
         None => (false, None),
     };
     let (update_rate_window, rate_window_val) = match input.rate_window_seconds {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+
+    let (update_pk_max, pk_max_val) = match input.per_key_max_requests {
+        Some(v) => (true, v),
+        None => (false, None),
+    };
+    let (update_pk_window, pk_window_val) = match input.per_key_rate_window_seconds {
         Some(v) => (true, v),
         None => (false, None),
     };
@@ -487,7 +532,9 @@ async fn update_assignment(
          active_hours_timezone = CASE WHEN $35 THEN $36 ELSE active_hours_timezone END, \
          retry_status_codes = CASE WHEN $37 THEN $38 ELSE retry_status_codes END, \
          retry_count = CASE WHEN $39 THEN $40 ELSE retry_count END, \
-         retry_delay_seconds = CASE WHEN $41 THEN $42 ELSE retry_delay_seconds END \
+         retry_delay_seconds = CASE WHEN $41 THEN $42 ELSE retry_delay_seconds END, \
+         per_key_max_requests = CASE WHEN $43 THEN $44 ELSE per_key_max_requests END, \
+         per_key_rate_window_seconds = CASE WHEN $45 THEN $46 ELSE per_key_rate_window_seconds END \
          WHERE group_id = $4 AND server_id = $5 RETURNING *",
     )
     .bind(input.priority)
@@ -532,6 +579,10 @@ async fn update_assignment(
     .bind(retry_count_val)
     .bind(update_retry_delay)
     .bind(retry_delay_val)
+    .bind(update_pk_max)
+    .bind(pk_max_val)
+    .bind(update_pk_window)
+    .bind(pk_window_val)
     .fetch_optional(&state.db)
     .await
     .map_err(internal)?

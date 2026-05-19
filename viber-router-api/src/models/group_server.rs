@@ -22,6 +22,12 @@ pub struct GroupServer {
     pub max_input_tokens: Option<i32>,
     pub min_input_tokens: Option<i32>,
     pub supported_models: Vec<String>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub per_key_max_requests: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub per_key_rate_window_seconds: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[sqlx(default)]
     #[serde(default)]
@@ -75,6 +81,12 @@ pub struct GroupServerDetail {
     pub supported_models: Vec<String>,
     #[sqlx(default)]
     #[serde(default)]
+    pub per_key_max_requests: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub per_key_rate_window_seconds: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
     pub active_hours_start: Option<String>,
     #[sqlx(default)]
     #[serde(default)]
@@ -122,6 +134,12 @@ pub struct AdminGroupServerDetail {
     #[serde(default)]
     pub supported_models: Vec<String>,
     pub password_hash: Option<String>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub per_key_max_requests: Option<i32>,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub per_key_rate_window_seconds: Option<i32>,
     #[sqlx(default)]
     #[serde(default)]
     pub active_hours_start: Option<String>,
@@ -174,6 +192,8 @@ pub struct UpdateAssignment {
     pub max_input_tokens: Option<Option<i32>>,
     pub min_input_tokens: Option<Option<i32>>,
     pub supported_models: Option<Vec<String>>,
+    pub per_key_max_requests: Option<Option<i32>>,
+    pub per_key_rate_window_seconds: Option<Option<i32>>,
     pub active_hours_start: Option<Option<String>>,
     pub active_hours_end: Option<Option<String>>,
     pub active_hours_timezone: Option<Option<String>>,
