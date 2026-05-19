@@ -37,8 +37,11 @@ pub struct UpdateUserEndpoint {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model_mappings: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub quota_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub quota_headers: Option<Option<serde_json::Value>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub custom_headers: Option<Option<serde_json::Value>>,
     pub priority_mode: Option<String>,
     pub is_enabled: Option<bool>,

@@ -73,7 +73,7 @@ interface PaginatedResponse {
 
 export interface CircuitStatus {
   server_id: string;
-  is_open: boolean;
+  model: string;
   remaining_seconds: number;
 }
 

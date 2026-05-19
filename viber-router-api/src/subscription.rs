@@ -759,9 +759,9 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 5, 1, 3, 0, 0).unwrap();
         let window = weekly_window_for(tz, now);
 
-        assert_eq!(window.monday_start_utc, Utc.with_ymd_and_hms(2026, 4, 27, 17, 0, 0).unwrap());
-        assert_eq!(window.next_monday_start_utc, Utc.with_ymd_and_hms(2026, 5, 4, 17, 0, 0).unwrap());
-        assert_eq!(window.monday_epoch, Utc.with_ymd_and_hms(2026, 4, 27, 17, 0, 0).unwrap().timestamp());
+        assert_eq!(window.monday_start_utc, Utc.with_ymd_and_hms(2026, 4, 26, 17, 0, 0).unwrap());
+        assert_eq!(window.next_monday_start_utc, Utc.with_ymd_and_hms(2026, 5, 3, 17, 0, 0).unwrap());
+        assert_eq!(window.monday_epoch, Utc.with_ymd_and_hms(2026, 4, 26, 17, 0, 0).unwrap().timestamp());
         assert_eq!(window.reset_at, window.next_monday_start_utc);
         assert!(window.ttl_seconds > 0);
     }

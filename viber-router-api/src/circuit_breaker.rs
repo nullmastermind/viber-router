@@ -2,9 +2,18 @@ use deadpool_redis::Pool;
 use deadpool_redis::redis::cmd;
 use uuid::Uuid;
 
-/// Check if the circuit is open for this group-server pair.
-pub async fn is_circuit_open(redis: &Pool, group_id: Uuid, server_id: Uuid) -> bool {
-    let key = format!("cb:open:{group_id}:{server_id}");
+fn model_slot(model: Option<&str>) -> &str {
+    model.unwrap_or("_any")
+}
+
+/// Check if the circuit is open for this group-server-model triple.
+pub async fn is_circuit_open(
+    redis: &Pool,
+    group_id: Uuid,
+    server_id: Uuid,
+    model: Option<&str>,
+) -> bool {
+    let key = format!("cb:open:{group_id}:{server_id}:{}", model_slot(model));
     let Ok(mut conn) = redis.get().await else {
         return false; // fail open
     };
@@ -12,19 +21,21 @@ pub async fn is_circuit_open(redis: &Pool, group_id: Uuid, server_id: Uuid) -> b
     result.unwrap_or(false)
 }
 
-/// Record an error for this group-server pair.
+/// Record an error for this group-server-model triple.
 /// Returns true if the circuit was newly tripped (first time reaching threshold).
 pub async fn record_error(
     redis: &Pool,
     group_id: Uuid,
     server_id: Uuid,
+    model: Option<&str>,
     max_failures: i32,
     window_seconds: i32,
     cooldown_seconds: i32,
 ) -> bool {
-    let err_key = format!("cb:err:{group_id}:{server_id}");
-    let open_key = format!("cb:open:{group_id}:{server_id}");
-    let realerted_key = format!("cb:realerted:{group_id}:{server_id}");
+    let slot = model_slot(model);
+    let err_key = format!("cb:err:{group_id}:{server_id}:{slot}");
+    let open_key = format!("cb:open:{group_id}:{server_id}:{slot}");
+    let realerted_key = format!("cb:realerted:{group_id}:{server_id}:{slot}");
 
     let Ok(mut conn) = redis.get().await else {
         return false;
@@ -82,9 +93,15 @@ pub async fn record_error(
 
 /// Check if a circuit was re-enabled (open key expired after being tripped).
 /// Returns true if re-enabled and this is the first detection.
-pub async fn check_re_enabled(redis: &Pool, group_id: Uuid, server_id: Uuid) -> bool {
-    let open_key = format!("cb:open:{group_id}:{server_id}");
-    let realerted_key = format!("cb:realerted:{group_id}:{server_id}");
+pub async fn check_re_enabled(
+    redis: &Pool,
+    group_id: Uuid,
+    server_id: Uuid,
+    model: Option<&str>,
+) -> bool {
+    let slot = model_slot(model);
+    let open_key = format!("cb:open:{group_id}:{server_id}:{slot}");
+    let realerted_key = format!("cb:realerted:{group_id}:{server_id}:{slot}");
 
     let Ok(mut conn) = redis.get().await else {
         return false;

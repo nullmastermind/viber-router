@@ -110,8 +110,8 @@
                         #{{ s.short_id }}
                         <q-btn flat dense size="xs" icon="content_copy" class="q-ml-xs" @click.stop="copyShortId(s.short_id)" />
                       </q-badge>
-                      <q-badge v-if="getCircuitStatus(s.server_id)?.is_open" color="negative" class="q-ml-sm">
-                        Circuit Open ({{ formatCircuitRemaining(getCircuitStatus(s.server_id)?.remaining_seconds ?? 0) }})
+                      <q-badge v-for="cs in getCircuitStatuses(s.server_id)" :key="`${cs.server_id}:${cs.model}`" color="negative" class="q-ml-sm">
+                        Circuit Open [{{ formatCircuitModel(cs.model) }}] ({{ formatCircuitRemaining(cs.remaining_seconds) }})
                       </q-badge>
                       <q-badge v-if="s.max_requests != null && s.rate_window_seconds != null" outline color="purple" class="q-ml-sm" :aria-label="`Rate limit: ${s.max_requests} requests per ${s.rate_window_seconds} seconds`">
                         {{ s.max_requests }}/{{ s.rate_window_seconds }}s
@@ -2034,7 +2034,7 @@ async function loadCircuitStatus() {
     circuitStatuses.value = [];
   }
   // Start/stop polling based on whether any circuit is open
-  if (circuitStatuses.value.some((c) => c.is_open)) {
+  if (circuitStatuses.value.length > 0) {
     startCircuitPoll();
   } else {
     stopCircuitPoll();
@@ -2053,8 +2053,12 @@ function stopCircuitPoll() {
   }
 }
 
-function getCircuitStatus(serverId: string): CircuitStatus | undefined {
-  return circuitStatuses.value.find((c) => c.server_id === serverId);
+function getCircuitStatuses(serverId: string): CircuitStatus[] {
+  return circuitStatuses.value.filter((c) => c.server_id === serverId);
+}
+
+function formatCircuitModel(model: string): string {
+  return model === '_any' ? 'all models' : model;
 }
 
 function formatCircuitRemaining(seconds: number): string {

@@ -132,7 +132,12 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
     Some((h, m))
 }
 
-fn spawn_cb_alert(state: &AppState, config: &GroupConfig, server: &GroupServerDetail) {
+fn spawn_cb_alert(
+    state: &AppState,
+    config: &GroupConfig,
+    server: &GroupServerDetail,
+    model: Option<&str>,
+) {
     let db = state.db.clone();
     let redis = state.redis.clone();
     let http_client = state.http_client.clone();
@@ -152,6 +157,7 @@ fn spawn_cb_alert(state: &AppState, config: &GroupConfig, server: &GroupServerDe
             group_name,
             group_id,
             server_id,
+            model: model.map(|s| s.to_string()),
             error_count: max_f,
             window_seconds: win,
             cooldown_seconds: cool,
@@ -1940,25 +1946,37 @@ async fn proxy_handler_inner(
 
         // Circuit breaker: check re-enable first, then check if open
         if has_cb {
-            if circuit_breaker::check_re_enabled(&state.redis, config.group_id, server.server_id)
-                .await
+            if circuit_breaker::check_re_enabled(
+                &state.redis,
+                config.group_id,
+                server.server_id,
+                request_model.as_deref(),
+            )
+            .await
             {
                 let db = state.db.clone();
                 let http_client = state.http_client.clone();
                 let server_name = server.server_name.clone();
                 let group_name = config.group_name.clone();
+                let model = request_model.clone();
                 tokio::spawn(telegram_notifier::send_circuit_re_enable_alert(
                     telegram_notifier::CircuitReEnableAlertContext {
                         db,
                         http_client,
                         server_name,
                         group_name,
+                        model,
                     },
                 ));
             }
 
-            if circuit_breaker::is_circuit_open(&state.redis, config.group_id, server.server_id)
-                .await
+            if circuit_breaker::is_circuit_open(
+                &state.redis,
+                config.group_id,
+                server.server_id,
+                request_model.as_deref(),
+            )
+            .await
             {
                 continue; // Skip circuit-broken server
             }
@@ -2190,13 +2208,14 @@ async fn proxy_handler_inner(
                         &state.redis,
                         config.group_id,
                         server.server_id,
+                        request_model.as_deref(),
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
                     )
                     .await;
                     if tripped {
-                        spawn_cb_alert(&state, &config, server);
+                        spawn_cb_alert(&state, &config, server, request_model.as_deref());
                     }
                 }
                 continue;
@@ -2380,13 +2399,14 @@ async fn proxy_handler_inner(
                         &state.redis,
                         config.group_id,
                         server.server_id,
+                        request_model.as_deref(),
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
                     )
                     .await;
                     if tripped {
-                        spawn_cb_alert(&state, &config, server);
+                        spawn_cb_alert(&state, &config, server, request_model.as_deref());
                     }
                 }
                 continue;
@@ -2454,13 +2474,14 @@ async fn proxy_handler_inner(
                     &state.redis,
                     config.group_id,
                     server.server_id,
+                    request_model.as_deref(),
                     server.cb_max_failures.unwrap(),
                     server.cb_window_seconds.unwrap(),
                     server.cb_cooldown_seconds.unwrap(),
                 )
                 .await;
                 if tripped {
-                    spawn_cb_alert(&state, &config, server);
+                    spawn_cb_alert(&state, &config, server, request_model.as_deref());
                 }
             }
             continue;
@@ -2815,13 +2836,14 @@ async fn proxy_handler_inner(
                         &state.redis,
                         config.group_id,
                         server.server_id,
+                        request_model.as_deref(),
                         server.cb_max_failures.unwrap(),
                         server.cb_window_seconds.unwrap(),
                         server.cb_cooldown_seconds.unwrap(),
                     )
                     .await;
                     if tripped {
-                        spawn_cb_alert(&state, &config, server);
+                        spawn_cb_alert(&state, &config, server, request_model.as_deref());
                     }
                 }
                 continue;
@@ -2959,13 +2981,14 @@ async fn proxy_handler_inner(
                             &state.redis,
                             config.group_id,
                             server.server_id,
+                            request_model.as_deref(),
                             server.cb_max_failures.unwrap(),
                             server.cb_window_seconds.unwrap(),
                             server.cb_cooldown_seconds.unwrap(),
                         )
                         .await;
                         if tripped {
-                            spawn_cb_alert(&state, &config, server);
+                            spawn_cb_alert(&state, &config, server, request_model.as_deref());
                         }
                     }
                     continue;
@@ -3000,13 +3023,14 @@ async fn proxy_handler_inner(
                             &state.redis,
                             config.group_id,
                             server.server_id,
+                            request_model.as_deref(),
                             server.cb_max_failures.unwrap(),
                             server.cb_window_seconds.unwrap(),
                             server.cb_cooldown_seconds.unwrap(),
                         )
                         .await;
                         if tripped {
-                            spawn_cb_alert(&state, &config, server);
+                            spawn_cb_alert(&state, &config, server, request_model.as_deref());
                         }
                     }
                     continue;
@@ -3136,13 +3160,14 @@ async fn proxy_handler_inner(
                             &state.redis,
                             config.group_id,
                             server.server_id,
+                            request_model.as_deref(),
                             server.cb_max_failures.unwrap(),
                             server.cb_window_seconds.unwrap(),
                             server.cb_cooldown_seconds.unwrap(),
                         )
                         .await;
                         if tripped {
-                            spawn_cb_alert(&state, &config, server);
+                            spawn_cb_alert(&state, &config, server, request_model.as_deref());
                         }
                     }
                     continue;

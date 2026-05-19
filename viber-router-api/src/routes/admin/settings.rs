@@ -53,6 +53,7 @@ async fn get_settings(
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateSettings {
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub telegram_bot_token: Option<Option<String>>,
     pub telegram_chat_ids: Option<Vec<String>>,
     pub alert_status_codes: Option<Vec<i32>>,
@@ -60,9 +61,12 @@ pub struct UpdateSettings {
     pub blocked_paths: Option<Vec<String>>,
     pub timezone: Option<String>,
     pub ct_always_estimate: Option<bool>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub ct_anthropic_base_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub ct_anthropic_api_key: Option<Option<String>>,
     pub user_endpoints_enabled: Option<bool>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub openai_compat_base_url: Option<Option<String>>,
 }
 

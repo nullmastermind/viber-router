@@ -32,9 +32,14 @@ pub struct CreateServer {
 pub struct UpdateServer {
     pub name: Option<String>,
     pub base_url: Option<String>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub api_key: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub password: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub system_prompt: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub remove_thinking: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub custom_headers: Option<Option<serde_json::Value>>,
 }

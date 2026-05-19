@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+use crate::serde_utils::double_option;
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct GroupServer {
     pub group_id: Uuid,
@@ -179,26 +181,45 @@ pub struct UpdateAssignment {
     pub priority: Option<i32>,
     pub model_mappings: Option<serde_json::Value>,
     pub is_enabled: Option<bool>,
+    #[serde(default, deserialize_with = "double_option")]
     pub cb_max_failures: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub cb_window_seconds: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub cb_cooldown_seconds: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub rate_input: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub rate_output: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub rate_cache_write: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub rate_cache_read: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub max_requests: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub rate_window_seconds: Option<Option<i32>>,
     pub normalize_cache_read: Option<bool>,
+    #[serde(default, deserialize_with = "double_option")]
     pub max_input_tokens: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub min_input_tokens: Option<Option<i32>>,
     pub supported_models: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub per_key_max_requests: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub per_key_rate_window_seconds: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub active_hours_start: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub active_hours_end: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub active_hours_timezone: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub retry_status_codes: Option<Option<Vec<i32>>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub retry_count: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "double_option")]
     pub retry_delay_seconds: Option<Option<f64>>,
 }
 

@@ -62,6 +62,7 @@ just check
 - Biome handles both linting and formatting (no ESLint/Prettier)
 - Rust code must pass `clippy` with `-D warnings` (warnings are errors)
 - Backend env vars: `DATABASE_URL`, `REDIS_URL` (required); `HOST`, `PORT`, `RUST_LOG` (optional with defaults)
+- **PATCH/update structs with nullable fields must use `serde_utils::double_option`.** Any `Option<Option<T>>` field in a `Deserialize` struct used for partial updates needs `#[serde(default, deserialize_with = "crate::serde_utils::double_option")]`. Without it, serde collapses both a missing field and an explicit JSON `null` into outer `None`, so "clear this value" silently becomes "leave unchanged" and user-cleared fields fail to persist. The outer `Option` must mean "field present?" and the inner must mean "value present?" — that distinction only works with the custom deserializer.
 
 ## Attribution (DO NOT MODIFY)
 

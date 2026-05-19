@@ -9,6 +9,7 @@ mod partition;
 mod rate_limiter;
 mod redis;
 mod routes;
+mod serde_utils;
 mod sse_usage_parser;
 mod subscription;
 mod telegram_notifier;

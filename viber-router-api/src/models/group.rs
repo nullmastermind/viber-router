@@ -42,7 +42,9 @@ pub struct UpdateGroup {
     pub name: Option<String>,
     pub failover_status_codes: Option<Vec<u16>>,
     pub is_active: Option<bool>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub ttft_timeout_ms: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub count_tokens_server_id: Option<Option<Uuid>>,
     pub count_tokens_model_mappings: Option<serde_json::Value>,
 }

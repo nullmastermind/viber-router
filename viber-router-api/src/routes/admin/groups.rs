@@ -231,7 +231,7 @@ async fn get_group(
 #[derive(Debug, serde::Serialize)]
 struct CircuitStatusEntry {
     server_id: Uuid,
-    is_open: bool,
+    model: String,
     remaining_seconds: i64,
 }
 
@@ -251,19 +251,29 @@ async fn circuit_status(
     let mut entries = Vec::new();
     if let Ok(mut conn) = state.redis.get().await {
         for (server_id,) in rows {
-            let key = format!("cb:open:{id}:{server_id}");
-            let ttl: i64 = deadpool_redis::redis::cmd("TTL")
-                .arg(&key)
+            let prefix = format!("cb:open:{id}:{server_id}:");
+            let pattern = format!("{prefix}*");
+            let keys: Vec<String> = deadpool_redis::redis::cmd("KEYS")
+                .arg(&pattern)
                 .query_async(&mut conn)
                 .await
-                .unwrap_or(-2);
-            // TTL: -2 = key doesn't exist, -1 = no expiry, >0 = remaining seconds
-            let is_open = ttl > 0;
-            entries.push(CircuitStatusEntry {
-                server_id,
-                is_open,
-                remaining_seconds: if is_open { ttl } else { 0 },
-            });
+                .unwrap_or_default();
+            for key in keys {
+                let ttl: i64 = deadpool_redis::redis::cmd("TTL")
+                    .arg(&key)
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or(-2);
+                if ttl <= 0 {
+                    continue;
+                }
+                let model = key.strip_prefix(&prefix).unwrap_or("_any").to_string();
+                entries.push(CircuitStatusEntry {
+                    server_id,
+                    model,
+                    remaining_seconds: ttl,
+                });
+            }
         }
     }
 

@@ -25,8 +25,12 @@ pub struct CreateModel {
 #[derive(Debug, Deserialize)]
 pub struct UpdateModel {
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub input_1m_usd: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub output_1m_usd: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub cache_write_1m_usd: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "crate::serde_utils::double_option")]
     pub cache_read_1m_usd: Option<Option<f64>>,
 }

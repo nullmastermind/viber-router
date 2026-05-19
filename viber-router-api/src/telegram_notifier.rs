@@ -127,6 +127,7 @@ pub struct CircuitBreakerAlertContext {
     pub group_name: String,
     pub group_id: Uuid,
     pub server_id: Uuid,
+    pub model: Option<String>,
     pub error_count: i32,
     pub window_seconds: i32,
     pub cooldown_seconds: i32,
@@ -143,7 +144,8 @@ pub async fn send_circuit_breaker_alert(ctx: CircuitBreakerAlertContext) {
         None => return,
     };
 
-    let cooldown_key = format!("tg:cooldown:cb:{}:{}", ctx.group_id, ctx.server_id);
+    let model_slot = ctx.model.as_deref().unwrap_or("_any");
+    let cooldown_key = format!("tg:cooldown:cb:{}:{}:{}", ctx.group_id, ctx.server_id, model_slot);
     let ttl_secs = settings.alert_cooldown_mins * 60;
 
     let should_send = match check_and_set_cooldown(&ctx.redis, &cooldown_key, ttl_secs).await {
@@ -161,10 +163,15 @@ pub async fn send_circuit_breaker_alert(ctx: CircuitBreakerAlertContext) {
     }
 
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let model_line = match &ctx.model {
+        Some(m) => format!("\n*Model:* {}", escape_md(m)),
+        None => String::new(),
+    };
     let text = format!(
-        "⚡ *Circuit Breaker Tripped*\n*Server:* {}\n*Group:* {}\n*Errors:* {} in {}s\n*Cooldown:* {}s\n*Time:* {}",
+        "⚡ *Circuit Breaker Tripped*\n*Server:* {}\n*Group:* {}{}\n*Errors:* {} in {}s\n*Cooldown:* {}s\n*Time:* {}",
         escape_md(&ctx.server_name),
         escape_md(&ctx.group_name),
+        model_line,
         escape_md(&ctx.error_count.to_string()),
         escape_md(&ctx.window_seconds.to_string()),
         escape_md(&ctx.cooldown_seconds.to_string()),
@@ -180,6 +187,7 @@ pub struct CircuitReEnableAlertContext {
     pub http_client: reqwest::Client,
     pub server_name: String,
     pub group_name: String,
+    pub model: Option<String>,
 }
 
 /// Send alert when circuit breaker re-enables a server.
@@ -194,10 +202,15 @@ pub async fn send_circuit_re_enable_alert(ctx: CircuitReEnableAlertContext) {
     };
 
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let model_line = match &ctx.model {
+        Some(m) => format!("\n*Model:* {}", escape_md(m)),
+        None => String::new(),
+    };
     let text = format!(
-        "✅ *Circuit Breaker Re\\-enabled*\n*Server:* {}\n*Group:* {}\n*Time:* {}",
+        "✅ *Circuit Breaker Re\\-enabled*\n*Server:* {}\n*Group:* {}{}\n*Time:* {}",
         escape_md(&ctx.server_name),
         escape_md(&ctx.group_name),
+        model_line,
         escape_md(&now.to_string()),
     );
 
