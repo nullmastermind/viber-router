@@ -125,6 +125,7 @@ export interface KeyTokenUsage {
   total_cache_read_tokens: number;
   request_count: number;
   cost_usd: number | null;
+  peak_tpm: number;
 }
 
 export interface KeyUsageResponse {

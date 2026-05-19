@@ -658,6 +658,7 @@
                         <q-td key="cache_creation" :props="props" class="text-right">{{ formatCompact(props.row.total_cache_creation_tokens) }}</q-td>
                         <q-td key="cache_read" :props="props" class="text-right">{{ formatCompact(props.row.total_cache_read_tokens) }}</q-td>
                         <q-td key="requests" :props="props" class="text-right">{{ formatCompact(props.row.request_count) }}</q-td>
+                        <q-td key="peak_tpm" :props="props" class="text-right">{{ formatCompact(props.row.peak_tpm ?? 0) }}</q-td>
                         <q-td key="cost" :props="props" class="text-right">{{ props.row.cost_usd != null ? `$${props.row.cost_usd.toFixed(4)}` : '\u2014' }}</q-td>
                         <q-td key="created_at" :props="props">{{ props.row.created_at != null ? props.row.created_at.slice(0, 10) : '\u2014' }}</q-td>
                         <q-td key="actions" :props="props">
@@ -667,7 +668,7 @@
                         </q-td>
                       </q-tr>
                       <q-tr v-if="props.expand && props.row.group_key_id != null" :props="props">
-                        <q-td colspan="10" class="q-pa-sm">
+                        <q-td colspan="11" class="q-pa-sm">
                           <div class="row items-center q-mb-xs">
                             <div class="text-subtitle2">Subscriptions</div>
                             <q-space />
@@ -797,6 +798,7 @@
                         <q-td class="text-right">{{ totalSubKeyUsage.cacheCreation.toLocaleString() }}</q-td>
                         <q-td class="text-right">{{ totalSubKeyUsage.cacheRead.toLocaleString() }}</q-td>
                         <q-td class="text-right">{{ totalSubKeyUsage.requests.toLocaleString() }}</q-td>
+                        <q-td class="text-right">{{ totalSubKeyUsage.peakTpm.toLocaleString() }}</q-td>
                         <q-td class="text-right">{{ totalSubKeyUsage.cost != null ? `$${totalSubKeyUsage.cost.toFixed(4)}` : '\u2014' }}</q-td>
                         <q-td />
                         <q-td />
@@ -1540,6 +1542,7 @@ import { useGroupsStore, type GroupWithServers, type GroupServerDetail, type Cir
 import { useServersStore } from 'stores/servers';
 import { useModelsStore } from 'stores/models';
 import { api } from 'boot/axios';
+import { subKeyUsageColumns as subKeyUsageColumnsDef } from 'src/utils/subKeyUsageColumns';
 import SubKeyUsage from 'components/SubKeyUsage.vue';
 import TtftChart from 'components/TtftChart.vue';
 import UptimeBars from 'components/UptimeBars.vue';
@@ -1915,32 +1918,7 @@ const tokenUsageColumns = [
   { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
 ];
 
-const subKeyUsageColumns = [
-  { name: 'index', label: '#', field: () => '', align: 'center' as const },
-  {
-    name: 'key_name',
-    label: 'Key Name',
-    field: 'key_name',
-    align: 'left' as const,
-    sortable: true,
-    format: (v: string | null, row: KeyTokenUsage) =>
-      v != null ? v : (row.group_key_id == null ? 'Master / Dynamic Keys' : 'Deleted Key'),
-  },
-  { name: 'input', label: 'Input Tokens', field: 'total_input_tokens', align: 'right' as const, sortable: true, format: formatCompact },
-  { name: 'output', label: 'Output Tokens', field: 'total_output_tokens', align: 'right' as const, sortable: true, format: formatCompact },
-  { name: 'cache_creation', label: 'Cache Write', field: 'total_cache_creation_tokens', align: 'right' as const, sortable: true, format: formatCompact },
-  { name: 'cache_read', label: 'Cache Read', field: 'total_cache_read_tokens', align: 'right' as const, sortable: true, format: formatCompact },
-  { name: 'requests', label: 'Requests', field: 'request_count', align: 'right' as const, sortable: true, format: formatCompact },
-  { name: 'cost', label: 'Cost ($)', field: 'cost_usd', align: 'right' as const, sortable: true, format: (v: number | null) => v != null ? `$${v.toFixed(4)}` : '\u2014' },
-  {
-    name: 'created_at',
-    label: 'Created At',
-    field: 'created_at',
-    align: 'left' as const,
-    format: (v: string | null) => v != null ? v.slice(0, 10) : '\u2014',
-  },
-  { name: 'actions', label: '', field: 'group_key_id', align: 'right' as const },
-];
+const subKeyUsageColumns = subKeyUsageColumnsDef;
 
 const totalSubKeyUsage = computed(() => {
   const rows = subKeyUsageData.value;
@@ -1949,9 +1927,10 @@ const totalSubKeyUsage = computed(() => {
   const cacheCreation = rows.reduce((s, r) => s + r.total_cache_creation_tokens, 0);
   const cacheRead = rows.reduce((s, r) => s + r.total_cache_read_tokens, 0);
   const requests = rows.reduce((s, r) => s + r.request_count, 0);
+  const peakTpm = rows.reduce((s, r) => Math.max(s, r.peak_tpm ?? 0), 0);
   const costRows = rows.filter((r) => r.cost_usd != null);
   const cost = costRows.length > 0 ? costRows.reduce((s, r) => s + (r.cost_usd ?? 0), 0) : null;
-  return { input, output, cacheCreation, cacheRead, requests, cost };
+  return { input, output, cacheCreation, cacheRead, requests, peakTpm, cost };
 });
 
 const spamColumns = [

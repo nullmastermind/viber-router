@@ -72,6 +72,7 @@ struct KeyTokenUsage {
     total_cache_read_tokens: i64,
     request_count: i64,
     cost_usd: Option<f64>,
+    peak_tpm: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -246,8 +247,17 @@ async fn get_token_usage_by_key(
         .group_id
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "group_id is required"))?;
 
-    let keys = if let (Some(start), Some(end)) = (params.start, params.end) {
-        let qb = String::from(
+    // Peak TPM is computed in a separate, concurrent query because folding it
+    // into the main aggregation joined plan dramatically increases scan cost
+    // on token_usage_logs (observed >9s on real data).
+    #[derive(sqlx::FromRow)]
+    struct PeakRow {
+        group_key_id: Option<Uuid>,
+        peak_tpm: i64,
+    }
+
+    let (keys, peak_rows) = if let (Some(start), Some(end)) = (params.start, params.end) {
+        let main_sql = String::from(
             "SELECT t.group_key_id, gk.name as key_name, gk.api_key, gk.created_at, \
              COALESCE(SUM(t.input_tokens)::bigint, 0) as total_input_tokens, \
              COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
@@ -259,7 +269,8 @@ async fn get_token_usage_by_key(
                 COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
                 COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
                 COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
-             ELSE NULL END as cost_usd \
+             ELSE NULL END as cost_usd, \
+             0::bigint as peak_tpm \
              FROM token_usage_logs t \
              LEFT JOIN group_keys gk ON gk.id = t.group_key_id \
              LEFT JOIN models m ON m.name = t.model \
@@ -268,18 +279,31 @@ async fn get_token_usage_by_key(
              GROUP BY t.group_key_id, gk.name, gk.api_key, gk.created_at \
              ORDER BY request_count DESC",
         );
+        let peak_sql = String::from(
+            "SELECT group_key_id, COALESCE(MAX(tpm), 0)::bigint AS peak_tpm FROM ( \
+               SELECT group_key_id, \
+                 COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_creation_tokens, 0) + COALESCE(cache_read_tokens, 0)), 0) AS tpm \
+               FROM token_usage_logs \
+               WHERE group_id = $1 AND created_at >= $2 AND created_at < $3 \
+               GROUP BY group_key_id, date_trunc('minute', created_at) \
+             ) pm GROUP BY group_key_id",
+        );
 
-        sqlx::query_as::<_, KeyTokenUsage>(&qb)
+        let main_fut = sqlx::query_as::<_, KeyTokenUsage>(&main_sql)
             .bind(group_id)
             .bind(start)
             .bind(end)
-            .fetch_all(&state.db)
-            .await
-            .map_err(internal)?
+            .fetch_all(&state.db);
+        let peak_fut = sqlx::query_as::<_, PeakRow>(&peak_sql)
+            .bind(group_id)
+            .bind(start)
+            .bind(end)
+            .fetch_all(&state.db);
+        tokio::try_join!(main_fut, peak_fut).map_err(internal)?
     } else {
         let interval = resolve_interval(params.period.as_deref().unwrap_or("24h"));
 
-        let qb = format!(
+        let main_sql = format!(
             "SELECT t.group_key_id, gk.name as key_name, gk.api_key, gk.created_at, \
              COALESCE(SUM(t.input_tokens)::bigint, 0) as total_input_tokens, \
              COALESCE(SUM(t.output_tokens)::bigint, 0) as total_output_tokens, \
@@ -291,7 +315,8 @@ async fn get_token_usage_by_key(
                 COALESCE(SUM(t.output_tokens::float8 * COALESCE(m.output_1m_usd, 0) * COALESCE(gs.rate_output, 1.0)), 0) + \
                 COALESCE(SUM(t.cache_creation_tokens::float8 * COALESCE(m.cache_write_1m_usd, 0) * COALESCE(gs.rate_cache_write, 1.0)), 0) + \
                 COALESCE(SUM(t.cache_read_tokens::float8 * COALESCE(m.cache_read_1m_usd, 0) * COALESCE(gs.rate_cache_read, 1.0)), 0)) / 1000000.0 \
-             ELSE NULL END as cost_usd \
+             ELSE NULL END as cost_usd, \
+             0::bigint as peak_tpm \
              FROM token_usage_logs t \
              LEFT JOIN group_keys gk ON gk.id = t.group_key_id \
              LEFT JOIN models m ON m.name = t.model \
@@ -300,13 +325,117 @@ async fn get_token_usage_by_key(
              GROUP BY t.group_key_id, gk.name, gk.api_key, gk.created_at \
              ORDER BY request_count DESC"
         );
+        let peak_sql = format!(
+            "SELECT group_key_id, COALESCE(MAX(tpm), 0)::bigint AS peak_tpm FROM ( \
+               SELECT group_key_id, \
+                 COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_creation_tokens, 0) + COALESCE(cache_read_tokens, 0)), 0) AS tpm \
+               FROM token_usage_logs \
+               WHERE group_id = $1 AND created_at > now() - interval '{interval}' \
+               GROUP BY group_key_id, date_trunc('minute', created_at) \
+             ) pm GROUP BY group_key_id"
+        );
 
-        sqlx::query_as::<_, KeyTokenUsage>(&qb)
+        let main_fut = sqlx::query_as::<_, KeyTokenUsage>(&main_sql)
             .bind(group_id)
-            .fetch_all(&state.db)
-            .await
-            .map_err(internal)?
+            .fetch_all(&state.db);
+        let peak_fut = sqlx::query_as::<_, PeakRow>(&peak_sql)
+            .bind(group_id)
+            .fetch_all(&state.db);
+        tokio::try_join!(main_fut, peak_fut).map_err(internal)?
     };
 
+    let peak_map: std::collections::HashMap<Option<Uuid>, i64> = peak_rows
+        .into_iter()
+        .map(|r| (r.group_key_id, r.peak_tpm))
+        .collect();
+    let mut keys = keys;
+    for k in &mut keys {
+        k.peak_tpm = peak_map.get(&k.group_key_id).copied().unwrap_or(0);
+    }
+
     Ok(Json(KeyUsageResponse { keys }))
+}
+
+/// Pure-logic mirror of the `peak` CTE used in `get_token_usage_by_key`.
+///
+/// For each `group_key_id`, returns the maximum sum of total tokens
+/// (input + output + cache_creation + cache_read) observed in any single
+/// 1-minute bucket (`date_trunc('minute', created_at)`).
+///
+/// Kept as a standalone helper so the bucketing rule can be unit-tested
+/// without a Postgres harness.
+#[cfg(test)]
+pub fn compute_peak_tpm(
+    rows: &[(Option<Uuid>, chrono::DateTime<chrono::Utc>, i64)],
+) -> std::collections::HashMap<Option<Uuid>, i64> {
+    use chrono::Timelike;
+    use std::collections::HashMap;
+
+    let mut per_minute: HashMap<(Option<Uuid>, chrono::DateTime<chrono::Utc>), i64> =
+        HashMap::new();
+    for (key, ts, tokens) in rows {
+        let minute = ts
+            .with_second(0)
+            .and_then(|t| t.with_nanosecond(0))
+            .unwrap_or(*ts);
+        *per_minute.entry((*key, minute)).or_insert(0) += *tokens;
+    }
+    let mut peak: HashMap<Option<Uuid>, i64> = HashMap::new();
+    for ((key, _), tpm) in per_minute {
+        let entry = peak.entry(key).or_insert(0);
+        if tpm > *entry {
+            *entry = tpm;
+        }
+    }
+    peak
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn peak_tpm_picks_max_minute_per_key() {
+        let k1 = Some(Uuid::from_u128(1));
+        let k2 = Some(Uuid::from_u128(2));
+        let t = |min: u32, sec: u32| Utc.with_ymd_and_hms(2026, 5, 19, 10, min, sec).unwrap();
+
+        let rows = vec![
+            // k1, minute 10 -> 100 + 200 = 300 (peak)
+            (k1, t(10, 5), 100),
+            (k1, t(10, 45), 200),
+            // k1, minute 11 -> 50
+            (k1, t(11, 0), 50),
+            // k2, minute 10 -> 10
+            (k2, t(10, 30), 10),
+            // k2, minute 12 -> 90 + 5 = 95 (peak)
+            (k2, t(12, 1), 90),
+            (k2, t(12, 59), 5),
+        ];
+
+        let peak = compute_peak_tpm(&rows);
+        assert_eq!(peak.get(&k1).copied(), Some(300));
+        assert_eq!(peak.get(&k2).copied(), Some(95));
+    }
+
+    #[test]
+    fn peak_tpm_handles_null_key_and_empty() {
+        assert!(compute_peak_tpm(&[]).is_empty());
+
+        let t = Utc.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap();
+        let rows = vec![(None, t, 7), (None, t, 3)];
+        let peak = compute_peak_tpm(&rows);
+        assert_eq!(peak.get(&None).copied(), Some(10));
+    }
+
+    #[test]
+    fn peak_tpm_buckets_strictly_by_minute() {
+        let k = Some(Uuid::from_u128(42));
+        let a = Utc.with_ymd_and_hms(2026, 5, 19, 10, 0, 59).unwrap();
+        let b = Utc.with_ymd_and_hms(2026, 5, 19, 10, 1, 0).unwrap();
+        // Same key, adjacent seconds straddling a minute boundary -> separate buckets, not summed.
+        let peak = compute_peak_tpm(&[(k, a, 5), (k, b, 6)]);
+        assert_eq!(peak.get(&k).copied(), Some(6));
+    }
 }
