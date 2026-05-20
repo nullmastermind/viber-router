@@ -83,7 +83,7 @@
             <div class="row items-center no-wrap">
               <span class="text-caption text-weight-medium" style="width: 90px; flex-shrink: 0">API Key</span>
               <code class="q-ml-sm ellipsis" style="font-size: 13px">{{ maskedKey }}</code>
-              <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy API key" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(data.api_key)" />
+              <q-btn flat dense size="xs" icon="content_copy" aria-label="Copy API key" class="q-ml-xs" style="flex-shrink: 0" @click="copyText(displayApiKey)" />
             </div>
           </q-card-section>
         </q-card>
@@ -968,6 +968,7 @@ interface UsageData {
   user_endpoints_enabled?: boolean;
   openai_compat_base_url?: string | null;
   public_base_url?: string | null;
+  api_key_prefix?: string | null;
 }
 
 interface TtftDataPoint {
@@ -1120,11 +1121,16 @@ const routeKey = computed(() => storedKey.value || undefined);
 
 const baseUrl = computed(() => data.value?.public_base_url || window.location.origin);
 
+const displayApiKey = computed(() => {
+  if (!data.value) return '';
+  return `${data.value.api_key_prefix ?? ''}${data.value.api_key}`;
+});
+
 const maskedKey = computed(() => {
   if (!data.value) return '';
-  const key = data.value.api_key;
+  const key = displayApiKey.value;
   if (key.length <= 12) return '****';
-  return `${key.slice(0, key.indexOf('-', 3) + 1)}****${key.slice(-4)}`;
+  return `${key.slice(0, key.indexOf('-') + 1)}****${key.slice(-4)}`;
 });
 
 function wrapOsCommand(url: string): string {
@@ -1167,13 +1173,13 @@ function buildCodexUrl(key: string): string {
 }
 
 const claudeCodeCmd = computed(() =>
-  data.value ? wrapOsCommand(buildClaudeCodeUrl(data.value.api_key)) : '',
+  data.value ? wrapOsCommand(buildClaudeCodeUrl(displayApiKey.value)) : '',
 );
 const maskedClaudeCodeCmd = computed(() =>
   data.value ? wrapOsCommand(buildClaudeCodeUrl(maskedKey.value)) : '',
 );
 const codexCmd = computed(() =>
-  data.value ? wrapOsCommand(buildCodexUrl(data.value.api_key)) : '',
+  data.value ? wrapOsCommand(buildCodexUrl(displayApiKey.value)) : '',
 );
 const maskedCodexCmd = computed(() =>
   data.value ? wrapOsCommand(buildCodexUrl(maskedKey.value)) : '',

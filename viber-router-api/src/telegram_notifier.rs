@@ -18,6 +18,7 @@ fn default_settings() -> Settings {
         user_endpoints_enabled: true,
         openai_compat_base_url: None,
         public_base_url: None,
+        api_key_prefix: None,
     }
 }
 

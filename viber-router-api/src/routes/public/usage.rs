@@ -32,6 +32,7 @@ pub struct PublicUsageResponse {
     user_endpoints_enabled: bool,
     openai_compat_base_url: Option<String>,
     public_base_url: Option<String>,
+    api_key_prefix: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -334,6 +335,14 @@ pub async fn public_usage(
             .flatten()
             .flatten();
 
+    let api_key_prefix: Option<String> =
+        sqlx::query_scalar("SELECT api_key_prefix FROM settings WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+
     Json(PublicUsageResponse {
         key_name: key_info.key_name,
         group_name: key_info.group_name,
@@ -345,6 +354,7 @@ pub async fn public_usage(
         user_endpoints_enabled,
         openai_compat_base_url,
         public_base_url,
+        api_key_prefix,
     })
     .into_response()
 }

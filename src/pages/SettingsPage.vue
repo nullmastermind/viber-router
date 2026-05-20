@@ -26,6 +26,16 @@
           class="q-mb-md"
         />
         <q-input
+          v-model="form.api_key_prefix"
+          label="API Key Prefix"
+          outlined
+          dense
+          clearable
+          placeholder="sk-upstream:"
+          hint="Prepended to the API key shown on the public usage page (display only — does not change auth)"
+          class="q-mb-md"
+        />
+        <q-input
           v-model="form.openai_compat_base_url"
           label="OpenAI-compatible Base URL"
           outlined
@@ -319,6 +329,7 @@ interface Settings {
   user_endpoints_enabled: boolean;
   openai_compat_base_url: string | null;
   public_base_url: string | null;
+  api_key_prefix: string | null;
 }
 
 interface TelegramChat {
@@ -342,6 +353,7 @@ const form = ref<Settings>({
   user_endpoints_enabled: true,
   openai_compat_base_url: null,
   public_base_url: null,
+  api_key_prefix: null,
 });
 
 const alertStatusCodesStr = computed({
@@ -425,6 +437,7 @@ async function saveSettings() {
       user_endpoints_enabled: form.value.user_endpoints_enabled,
       openai_compat_base_url: form.value.openai_compat_base_url || null,
       public_base_url: form.value.public_base_url || null,
+      api_key_prefix: form.value.api_key_prefix || null,
     });
     form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });

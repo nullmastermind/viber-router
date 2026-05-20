@@ -23,6 +23,7 @@ pub struct Settings {
     pub user_endpoints_enabled: bool,
     pub openai_compat_base_url: Option<String>,
     pub public_base_url: Option<String>,
+    pub api_key_prefix: Option<String>,
 }
 
 fn default_user_endpoints_enabled() -> bool {
