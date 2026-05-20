@@ -659,6 +659,33 @@ fn transform_request_body(
         }
     }
 
+    // Strip empty text content blocks from messages. Upstream Anthropic rejects
+    // requests containing `{"type":"text","text":""}` with
+    // `messages: text content blocks must be non-empty`. Some clients (e.g. Claude
+    // Code variants) emit an empty leading text block alongside tool_use blocks.
+    if let Some(messages) = json.get_mut("messages").and_then(|m| m.as_array_mut()) {
+        let mut stripped = 0usize;
+        for msg in messages.iter_mut() {
+            if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                let before = content.len();
+                content.retain(|block| {
+                    if block.get("type").and_then(|t| t.as_str()) != Some("text") {
+                        return true;
+                    }
+                    let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                    !text.is_empty()
+                });
+                stripped += before - content.len();
+            }
+        }
+        if stripped > 0 {
+            tracing::info!(
+                stripped_blocks = stripped,
+                "Stripped empty text blocks from request messages"
+            );
+        }
+    }
+
     // Strip `context_management` — not a valid Anthropic API field; some clients
     // (e.g. Claude Code) send it but upstream rejects with "Extra inputs are not permitted".
     if let Some(obj) = json.as_object_mut()
@@ -4027,6 +4054,32 @@ mod tests {
         assert_eq!(assistant.len(), 2);
         assert_eq!(assistant[0]["signature"], "good");
         assert_eq!(assistant[1]["type"], "text");
+    }
+
+    #[test]
+    fn test_transform_request_body_strips_empty_text_blocks() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": ""},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "keep me"},
+                    {"type": "text", "text": ""}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1);
+        assert_eq!(assistant[0]["type"], "tool_use");
+        let user = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(user.len(), 1);
+        assert_eq!(user[0]["text"], "keep me");
     }
 
     #[test]
