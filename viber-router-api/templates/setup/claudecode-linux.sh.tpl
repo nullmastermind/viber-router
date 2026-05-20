@@ -339,6 +339,7 @@ update_settings_json() {
             .env.ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnet |
             .env.CLAUDE_CODE_SUBAGENT_MODEL = $subagent |
             .disableLoginPrompt = true |
+            .includeCoAuthoredBy = false |
             .statusLine = {"type": "command", "command": $sl_cmd}
         ' "$settings_file" > "$tmp_file" && mv "$tmp_file" "$settings_file"
     else
@@ -351,7 +352,8 @@ update_settings_json() {
             .env.ANTHROPIC_DEFAULT_OPUS_MODEL = $opus |
             .env.ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnet |
             .env.CLAUDE_CODE_SUBAGENT_MODEL = $subagent |
-            .disableLoginPrompt = true
+            .disableLoginPrompt = true |
+            .includeCoAuthoredBy = false
         ' "$settings_file" > "$tmp_file" && mv "$tmp_file" "$settings_file"
     fi
 }

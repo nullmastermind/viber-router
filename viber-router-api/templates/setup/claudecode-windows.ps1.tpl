@@ -335,6 +335,12 @@ if (Get-Member -InputObject $settings -Name "disableLoginPrompt" -MemberType Pro
     $settings | Add-Member -MemberType NoteProperty -Name "disableLoginPrompt" -Value $true
 }
 
+if (Get-Member -InputObject $settings -Name "includeCoAuthoredBy" -MemberType Properties) {
+    $settings.includeCoAuthoredBy = $false
+} else {
+    $settings | Add-Member -MemberType NoteProperty -Name "includeCoAuthoredBy" -Value $false
+}
+
 # Set statusLine if statusline script was installed
 if ($statuslineInstalled) {
     if (Get-Command pwsh -ErrorAction SilentlyContinue) {
