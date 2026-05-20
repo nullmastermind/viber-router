@@ -1153,7 +1153,7 @@ function buildClaudeCodeUrl(key: string): string {
     opus,
     subagent,
   });
-  return `${baseUrl.value}/api/v1/llm/setup-claudecode?${params.toString()}`;
+  return `${window.location.origin}/api/v1/llm/setup-claudecode?${params.toString()}`;
 }
 
 function buildCodexUrl(key: string): string {
@@ -1169,7 +1169,7 @@ function buildCodexUrl(key: string): string {
     medium,
     large,
   });
-  return `${baseUrl.value}/api/v1/llm/setup-codex?${params.toString()}`;
+  return `${window.location.origin}/api/v1/llm/setup-codex?${params.toString()}`;
 }
 
 const claudeCodeCmd = computed(() =>

@@ -77,12 +77,12 @@ fn validate_model(value: Option<String>, default: &str) -> String {
 }
 
 fn validate_key(key: &str) -> Result<&str, StatusCode> {
-    if key.is_empty() || key.len() > 200 {
+    if key.is_empty() || key.len() > 300 {
         return Err(StatusCode::BAD_REQUEST);
     }
     if !key
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
     {
         return Err(StatusCode::BAD_REQUEST);
     }
