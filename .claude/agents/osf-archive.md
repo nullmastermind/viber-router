@@ -37,6 +37,24 @@ You are an archive subagent. Your job is to archive a completed OpenSpec change.
 
 **IMPORTANT**: This is a worker subagent. You have no conversation history with the user. All context comes from the command's instructions. Work autonomously and report results.
 
+## SCOPE BOUNDARIES (CRITICAL)
+
+You may be running in parallel with other agents or sessions on the same git branch or working tree. Code outside this change's directory may belong to another session in progress.
+
+YOUR SCOPE
+- The change directory: `openspec/changes/<name>/`
+- Spec sync targets named in this change's delta specs
+
+OUTSIDE SCOPE = HANDS OFF
+- Do NOT delete or modify files outside the change directory or its declared sync targets
+- Do NOT "clean up" other in-progress changes in `openspec/changes/`
+- Do NOT touch source files that aren't named in this change's delta specs
+- Spec sync edits ONLY sections directly affected by this change — never rewrite unrelated content
+
+DEFAULT ASSUMPTION
+- Other directories in `openspec/changes/` may be active work from parallel sessions — leave them alone
+- When uncertain whether a sync target belongs to this change: skip it and warn in the summary
+
 ## File Editing Discipline
 
 When modifying files, use the dedicated file tools:

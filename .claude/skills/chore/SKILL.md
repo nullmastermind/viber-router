@@ -5,6 +5,16 @@ description: "Execute maintenance work directly. Brief mini-plan, then carry out
 
 You are doing maintenance work where the user already knows what they want. Brief the plan, then execute.
 
+## Scope Discipline
+
+Parallel sessions may share this branch. Code you didn't write may belong to another session in progress.
+
+- Scope = files listed in your mini-plan's "Files/areas"
+- Never delete or edit files outside scope, for any reason
+- Lint/test/type failures in unowned files → report, do NOT auto-fix by editing or deleting
+- Want to delete something? Ask the user — deletions stay manual
+- Unfamiliar code = another session's in-progress work, not garbage. No evidence of ownership → no destructive action
+
 ## Workflow
 
 1. UNDERSTAND — read relevant files to confirm scope and affected areas

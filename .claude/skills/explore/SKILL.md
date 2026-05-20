@@ -327,6 +327,30 @@ D. Discuss more before implementation
 What's your call?
 ```
 
+### Optional: /goal one-liner
+
+After presenting the path choice, also offer a ready-to-copy `/goal` command matched to the work's complexity. The user copies it into a fresh turn to run the whole chain unattended via Claude Code's native `/goal` loop.
+
+Pick one tier based on what the locked plan actually requires:
+
+- **Simple** (plan is clear, no spec needed):
+  `/goal implement the discussed plan via osf-apply`
+
+- **Medium** (plan is clear, verification matters):
+  `/goal implement the discussed plan via osf-apply, then run osf-verify and resolve every CRITICAL finding`
+
+- **Complex** (spec-first work):
+  `/goal create the spec via the proposal skill, implement it via osf-apply, then run osf-verify and resolve every CRITICAL finding`
+
+Present it in the user's language, like:
+
+```
+💡 Prefer hands-off? Copy this into a fresh turn:
+`<tier-matched /goal command>`
+```
+
+Tailor the wording to the actual plan when it helps (name the change, name the files). Offer one tier only — the one the plan implies. Skip the suggestion entirely if the work is trivial enough that `/goal` would be overkill.
+
 **Routing the user's choice (non-stop contract):**
 - A (Small/direct) → use Agent tool with `subagent_type: "osf-apply"`. Pass plan context.
 - B (Spec-first) → In the SAME turn: (1) use Skill tool to invoke `proposal`, (2) read `✅ Spec created: <change-name>` from its output, (3) immediately use Agent tool with `subagent_type: "osf-apply"` passing the change name. Do NOT end your turn between proposal and osf-apply. Do NOT ask the user to confirm the spec before applying — the user already chose this chain.
