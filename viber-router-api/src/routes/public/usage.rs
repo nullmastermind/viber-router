@@ -31,6 +31,7 @@ pub struct PublicUsageResponse {
     user_endpoints: Vec<crate::models::PublicUserEndpoint>,
     user_endpoints_enabled: bool,
     openai_compat_base_url: Option<String>,
+    public_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -325,6 +326,14 @@ pub async fn public_usage(
             .flatten()
             .flatten();
 
+    let public_base_url: Option<String> =
+        sqlx::query_scalar("SELECT public_base_url FROM settings WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+
     Json(PublicUsageResponse {
         key_name: key_info.key_name,
         group_name: key_info.group_name,
@@ -335,6 +344,7 @@ pub async fn public_usage(
         user_endpoints,
         user_endpoints_enabled,
         openai_compat_base_url,
+        public_base_url,
     })
     .into_response()
 }

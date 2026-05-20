@@ -16,6 +16,16 @@
           class="q-mb-md"
         />
         <q-input
+          v-model="form.public_base_url"
+          label="Public Base URL"
+          outlined
+          dense
+          clearable
+          placeholder="https://example.com"
+          hint="When set, this URL is shown as the Base URL on the public usage page (overrides the dashboard origin)"
+          class="q-mb-md"
+        />
+        <q-input
           v-model="form.openai_compat_base_url"
           label="OpenAI-compatible Base URL"
           outlined
@@ -308,6 +318,7 @@ interface Settings {
   ct_anthropic_api_key: string | null;
   user_endpoints_enabled: boolean;
   openai_compat_base_url: string | null;
+  public_base_url: string | null;
 }
 
 interface TelegramChat {
@@ -330,6 +341,7 @@ const form = ref<Settings>({
   ct_anthropic_api_key: null,
   user_endpoints_enabled: true,
   openai_compat_base_url: null,
+  public_base_url: null,
 });
 
 const alertStatusCodesStr = computed({
@@ -412,6 +424,7 @@ async function saveSettings() {
       ct_anthropic_api_key: form.value.ct_anthropic_api_key || null,
       user_endpoints_enabled: form.value.user_endpoints_enabled,
       openai_compat_base_url: form.value.openai_compat_base_url || null,
+      public_base_url: form.value.public_base_url || null,
     });
     form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });

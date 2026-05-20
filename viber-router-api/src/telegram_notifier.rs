@@ -17,6 +17,7 @@ fn default_settings() -> Settings {
         ct_anthropic_api_key: None,
         user_endpoints_enabled: true,
         openai_compat_base_url: None,
+        public_base_url: None,
     }
 }
 

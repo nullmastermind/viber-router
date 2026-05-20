@@ -967,6 +967,7 @@ interface UsageData {
   user_endpoints: UserEndpoint[];
   user_endpoints_enabled?: boolean;
   openai_compat_base_url?: string | null;
+  public_base_url?: string | null;
 }
 
 interface TtftDataPoint {
@@ -1117,7 +1118,7 @@ watch([selectedOpus, selectedSonnet, selectedHaiku, selectedSubAgent, selectedCo
 
 const routeKey = computed(() => storedKey.value || undefined);
 
-const baseUrl = computed(() => window.location.origin);
+const baseUrl = computed(() => data.value?.public_base_url || window.location.origin);
 
 const maskedKey = computed(() => {
   if (!data.value) return '';
