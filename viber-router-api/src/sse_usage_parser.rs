@@ -107,13 +107,14 @@ impl SseUsageParser {
                         .and_then(|v| v.as_i64())
                         .map(|v| v as i32);
                     // Some upstreams (e.g. proxies/gateways) send input_tokens: 0 in
-                    // message_start and the real count in message_delta. Overwrite if
-                    // present and non-zero so we capture the actual value.
+                    // message_start and the real count in message_delta. Only fall back
+                    // when message_start is missing or zero.
                     if let Some(input) = usage
                         .get("input_tokens")
                         .and_then(|v| v.as_i64())
                         .map(|v| v as i32)
-                        && (input > 0 || self.input_tokens.is_none())
+                        && input > 0
+                        && self.input_tokens.unwrap_or(0) == 0
                     {
                         self.input_tokens = Some(input);
                     }
@@ -121,7 +122,8 @@ impl SseUsageParser {
                         .get("cache_creation_input_tokens")
                         .and_then(|v| v.as_i64())
                         .map(|v| v as i32)
-                        && (cc > 0 || self.cache_creation_tokens.is_none())
+                        && cc > 0
+                        && self.cache_creation_tokens.unwrap_or(0) == 0
                     {
                         self.cache_creation_tokens = Some(cc);
                     }
@@ -129,7 +131,8 @@ impl SseUsageParser {
                         .get("cache_read_input_tokens")
                         .and_then(|v| v.as_i64())
                         .map(|v| v as i32)
-                        && (cr > 0 || self.cache_read_tokens.is_none())
+                        && cr > 0
+                        && self.cache_read_tokens.unwrap_or(0) == 0
                     {
                         self.cache_read_tokens = Some(cr);
                     }
@@ -351,6 +354,17 @@ mod tests {
         // Standard Anthropic: real input in message_start, no input in message_delta
         let mut parser = SseUsageParser::new();
         let data = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":150,\"cache_read_input_tokens\":50}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":80}}\n\n";
+        parser.feed(data);
+        let result = parser.finish().unwrap();
+        assert_eq!(result.input_tokens, 150);
+        assert_eq!(result.output_tokens, 80);
+        assert_eq!(result.cache_read_tokens, Some(50));
+    }
+
+    #[test]
+    fn test_standard_upstream_delta_input_does_not_overwrite_message_start() {
+        let mut parser = SseUsageParser::new();
+        let data = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":150,\"cache_read_input_tokens\":50}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":999,\"output_tokens\":80,\"cache_read_input_tokens\":300}}\n\n";
         parser.feed(data);
         let result = parser.finish().unwrap();
         assert_eq!(result.input_tokens, 150);
