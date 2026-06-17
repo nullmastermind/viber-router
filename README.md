@@ -1,66 +1,42 @@
 # Viber Router
 
-A high-performance Anthropic API relay proxy and load balancer with a web-based admin UI.
+Viber Router is an Anthropic API relay proxy and load balancer with a web admin UI. You put it in front of your Anthropic-compatible API keys, point your clients at it instead of `api.anthropic.com`, and it handles routing, failover, and monitoring for you. Clients keep using the Anthropic SDK as-is — only the base URL and key change.
 
-Drop Viber Router in front of your Anthropic API keys to get automatic failover, per-group server routing, TTFT monitoring, and Telegram alerts — all manageable through a Vue 3 dashboard.
+## What it does
 
----
+A request comes in on `/v1/*` carrying a proxy-issued key. Viber Router reads that key to figure out which group it belongs to, picks the first healthy server in the group, rewrites the model name if that server expects a different alias, and forwards the request upstream. If the upstream answers with a status code you've flagged for failover (429, 500, 502, and 503 by default), it moves on to the next server in the group and tries again. Streaming responses are passed straight through, and usage and timing data are parsed out of the stream as it flows.
 
-## Features
+Around that core relay path sit the things you'd want from a proxy you actually run in production:
 
-- **Drop-in Anthropic proxy** — forwards `/v1/*` requests transparently; clients need only swap the base URL and API key
-- **Group-based routing** — each group holds an ordered list of upstream servers with independent API keys and failover rules
-- **Automatic failover** — retries the next server in the group on configurable HTTP status codes (default: 429, 500, 502, 503)
-- **Model name mapping** — rewrite model names per upstream server (e.g. send `claude-opus-4-5` to a server that expects a different alias)
-- **`count-tokens` routing** — route token-counting requests to a dedicated default server
-- **TTFT monitoring** — records Time-to-First-Token for every streaming request; view avg / p50 / p95 stats, scatter chart, and navigate custom time windows
-- **Proxy logs** — searchable request log with status, latency, server, and group columns
-- **Telegram alerts** — sends a notification when an upstream returns a monitored status code; configurable per-code list and cooldown window
-- **Token-based admin auth** — single `ADMIN_TOKEN` protects all admin API endpoints
-- **Auto migration** — SQLx migrations run automatically on startup; no manual schema management
-- **Partitioned log tables** — monthly PostgreSQL partitions for `proxy_logs` and `ttft_logs` with configurable retention (default: 30 days)
-- **Single Docker image** — Rust API binary and compiled Vue SPA served from one container
+- **Group-based routing** — each group is an ordered list of upstream servers, each with its own key and its own model-name mapping.
+- **Per-server model mapping** — send `claude-opus-4-5` and have one server receive that name while another receives whatever alias it expects.
+- **TTFT monitoring** — Time-to-First-Token is recorded for every streaming request, with average, p50, and p95 views, a scatter chart, and a navigable time window.
+- **Token and cost tracking** — token usage is parsed inline and priced against the model table.
+- **Proxy logs** — a searchable request log showing status, latency, server, and group.
+- **Telegram alerts** — a notification fires when an upstream returns a monitored status, with a configurable code list and cooldown so you're not spammed.
+- **Dynamic per-server keys** — a proxy key can embed override keys for individual servers when you need them.
 
----
+Operationally it stays out of your way. SQLx migrations run on startup, so there's no manual schema step. The high-volume log tables (`proxy_logs`, `ttft_logs`, token usage, and uptime checks) are partitioned by month and old partitions are dropped automatically once they pass the retention window. Admin access is gated by a single bearer token. And the whole thing — the Rust API binary plus the compiled Vue SPA — ships as one Docker image.
 
-## Architecture
+## How it's built
 
-| Layer | Technology |
-|---|---|
-| Frontend | Vue 3 + Quasar 2 + Vite (SPA, hash routing) |
-| Backend | Rust, Axum 0.8, Tokio |
-| Database | PostgreSQL (SQLx, connection pool) |
-| Cache / rate-limit | Redis (deadpool-redis) |
-| State management | Pinia |
-| HTTP client (frontend) | Axios |
+The frontend is a Vue 3 / Quasar 2 single-page app built with Vite, using Pinia for state and Axios for HTTP. The backend is Rust on Axum 0.8 and Tokio. PostgreSQL (via SQLx) is the system of record, and Redis (via deadpool-redis) handles caching and rate limiting. In production both halves are served from the same container.
 
----
+## Configuration
 
-## Environment Variables
+The backend reads its configuration from a `.env` file, or directly from the environment. Three values are required:
 
-The backend reads configuration from a `.env` file (or from the environment directly).
+- `DATABASE_URL` — PostgreSQL connection string, e.g. `postgres://user:pass@localhost:5432/viber_router`
+- `REDIS_URL` — Redis connection string, e.g. `redis://localhost:6379`
+- `ADMIN_TOKEN` — the bearer token that protects the admin UI and API
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DATABASE_URL` | ✅ | — | PostgreSQL connection string, e.g. `postgres://user:pass@localhost:5432/viber_router` |
-| `REDIS_URL` | ✅ | — | Redis connection string, e.g. `redis://localhost:6379` |
-| `ADMIN_TOKEN` | ✅ | — | Bearer token used to authenticate admin UI / API calls |
-| `HOST` | | `0.0.0.0` | Address the server binds to |
-| `PORT` | | `3333` | TCP port the server listens on |
-| `DATABASE_MAX_CONNECTIONS` | | `50` | Maximum PostgreSQL connection pool size |
-| `REDIS_MAX_CONNECTIONS` | | `30` | Maximum Redis connection pool size |
-| `RUST_LOG` | | `info` | Log level filter (e.g. `debug`, `info`, `warn`) |
-| `LOG_RETENTION_DAYS` | | `30` | Days to retain proxy and TTFT log partitions before dropping |
+The rest have sensible defaults: `HOST` (`0.0.0.0`), `PORT` (`3333`), `DATABASE_MAX_CONNECTIONS` (`50`), `REDIS_MAX_CONNECTIONS` (`30`), `RUST_LOG` (`info`), and `LOG_RETENTION_DAYS` (`30`, the number of days log partitions are kept before being dropped).
 
-Copy `viber-router-api/.env.example` to `viber-router-api/.env` and fill in the required values for local development.
-
----
+For local development, copy `viber-router-api/.env.example` to `viber-router-api/.env` and fill in the required values.
 
 ## Deployment
 
-### Docker Compose (recommended)
-
-Create a `docker-compose.yml`:
+The simplest way to run Viber Router is Docker Compose alongside Postgres and Redis. Drop this into a `docker-compose.yml`:
 
 ```yaml
 services:
@@ -106,24 +82,9 @@ volumes:
   redis_data:
 ```
 
-Then start the stack:
+Then bring it up with `docker compose up -d`. The admin UI will be at `http://localhost:3333`; log in with the `ADMIN_TOKEN` you set. Because `pull_policy: always` is in place, a later `docker compose pull && docker compose up -d` will fetch and roll out the latest image.
 
-```bash
-docker compose up -d
-```
-
-The admin UI is available at `http://localhost:3333`. Log in with the `ADMIN_TOKEN` value you set.
-
-### Pull and update
-
-`pull_policy: always` ensures `docker compose up -d` fetches the latest image automatically. To update a running stack:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-### Single container (no compose)
+If you'd rather not use Compose and already have Postgres and Redis elsewhere, a single container works too:
 
 ```bash
 docker run -d \
@@ -135,51 +96,20 @@ docker run -d \
   nullmastermind/viber-router:latest
 ```
 
----
-
 ## Development
 
-### Prerequisites
+You'll need stable Rust, Node.js 22+, [Bun](https://bun.sh/), the [just](https://github.com/casey/just) task runner, and a local PostgreSQL and Redis. Note that the backend uses SQLx compile-time query checking, so `cargo check` needs a reachable database.
 
-- [Rust](https://rustup.rs/) (stable)
-- Node.js 22+
-- [Bun](https://bun.sh/)
-- [just](https://github.com/casey/just) — task runner
-- PostgreSQL and Redis running locally
-
-### Setup
+Get set up by installing the frontend dependencies and creating your backend config:
 
 ```bash
-# Install frontend dependencies
 bun install
-
-# Copy and fill in backend config
 cp viber-router-api/.env.example viber-router-api/.env
-# Edit viber-router-api/.env — set DATABASE_URL, REDIS_URL, ADMIN_TOKEN
+# then edit viber-router-api/.env to set DATABASE_URL, REDIS_URL, ADMIN_TOKEN
 ```
 
-### Run
+Run the two halves in separate terminals. `just dev-ui` starts the Quasar HMR server on `http://localhost:9000` and `just dev-api` starts the Rust API on `http://localhost:3333`; the dev server proxies API calls to the backend automatically, so you just open port 9000.
 
-```bash
-just dev-ui    # Frontend HMR dev server (Quasar) — http://localhost:9000
-just dev-api   # Rust API server — http://localhost:3333
-```
+Before committing, run `just check`. It runs `vue-tsc`, `biome lint`, `cargo check`, and `cargo clippy -D warnings` across both halves — and since clippy runs with `-D warnings`, anything less than clean fails.
 
-During development the frontend proxies API calls to the backend automatically via Quasar's dev server configuration.
-
-### Check (type-check + lint)
-
-Run this before every commit:
-
-```bash
-just check
-```
-
-This runs `vue-tsc`, `biome lint`, `cargo check`, and `cargo clippy -D warnings` across both the frontend and backend.
-
-### Build Docker image locally
-
-```bash
-just docker-build   # builds nullmastermind/viber-router:latest
-just docker-push    # builds then pushes to Docker Hub
-```
+To build the image yourself, `just docker-build` produces `nullmastermind/viber-router:latest` locally and `just docker-push` builds and pushes it to Docker Hub.
