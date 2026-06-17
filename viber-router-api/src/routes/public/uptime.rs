@@ -123,7 +123,12 @@ pub async fn public_uptime(
     .await
     .unwrap_or_default();
 
-    // 2. Query uptime_checks grouped by request_model and 30-min bucket
+    // 2. Query uptime_checks grouped by request_model and 30-min bucket.
+    //    Each server attempt writes its own row sharing one request_id, so we
+    //    first collapse rows to one logical request (bool_or 2xx = succeeded,
+    //    bucketed by the request start time) before counting — otherwise a
+    //    request that failed over to a successful server would be scored as a
+    //    partial failure (degraded) instead of operational.
     #[derive(sqlx::FromRow)]
     struct RawModelBucket {
         request_model: String,
@@ -133,12 +138,19 @@ pub async fn public_uptime(
     }
 
     let raw_model_buckets = sqlx::query_as::<_, RawModelBucket>(
-        "SELECT request_model, \
-           (floor(extract(epoch from created_at) / 1800) * 1800)::bigint as bucket, \
+        "WITH requests AS ( \
+           SELECT request_id, request_model, \
+             min(created_at) AS started_at, \
+             bool_or(status_code BETWEEN 200 AND 299) AS succeeded \
+           FROM uptime_checks \
+           WHERE group_id = $1 AND created_at >= $2 AND request_model IS NOT NULL \
+           GROUP BY request_id, request_model \
+         ) \
+         SELECT request_model, \
+           (floor(extract(epoch from started_at) / 1800) * 1800)::bigint as bucket, \
            COUNT(*)::bigint as total_requests, \
-           COUNT(*) FILTER (WHERE status_code BETWEEN 200 AND 299)::bigint as successful_requests \
-         FROM uptime_checks \
-         WHERE group_id = $1 AND created_at >= $2 AND request_model IS NOT NULL \
+           COUNT(*) FILTER (WHERE succeeded)::bigint as successful_requests \
+         FROM requests \
          GROUP BY request_model, bucket",
     )
     .bind(key_info.group_id)
