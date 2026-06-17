@@ -216,6 +216,29 @@
       <q-card-section>
         <div class="text-subtitle1 q-mb-md">Database Maintenance</div>
 
+        <q-input
+          v-model.number="form.proxy_log_retention_days"
+          label="Auto-delete logs older than (days)"
+          outlined
+          dense
+          type="number"
+          min="1"
+          style="max-width: 320px"
+          class="q-mb-xs"
+          hint="A job runs daily at 00:00 (in the configured timezone) and removes logs older than this. Default 3."
+        />
+        <div class="q-mb-md">
+          <q-btn
+            color="primary"
+            label="Save Settings"
+            :loading="saving"
+            @click="saveSettings"
+          />
+        </div>
+
+        <q-separator class="q-mb-md" />
+
+        <div class="text-caption text-grey-7 q-mb-sm">Manual purge</div>
         <div class="row q-gutter-sm items-center q-mb-sm">
           <q-select
             v-model="purgeKeepDays"
@@ -335,6 +358,7 @@ interface Settings {
   openai_compat_base_url: string | null;
   public_base_url: string | null;
   api_key_prefix: string | null;
+  proxy_log_retention_days: number;
 }
 
 interface TelegramChat {
@@ -359,6 +383,7 @@ const form = ref<Settings>({
   openai_compat_base_url: null,
   public_base_url: null,
   api_key_prefix: null,
+  proxy_log_retention_days: 3,
 });
 
 const alertStatusCodesStr = computed({
@@ -443,6 +468,7 @@ async function saveSettings() {
       openai_compat_base_url: form.value.openai_compat_base_url || null,
       public_base_url: form.value.public_base_url || null,
       api_key_prefix: form.value.api_key_prefix || null,
+      proxy_log_retention_days: form.value.proxy_log_retention_days,
     });
     form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });

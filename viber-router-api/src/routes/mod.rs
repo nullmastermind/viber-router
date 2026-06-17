@@ -9,7 +9,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
-mod admin;
+pub mod admin;
 mod health;
 pub mod key_parser;
 mod llm;

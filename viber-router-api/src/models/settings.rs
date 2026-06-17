@@ -24,8 +24,14 @@ pub struct Settings {
     pub openai_compat_base_url: Option<String>,
     pub public_base_url: Option<String>,
     pub api_key_prefix: Option<String>,
+    #[serde(default = "default_proxy_log_retention_days")]
+    pub proxy_log_retention_days: i32,
 }
 
 fn default_user_endpoints_enabled() -> bool {
     true
+}
+
+fn default_proxy_log_retention_days() -> i32 {
+    3
 }

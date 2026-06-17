@@ -131,6 +131,66 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Spawn the daily midnight proxy-log purge. Fires at 00:00 in the configured
+    // timezone setting and removes proxy logs older than `proxy_log_retention_days`
+    // (default 3). The purge drops whole expired monthly partitions and DELETE+VACUUMs
+    // the overlapping one, so the DB size stays bounded; log writes go through the mpsc
+    // buffer, so request relay is never affected.
+    let purge_pool = db_pool.clone();
+    tokio::spawn(async move {
+        use chrono::{Duration as ChronoDuration, TimeZone, Utc};
+        loop {
+            // Read timezone + retention fresh each cycle so admin UI changes take effect.
+            let (tz_str, keep_days) = sqlx::query_as::<_, (String, i32)>(
+                "SELECT timezone, proxy_log_retention_days FROM settings WHERE id = 1",
+            )
+            .fetch_optional(&purge_pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| (cache::DEFAULT_TIMEZONE.to_string(), 3));
+
+            let tz: chrono_tz::Tz = tz_str
+                .parse()
+                .unwrap_or_else(|_| cache::DEFAULT_TIMEZONE.parse().unwrap());
+
+            // Compute the next local midnight in `tz`, then the UTC instant to sleep until.
+            let now_local = Utc::now().with_timezone(&tz);
+            let today = now_local.date_naive();
+            let mut next_midnight_date = today;
+            // If it's already past midnight today (it always is unless exactly 00:00:00),
+            // target tomorrow.
+            if now_local.time() != chrono::NaiveTime::MIN {
+                next_midnight_date = today + ChronoDuration::days(1);
+            }
+            let next_midnight_naive = next_midnight_date.and_time(chrono::NaiveTime::MIN);
+            // Resolve the local naive midnight to a concrete UTC instant (handles DST).
+            let next_midnight_utc = match tz.from_local_datetime(&next_midnight_naive) {
+                chrono::LocalResult::Single(dt) => dt.with_timezone(&Utc),
+                chrono::LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
+                chrono::LocalResult::None => {
+                    // Midnight skipped by DST spring-forward — target one hour later,
+                    // which is guaranteed to exist.
+                    match tz.from_local_datetime(&(next_midnight_naive + ChronoDuration::hours(1))) {
+                        chrono::LocalResult::Single(dt)
+                        | chrono::LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
+                        chrono::LocalResult::None => next_midnight_naive.and_utc(),
+                    }
+                }
+            };
+
+            let sleep_secs = (next_midnight_utc - Utc::now()).num_seconds().max(1) as u64;
+            tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
+
+            match routes::admin::logs::purge_proxy_logs(&purge_pool, i64::from(keep_days)).await {
+                Ok(deleted) => tracing::info!(
+                    "Daily midnight purge ({tz_str}): removed {deleted} proxy logs older than {keep_days} days"
+                ),
+                Err(e) => tracing::warn!("Daily midnight purge failed: {e}"),
+            }
+        }
+    });
+
     // Spawn pricing cache refresh task (every 60 seconds)
     let pricing_pool = db_pool.clone();
     tokio::spawn(async move {

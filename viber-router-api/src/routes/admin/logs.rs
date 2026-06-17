@@ -359,7 +359,28 @@ async fn purge_logs(
         ));
     }
 
-    let cutoff_naive = Utc::now().naive_utc().date() - chrono::Duration::days(body.keep_days);
+    let total_deleted = purge_proxy_logs(&state.db, body.keep_days).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(PurgeResponse {
+        deleted: total_deleted,
+    }))
+}
+
+/// Delete proxy logs older than `keep_days` days (cutoff = local-naive midnight,
+/// `keep_days` days ago). Whole monthly partitions before the cutoff are dropped
+/// (instant, reclaims disk); the overlapping partition has its old rows DELETEd and
+/// is then VACUUM FULL-ed to reclaim space. Log writes go through the async mpsc
+/// buffer, so the relay path is never blocked — only log inserts can briefly stall
+/// during the VACUUM lock. Returns the number of rows removed.
+///
+/// Shared by the `/purge` admin endpoint and the daily midnight purge task.
+pub async fn purge_proxy_logs(db: &sqlx::PgPool, keep_days: i64) -> Result<i64, sqlx::Error> {
+    let cutoff_naive = Utc::now().naive_utc().date() - chrono::Duration::days(keep_days);
     let cutoff = Utc.from_utc_datetime(&cutoff_naive.and_time(NaiveTime::MIN));
 
     // Find all proxy_logs partitions
@@ -369,14 +390,8 @@ async fn purge_logs(
          AND tablename != 'proxy_logs' \
          ORDER BY tablename",
     )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": e.to_string()})),
-        )
-    })?;
+    .fetch_all(db)
+    .await?;
 
     let mut total_deleted: i64 = 0;
     // Partitions that had rows deleted (not dropped) need VACUUM FULL to actually
@@ -392,12 +407,12 @@ async fn purge_logs(
                 // Count rows first so we can report them
                 let count_sql = format!("SELECT COUNT(*) FROM \"{partition_name}\"");
                 let count = sqlx::query_scalar::<_, i64>(&count_sql)
-                    .fetch_one(&state.db)
+                    .fetch_one(db)
                     .await
                     .unwrap_or(0);
 
                 let drop_sql = format!("DROP TABLE IF EXISTS \"{partition_name}\"");
-                if let Err(e) = sqlx::query(&drop_sql).execute(&state.db).await {
+                if let Err(e) = sqlx::query(&drop_sql).execute(db).await {
                     tracing::warn!("Failed to drop partition {partition_name}: {e}");
                 } else {
                     tracing::info!("Dropped partition {partition_name} ({count} rows)");
@@ -407,11 +422,7 @@ async fn purge_logs(
             Some(_) => {
                 // Partition overlaps cutoff — delete rows older than cutoff
                 let delete_sql = format!("DELETE FROM \"{partition_name}\" WHERE created_at < $1");
-                match sqlx::query(&delete_sql)
-                    .bind(cutoff)
-                    .execute(&state.db)
-                    .await
-                {
+                match sqlx::query(&delete_sql).bind(cutoff).execute(db).await {
                     Ok(result) => {
                         let deleted = result.rows_affected();
                         total_deleted += deleted as i64;
@@ -438,13 +449,11 @@ async fn purge_logs(
     // parent table to keep the lock scoped to the smallest possible target.
     for partition_name in &partitions_to_vacuum {
         let vacuum_sql = format!("VACUUM FULL \"{partition_name}\"");
-        match sqlx::query(&vacuum_sql).execute(&state.db).await {
+        match sqlx::query(&vacuum_sql).execute(db).await {
             Ok(_) => tracing::info!("VACUUM FULL completed for {partition_name}"),
             Err(e) => tracing::warn!("VACUUM FULL failed for {partition_name}: {e}"),
         }
     }
 
-    Ok(Json(PurgeResponse {
-        deleted: total_deleted,
-    }))
+    Ok(total_deleted)
 }
