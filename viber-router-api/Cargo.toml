@@ -25,3 +25,9 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
+
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+debug = false

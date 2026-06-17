@@ -5,10 +5,10 @@ dev-ui:
     cd {{justfile_directory()}} && bun run dev
 
 dev-api:
-    cd {{justfile_directory()}}/viber-router-api && cargo run
+    cd {{justfile_directory()}}/viber-router-api && cargo run --release
 
 dev-api-watch:
-    cd {{justfile_directory()}}/viber-router-api && cargo watch -x run
+    cd {{justfile_directory()}}/viber-router-api && cargo watch -x "run --release"
 
 check:
     cd {{justfile_directory()}} && bun run vue-tsc --noEmit
