@@ -301,6 +301,11 @@
         <q-card-section>
           Are you sure you want to permanently delete {{ purgePreviewCount }} logs older than
           {{ purgeKeepDays }} days? This cannot be undone.
+          <div class="text-warning q-mt-sm">
+            &#9888; The current month's log table will be briefly locked while disk space is
+            reclaimed (VACUUM FULL). New proxy logs may be delayed or dropped during this time;
+            request relay is not affected.
+          </div>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />

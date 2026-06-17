@@ -379,6 +379,9 @@ async fn purge_logs(
     })?;
 
     let mut total_deleted: i64 = 0;
+    // Partitions that had rows deleted (not dropped) need VACUUM FULL to actually
+    // reclaim disk space — DELETE alone only marks dead tuples.
+    let mut partitions_to_vacuum: Vec<String> = Vec::new();
 
     for partition_name in partitions {
         let end_date = partition::parse_partition_end_date(&partition_name, "proxy_logs");
@@ -410,7 +413,11 @@ async fn purge_logs(
                     .await
                 {
                     Ok(result) => {
-                        total_deleted += result.rows_affected() as i64;
+                        let deleted = result.rows_affected();
+                        total_deleted += deleted as i64;
+                        if deleted > 0 {
+                            partitions_to_vacuum.push(partition_name);
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Failed to delete from partition {partition_name}: {e}");
@@ -421,6 +428,19 @@ async fn purge_logs(
                 // Can't parse partition name — skip
                 tracing::warn!("Could not parse partition end date for {partition_name}");
             }
+        }
+    }
+
+    // Reclaim disk space from the partitions we deleted rows from. VACUUM FULL takes
+    // an ACCESS EXCLUSIVE lock (blocks reads/writes on that partition while it runs)
+    // and cannot run inside a transaction — sqlx queries here are not transactional,
+    // so this is safe. We vacuum each affected partition individually rather than the
+    // parent table to keep the lock scoped to the smallest possible target.
+    for partition_name in &partitions_to_vacuum {
+        let vacuum_sql = format!("VACUUM FULL \"{partition_name}\"");
+        match sqlx::query(&vacuum_sql).execute(&state.db).await {
+            Ok(_) => tracing::info!("VACUUM FULL completed for {partition_name}"),
+            Err(e) => tracing::warn!("VACUUM FULL failed for {partition_name}: {e}"),
         }
     }
 
