@@ -183,9 +183,3 @@ This runs `vue-tsc`, `biome lint`, `cargo check`, and `cargo clippy -D warnings`
 just docker-build   # builds nullmastermind/viber-router:latest
 just docker-push    # builds then pushes to Docker Hub
 ```
-
----
-
-## License
-
-MIT — see [LICENSE](./LICENSE).
