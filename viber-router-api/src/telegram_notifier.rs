@@ -20,6 +20,7 @@ fn default_settings() -> Settings {
         public_base_url: None,
         api_key_prefix: None,
         proxy_log_retention_days: 3,
+        log_request_body: false,
     }
 }
 

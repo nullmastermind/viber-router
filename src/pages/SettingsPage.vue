@@ -227,6 +227,17 @@
           class="q-mb-xs"
           hint="A job runs daily at 00:00 (in the configured timezone) and removes logs older than this. Default 3."
         />
+
+        <q-toggle
+          v-model="form.log_request_body"
+          label="Store request body in error logs"
+          class="q-mt-md q-mb-xs"
+        />
+        <div class="text-caption text-grey-7 q-mb-md">
+          When off, the request body is not stored (an empty <code>{}</code> is saved instead) to
+          save disk space. The cURL command on the Proxy Error Logs page will have an empty body.
+          Headers are unaffected. Default off.
+        </div>
         <div class="q-mb-md">
           <q-btn
             color="primary"
@@ -359,6 +370,7 @@ interface Settings {
   public_base_url: string | null;
   api_key_prefix: string | null;
   proxy_log_retention_days: number;
+  log_request_body: boolean;
 }
 
 interface TelegramChat {
@@ -384,6 +396,7 @@ const form = ref<Settings>({
   public_base_url: null,
   api_key_prefix: null,
   proxy_log_retention_days: 3,
+  log_request_body: false,
 });
 
 const alertStatusCodesStr = computed({
@@ -469,6 +482,7 @@ async function saveSettings() {
       public_base_url: form.value.public_base_url || null,
       api_key_prefix: form.value.api_key_prefix || null,
       proxy_log_retention_days: form.value.proxy_log_retention_days,
+      log_request_body: form.value.log_request_body,
     });
     form.value = { ...form.value, ...data, timezone: data.timezone || 'Asia/Ho_Chi_Minh' };
     $q.notify({ type: 'positive', message: 'Settings saved' });

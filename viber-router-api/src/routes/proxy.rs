@@ -763,6 +763,22 @@ pub async fn user_endpoints_feature_enabled(state: &AppState) -> bool {
     enabled
 }
 
+/// Whether the proxy should store the real request body in proxy logs.
+/// Defaults to false (store `{}` instead) on cache miss, DB failure, or missing row.
+pub async fn log_request_body_enabled(state: &AppState) -> bool {
+    if let Ok(Some(v)) = cache::get_log_request_body(&state.redis).await {
+        return v;
+    }
+    let row: Option<(bool,)> =
+        sqlx::query_as("SELECT log_request_body FROM settings WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
+    let enabled = row.map(|(v,)| v).unwrap_or(false);
+    cache::set_log_request_body(&state.redis, enabled).await;
+    enabled
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn try_user_endpoint_waterfall(
     state: &AppState,
@@ -1197,6 +1213,9 @@ async fn proxy_handler_inner(
             "Not found",
         );
     }
+
+    // Whether to store the real request body in proxy logs; when off, store `{}`.
+    let log_request_body = log_request_body_enabled(&state).await;
 
     // Extract API key from x-api-key header, falling back to Authorization: Bearer <key>
     let raw_key = match req
@@ -1833,8 +1852,11 @@ async fn proxy_handler_inner(
             upstream_req = upstream_req.header("authorization", format!("Bearer {}", resolved_key));
             upstream_req = apply_custom_headers(upstream_req, &ct_server.custom_headers);
 
-            let attempt_body: Option<serde_json::Value> =
-                serde_json::from_slice(&transformed_body).ok();
+            let attempt_body: Option<serde_json::Value> = if log_request_body {
+                serde_json::from_slice(&transformed_body).ok()
+            } else {
+                Some(serde_json::json!({}))
+            };
             let attempt_headers = Value::Object(server_log_headers);
             let attempt_url = upstream_url.clone();
 
@@ -2176,8 +2198,11 @@ async fn proxy_handler_inner(
         upstream_req = apply_custom_headers(upstream_req, &server.custom_headers);
 
         // Prepare curl data for this attempt
-        let attempt_body: Option<serde_json::Value> =
-            serde_json::from_slice(&transformed_body).ok();
+        let attempt_body: Option<serde_json::Value> = if log_request_body {
+            serde_json::from_slice(&transformed_body).ok()
+        } else {
+            Some(serde_json::json!({}))
+        };
         let attempt_headers = Value::Object(server_log_headers);
         let attempt_url = upstream_url.clone();
 

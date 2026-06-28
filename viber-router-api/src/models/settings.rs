@@ -26,6 +26,8 @@ pub struct Settings {
     pub api_key_prefix: Option<String>,
     #[serde(default = "default_proxy_log_retention_days")]
     pub proxy_log_retention_days: i32,
+    #[serde(default)]
+    pub log_request_body: bool,
 }
 
 fn default_user_endpoints_enabled() -> bool {

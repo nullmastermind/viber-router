@@ -182,6 +182,28 @@ pub async fn invalidate_user_endpoints_enabled(redis: &Pool) {
     }
 }
 
+const LOG_REQUEST_BODY_KEY: &str = "settings:log_request_body";
+
+/// Returns Ok(Some(enabled)) on cache hit, Ok(None) on miss, Err(()) on Redis failure.
+pub async fn get_log_request_body(redis: &Pool) -> Result<Option<bool>, ()> {
+    let mut conn = redis.get().await.map_err(|_| ())?;
+    let data: Option<String> = conn.get(LOG_REQUEST_BODY_KEY).await.map_err(|_| ())?;
+    Ok(data.map(|d| d == "1"))
+}
+
+pub async fn set_log_request_body(redis: &Pool, enabled: bool) {
+    if let Ok(mut conn) = redis.get().await {
+        let val = if enabled { "1" } else { "0" };
+        let _: Result<(), _> = conn.set(LOG_REQUEST_BODY_KEY, val).await;
+    }
+}
+
+pub async fn invalidate_log_request_body(redis: &Pool) {
+    if let Ok(mut conn) = redis.get().await {
+        let _: Result<(), _> = conn.del(LOG_REQUEST_BODY_KEY).await;
+    }
+}
+
 /// Add a user-agent to the group's seen-UA set.
 /// Returns Ok(true) if the UA is new (SADD returned 1), Ok(false) if already present.
 pub async fn add_group_ua(
