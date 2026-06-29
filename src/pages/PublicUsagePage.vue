@@ -1136,7 +1136,7 @@ const maskedKey = computed(() => {
 function wrapOsCommand(url: string): string {
   return setupOs.value === 'windows'
     ? `irm "${url}" | iex`
-    : `curl -fsSL "${url}" | tr -d '\r' | sh`;
+    : `curl -fsSL "${url}" | tr -d '\\r' | sh`;
 }
 
 function buildClaudeCodeUrl(key: string): string {
