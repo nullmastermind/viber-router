@@ -424,17 +424,35 @@ fn transform_model(body: &[u8], mappings: &serde_json::Value) -> Vec<u8> {
 }
 
 /// Check if a 400 error response body indicates an invalid thinking block signature.
+/// Turn-shape errors (e.g. "Expected 'thinking' or 'redacted_thinking', but found
+/// 'text'") mention "thinking" alone and must NOT match here — matching on either
+/// keyword in isolation is what previously misclassified self-inflicted turn-shape
+/// corruption as a signature error and drove the retry loop into failover.
 fn is_thinking_signature_error(response_body: &[u8]) -> bool {
     let text = match std::str::from_utf8(response_body) {
         Ok(s) => s,
         Err(_) => return false,
     };
     let lower = text.to_lowercase();
-    lower.contains("signature") || lower.contains("thinking")
+    lower.contains("signature") && lower.contains("thinking")
 }
 
-/// Strip all thinking content blocks from assistant messages in the request body.
-/// Returns `Some(new_body)` if thinking blocks were found and stripped, `None` if no changes needed.
+/// Remove every thinking-family block (`thinking`, `redacted_thinking`) from a single
+/// message's content array. Returns true if the content array was modified.
+fn strip_thinking_family_from_message(msg: &mut Value) -> bool {
+    let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
+        return false;
+    };
+    let before_len = content.len();
+    content.retain(|block| !is_thinking_family_block(block));
+    content.len() != before_len
+}
+
+/// Strip all thinking-family content blocks from assistant messages in the request body,
+/// unconditionally. Used on failover: thinking signatures are bound to the producing
+/// account/key, so a signature valid at server A is invalid at server B even for the
+/// same model.
+/// Returns `Some(new_body)` if any blocks were removed, `None` if no changes needed.
 fn strip_thinking_blocks(body: &[u8]) -> Option<Vec<u8>> {
     let mut json: Value = serde_json::from_slice(body).ok()?;
     let messages = json.get_mut("messages")?.as_array_mut()?;
@@ -444,12 +462,8 @@ fn strip_thinking_blocks(body: &[u8]) -> Option<Vec<u8>> {
         if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
             continue;
         }
-        if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
-            let before_len = content.len();
-            content.retain(|block| block.get("type").and_then(|t| t.as_str()) != Some("thinking"));
-            if content.len() != before_len {
-                changed = true;
-            }
+        if strip_thinking_family_from_message(msg) {
+            changed = true;
         }
     }
 
@@ -465,6 +479,60 @@ fn extract_request_model(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|v| v.get("model")?.as_str().map(String::from))
+}
+
+/// Whether a content block belongs to the thinking family (`thinking` or
+/// `redacted_thinking`). Anything else is never touched by thinking-related
+/// filtering.
+fn is_thinking_family_block(block: &Value) -> bool {
+    matches!(
+        block.get("type").and_then(|t| t.as_str()),
+        Some("thinking") | Some("redacted_thinking")
+    )
+}
+
+/// Validity predicate for a thinking-family content block:
+/// - `thinking` is valid iff `signature` is a non-empty string
+/// - `redacted_thinking` is valid iff `data` is a non-empty string (no signature expected)
+/// - anything else is not a thinking block and is reported as valid (never stripped by
+///   thinking-related filters)
+fn is_valid_thinking_block(block: &Value) -> bool {
+    match block.get("type").and_then(|t| t.as_str()) {
+        Some("thinking") => block
+            .get("signature")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| !s.is_empty()),
+        Some("redacted_thinking") => block
+            .get("data")
+            .and_then(|d| d.as_str())
+            .is_some_and(|d| !d.is_empty()),
+        _ => true,
+    }
+}
+
+/// Index of the latest assistant message in a `messages` array: the last
+/// element whose `role == "assistant"`. This is NOT necessarily the last
+/// element overall — a tool-use round trip ends with a `user` message
+/// carrying `tool_result`, and the assistant turn holding thinking + tool_use
+/// sits immediately before it.
+fn latest_assistant_index(messages: &[Value]) -> Option<usize> {
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, msg)| msg.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+        .map(|(idx, _)| idx)
+}
+
+/// Whether a message's `content` array contains a `tool_use` block.
+fn message_has_tool_use(msg: &Value) -> bool {
+    msg.get("content")
+        .and_then(|c| c.as_array())
+        .is_some_and(|blocks| {
+            blocks
+                .iter()
+                .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+        })
 }
 
 /// Estimate the number of input tokens for a request body.
@@ -629,32 +697,82 @@ fn transform_request_body(
         }
     }
 
-    // Strip thinking blocks with missing/empty signatures from assistant messages.
-    // Upstream Anthropic rejects these with "Invalid `signature` in `thinking` block";
-    // some intermediary proxies strip the signature in their responses, and clients then
-    // echo the now-invalid block back on the next turn.
+    // Strip invalid thinking-family blocks (`thinking` / `redacted_thinking`) from
+    // assistant messages. Upstream Anthropic rejects invalid signatures/data with
+    // "Invalid `signature` in `thinking` block"; some intermediary proxies strip the
+    // signature in their responses, and clients then echo the now-invalid block back
+    // on the next turn.
+    //
+    // Anthropic's contract: within the LATEST assistant message, the sequence of
+    // consecutive thinking-family blocks must be forwarded complete and unmodified --
+    // it can't be rearranged, edited, or partially dropped. Dropping only the invalid
+    // block from that sequence is itself a rejected modification (the remaining blocks
+    // no longer match what the model generated), so if ANY thinking-family block in the
+    // latest assistant message is invalid, we must drop ALL of them from that message
+    // (all-or-nothing). If every block is valid, the message is left completely
+    // untouched -- every block forwarded byte-for-byte, including `redacted_thinking`
+    // blocks and omitted-display `thinking` blocks (empty `thinking` text, valid
+    // `signature`).
+    //
+    // Older (non-latest) assistant messages are not bound by the strict-sequence rule
+    // (the API auto-filters prior-turn thinking anyway), so there we only drop the
+    // invalid blocks and keep the valid ones -- "recommended: across turns, pass
+    // everything back", so we don't gratuitously strip valid prior thinking.
     if let Some(messages) = json.get_mut("messages").and_then(|m| m.as_array_mut()) {
-        let mut stripped = 0usize;
-        for msg in messages.iter_mut() {
+        let latest_idx = latest_assistant_index(messages);
+        let mut stripped_latest = 0usize;
+        let mut latest_was_tool_use_turn = false;
+        let mut stripped_prior = 0usize;
+
+        for (idx, msg) in messages.iter_mut().enumerate() {
             if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
                 continue;
             }
-            if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+            let is_latest = Some(idx) == latest_idx;
+            let has_tool_use = is_latest && message_has_tool_use(msg);
+
+            let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
+                continue;
+            };
+
+            if is_latest {
+                let all_valid = content
+                    .iter()
+                    .filter(|block| is_thinking_family_block(block))
+                    .all(is_valid_thinking_block);
+                if all_valid {
+                    // Sequence intact: forward untouched, byte-for-byte.
+                    continue;
+                }
+                let before = content.len();
+                content.retain(|block| !is_thinking_family_block(block));
+                let dropped = before - content.len();
+                stripped_latest += dropped;
+                if dropped > 0 {
+                    latest_was_tool_use_turn = has_tool_use;
+                }
+            } else {
                 let before = content.len();
                 content.retain(|block| {
-                    if block.get("type").and_then(|t| t.as_str()) != Some("thinking") {
-                        return true;
-                    }
-                    let sig = block.get("signature").and_then(|s| s.as_str()).unwrap_or("");
-                    !sig.is_empty()
+                    !is_thinking_family_block(block) || is_valid_thinking_block(block)
                 });
-                stripped += before - content.len();
+                stripped_prior += before - content.len();
             }
         }
-        if stripped > 0 {
+
+        if stripped_latest > 0 {
+            tracing::warn!(
+                stripped_blocks = stripped_latest,
+                tool_use_turn = latest_was_tool_use_turn,
+                "Dropped ALL thinking-family blocks from the latest assistant message: at least one \
+                 had an invalid/missing signature or data, and a partial sequence would be rejected \
+                 by upstream. Reasoning continuity for this turn is lost."
+            );
+        }
+        if stripped_prior > 0 {
             tracing::info!(
-                stripped_blocks = stripped,
-                "Stripped thinking blocks with empty signature from request"
+                stripped_blocks = stripped_prior,
+                "Stripped invalid thinking-family blocks from prior-turn assistant messages"
             );
         }
     }
@@ -669,6 +787,14 @@ fn transform_request_body(
             if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
                 let before = content.len();
                 content.retain(|block| {
+                    // Never touch thinking-family blocks here: an omitted-display
+                    // `thinking` block is *intentionally* empty-looking (empty
+                    // `thinking` field, valid `signature`), and stripping it would
+                    // break signature continuity for the thinking sequence just as
+                    // badly as the bug this filter is meant to fix for text blocks.
+                    if is_thinking_family_block(block) {
+                        return true;
+                    }
                     if block.get("type").and_then(|t| t.as_str()) != Some("text") {
                         return true;
                     }
@@ -3794,9 +3920,22 @@ mod tests {
     }
 
     #[test]
-    fn test_is_thinking_signature_error_with_thinking() {
+    fn test_is_thinking_signature_error_mentions_thinking_only_is_false() {
+        // Renamed from `..._with_thinking`, and its expected outcome flipped from
+        // true to false: this body mentions "thinking" but never "signature", so
+        // under the narrowed (AND-based) predicate it must NOT be classified as a
+        // signature error. The old OR-based predicate asserted `true` here, which is
+        // exactly the over-broad matching that misclassified self-inflicted
+        // turn-shape 400s (see the test below) as signature errors and drove the
+        // retry-then-failover loop described in the bug report.
         let body = br#"{"error":{"message":"Invalid thinking block content"}}"#;
-        assert!(is_thinking_signature_error(body));
+        assert!(!is_thinking_signature_error(body));
+    }
+
+    #[test]
+    fn test_is_thinking_signature_error_turn_shape_error_is_false() {
+        let body = br#"{"error":{"type":"invalid_request_error","message":"messages.1: Expected 'thinking' or 'redacted_thinking', but found 'text'. When \"thinking\" is enabled, a final assistant message must start with a thinking block"}}"#;
+        assert!(!is_thinking_signature_error(body));
     }
 
     #[test]
@@ -3865,6 +4004,26 @@ mod tests {
         let user_content = parsed["messages"][0]["content"].as_array().unwrap();
         assert_eq!(user_content.len(), 1);
         assert_eq!(user_content[0]["type"], "text");
+    }
+
+    #[test]
+    fn test_strip_thinking_blocks_removes_redacted_thinking() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-6",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": "encrypted-blob"},
+                    {"type": "text", "text": "response"}
+                ]}
+            ]
+        }))
+        .unwrap();
+
+        let result = strip_thinking_blocks(&body).expect("redacted_thinking must be stripped too");
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant_content = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant_content.len(), 1);
+        assert_eq!(assistant_content[0]["type"], "text");
     }
 
     #[test]
@@ -4062,6 +4221,14 @@ mod tests {
 
     #[test]
     fn test_transform_request_body_strips_mixed_signatures() {
+        // NOTE: this message is the LATEST (and only) assistant message, so the
+        // all-or-nothing rule applies: Anthropic requires the consecutive thinking
+        // sequence within the latest assistant message to be forwarded complete and
+        // unmodified. Dropping only the invalid block would itself be a partial,
+        // rejected modification -- so when any thinking-family block here is invalid,
+        // ALL thinking-family blocks must be dropped, not just the bad one. (This
+        // updates a pre-existing test that encoded the old, buggy partial-drop
+        // behavior which caused upstream 400s / stalled tool-use loops.)
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "claude-opus-4-7",
             "messages": [
@@ -4076,9 +4243,8 @@ mod tests {
         let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
         let parsed: Value = serde_json::from_slice(&result).unwrap();
         let assistant = parsed["messages"][0]["content"].as_array().unwrap();
-        assert_eq!(assistant.len(), 2);
-        assert_eq!(assistant[0]["signature"], "good");
-        assert_eq!(assistant[1]["type"], "text");
+        assert_eq!(assistant.len(), 1, "all thinking-family blocks must be dropped (all-or-nothing)");
+        assert_eq!(assistant[0]["type"], "text");
     }
 
     #[test]
@@ -4105,6 +4271,274 @@ mod tests {
         let user = parsed["messages"][1]["content"].as_array().unwrap();
         assert_eq!(user.len(), 1);
         assert_eq!(user[0]["text"], "keep me");
+    }
+
+    #[test]
+    fn test_transform_request_body_latest_assistant_all_valid_thinking_preserved_verbatim() {
+        // Latest assistant message with ALL-valid thinking blocks + a tool_use block:
+        // thinking blocks must be preserved verbatim, signatures byte-identical, order
+        // unchanged.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "step one", "signature": "sig-AAA111"},
+                    {"type": "thinking", "thinking": "step two", "signature": "sig-BBB222"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 3);
+        assert_eq!(assistant[0]["type"], "thinking");
+        assert_eq!(assistant[0]["signature"], "sig-AAA111");
+        assert_eq!(assistant[1]["type"], "thinking");
+        assert_eq!(assistant[1]["signature"], "sig-BBB222");
+        assert_eq!(assistant[2]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_transform_request_body_preserves_omitted_display_thinking_block() {
+        // Regression guard: with `display: "omitted"` (default on newer models),
+        // thinking blocks legitimately arrive with an EMPTY `thinking` field but a
+        // valid `signature`. These must be passed back unchanged -- this is exactly
+        // the shape that made models stop mid-tool-loop when the old code treated
+        // empty-looking blocks as strippable.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "", "signature": "abc"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2, "omitted-display thinking block must be preserved");
+        assert_eq!(assistant[0]["type"], "thinking");
+        assert_eq!(assistant[0]["signature"], "abc");
+        assert_eq!(assistant[1]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_transform_request_body_latest_assistant_partial_invalid_drops_all_thinking() {
+        // Latest assistant message with one valid and one invalid (empty signature)
+        // thinking block: ALL thinking-family blocks must be dropped (all-or-nothing),
+        // while non-thinking blocks survive.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "first", "signature": "good-sig"},
+                    {"type": "thinking", "thinking": "second", "signature": ""},
+                    {"type": "text", "text": "partial answer"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2, "all thinking-family blocks must be dropped (all-or-nothing)");
+        assert!(assistant.iter().all(|b| b["type"] != "thinking" && b["type"] != "redacted_thinking"));
+        assert_eq!(assistant[0]["type"], "text");
+        assert_eq!(assistant[1]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_transform_request_body_preserves_valid_redacted_thinking() {
+        // redacted_thinking with non-empty `data` in the latest assistant message must
+        // be preserved, `data` intact.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": "encrypted-blob-xyz"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0]["type"], "redacted_thinking");
+        assert_eq!(assistant[0]["data"], "encrypted-blob-xyz");
+    }
+
+    #[test]
+    fn test_transform_request_body_invalid_redacted_thinking_drops_all_in_latest() {
+        // redacted_thinking with missing/empty `data` next to a valid `thinking` block
+        // in the latest assistant message: both dropped (all-or-nothing).
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": ""},
+                    {"type": "thinking", "thinking": "valid", "signature": "sig-1"},
+                    {"type": "text", "text": "answer"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1, "invalid redacted_thinking forces all-or-nothing drop");
+        assert_eq!(assistant[0]["type"], "text");
+    }
+
+    #[test]
+    fn test_transform_request_body_valid_redacted_thinking_and_bad_thinking_both_dropped() {
+        // A valid redacted_thinking block sitting next to a thinking block with an
+        // empty signature: the redacted_thinking's own data is fine, but the sibling
+        // thinking block's missing signature still invalidates the whole message, so
+        // BOTH thinking-family blocks are dropped together (never just the bad one).
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": "valid-encrypted-blob"},
+                    {"type": "thinking", "thinking": "stale", "signature": ""},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 1, "both thinking-family blocks dropped together");
+        assert_eq!(assistant[0]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_transform_request_body_older_assistant_invalid_thinking_pruned_latest_untouched() {
+        // Older (non-latest) assistant message with an invalid thinking block, plus a
+        // latest assistant message with valid ones: invalid prior-turn block dropped,
+        // latest message's valid blocks fully preserved.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "old reasoning", "signature": ""},
+                    {"type": "text", "text": "old answer"}
+                ]},
+                {"role": "user", "content": "second question"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "new reasoning", "signature": "sig-new"},
+                    {"type": "text", "text": "new answer"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+
+        let older_assistant = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(older_assistant.len(), 1, "invalid thinking pruned from prior-turn message");
+        assert_eq!(older_assistant[0]["type"], "text");
+
+        let latest_assistant = parsed["messages"][3]["content"].as_array().unwrap();
+        assert_eq!(latest_assistant.len(), 2, "latest message's valid thinking fully preserved");
+        assert_eq!(latest_assistant[0]["type"], "thinking");
+        assert_eq!(latest_assistant[0]["signature"], "sig-new");
+    }
+
+    #[test]
+    fn test_latest_assistant_index_targets_assistant_not_trailing_tool_result_user() {
+        // Realistic tool-use round trip: [user, assistant(thinking+tool_use),
+        // user(tool_result)] -- latest_assistant_index must target the assistant
+        // message at index 1, NOT the trailing user tool_result message, and its
+        // thinking must survive with signature intact.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": "please read the file"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "I should read it", "signature": "sig-round-trip"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {"path": "x"}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "tu_1", "content": "file contents"}
+                ]}
+            ]
+        }))
+        .unwrap();
+
+        // Directly verify the helper targets index 1, not the trailing user message.
+        let parsed_messages: Value = serde_json::from_slice(&body).unwrap();
+        let messages_arr = parsed_messages["messages"].as_array().unwrap();
+        assert_eq!(latest_assistant_index(messages_arr), Some(1));
+
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0]["type"], "thinking");
+        assert_eq!(assistant[0]["signature"], "sig-round-trip");
+    }
+
+    #[test]
+    fn test_transform_request_body_empty_text_strip_does_not_disturb_thinking() {
+        // An assistant message containing an omitted-display thinking block AND a
+        // genuinely empty text block: text block stripped, thinking block preserved
+        // with signature intact.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "", "signature": "sig-omitted"},
+                    {"type": "text", "text": ""},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2, "empty text block stripped, thinking + tool_use survive");
+        assert_eq!(assistant[0]["type"], "thinking");
+        assert_eq!(assistant[0]["signature"], "sig-omitted");
+        assert_eq!(assistant[1]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_transform_request_body_non_thinking_messages_unaffected() {
+        // Regression guard: ordinary messages with no thinking-family blocks are
+        // unaffected by the new pass-A logic.
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "claude-opus-4-7",
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "hi there"},
+                    {"type": "tool_use", "id": "tu_1", "name": "Read", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "tu_1", "content": "ok"}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let result = transform_request_body(&body, &serde_json::json!({}), None, "/v1/messages", false);
+        let parsed: Value = serde_json::from_slice(&result).unwrap();
+        let assistant = parsed["messages"][1]["content"].as_array().unwrap();
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0]["type"], "text");
+        assert_eq!(assistant[0]["text"], "hi there");
+        assert_eq!(assistant[1]["type"], "tool_use");
     }
 
     #[test]
