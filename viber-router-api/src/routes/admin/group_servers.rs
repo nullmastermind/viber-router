@@ -307,6 +307,7 @@ pub fn router() -> Router<AppState> {
         .route("/", post(assign_server))
         .route("/reorder", put(reorder_priorities))
         .route("/{server_id}", put(update_assignment).delete(remove_server))
+        .route("/{server_id}/ping", post(super::server_ping::ping_server))
 }
 
 async fn assign_server(

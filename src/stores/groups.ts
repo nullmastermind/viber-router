@@ -284,6 +284,18 @@ export const useGroupsStore = defineStore('groups', () => {
     await api.delete(`/api/admin/groups/${groupId}/servers/${serverId}`);
   }
 
+  async function pingServer(groupId: string, serverId: string, model: string) {
+    const { data } = await api.post<{
+      ok: boolean;
+      status: number;
+      ttft_ms: number | null;
+      model: string;
+      mapped_model: string;
+      error: string | null;
+    }>(`/api/admin/groups/${groupId}/servers/${serverId}/ping`, { model });
+    return data;
+  }
+
   async function reorderServers(groupId: string, serverIds: string[]) {
     await api.put(`/api/admin/groups/${groupId}/servers/reorder`, { server_ids: serverIds });
   }
@@ -464,7 +476,7 @@ export const useGroupsStore = defineStore('groups', () => {
     groups, total, totalPages, loading,
     fetchGroups, getGroup, createGroup, updateGroup, deleteGroup, regenerateKey,
     bulkActivate, bulkDeactivate, bulkDelete, bulkAssignServer,
-    assignServer, updateAssignment, removeServer, reorderServers,
+    assignServer, updateAssignment, removeServer, pingServer, reorderServers,
     fetchTtftStats, fetchCircuitStatus, fetchTokenUsageStats, fetchTokenUsageByKey,
     fetchGroupKeys, createGroupKey, updateGroupKey, regenerateGroupKey, deleteGroupKey, bulkCreateGroupKeys, fetchKeyUsage,
     fetchGroupAllowedModels, addGroupAllowedModel, removeGroupAllowedModel,

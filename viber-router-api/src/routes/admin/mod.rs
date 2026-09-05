@@ -8,6 +8,7 @@ pub mod groups;
 pub mod key_subscriptions;
 pub mod logs;
 pub mod models;
+pub mod server_ping;
 pub mod servers;
 pub mod settings;
 pub mod spam_detection;

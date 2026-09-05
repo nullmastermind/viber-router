@@ -219,6 +219,7 @@
                         @click.stop="unlockDialog(s.server_id)"
                       />
                       <q-btn flat dense icon="edit" :aria-label="`Edit server ${s.server_name}`" @click="openEditServer(s)" />
+                      <q-btn flat dense icon="network_ping" :aria-label="`Ping server ${s.server_name}`" @click="openPingDialog(s)" />
                       <q-btn flat dense icon="tune" :aria-label="`Edit model mappings for ${s.server_name}`" @click="editMappings(s)" />
                       <q-btn flat dense icon="replay" :aria-label="`Edit retry config for ${s.server_name}`" @click="openRetryDialog(s)" />
                       <q-btn flat dense icon="delete" color="negative" :aria-label="`Remove server ${s.server_name}`" @click="onRemoveServer(s)" />
@@ -986,6 +987,16 @@
         </q-card>
       </q-dialog>
 
+      <ServerPingDialog
+        v-model="showPing"
+        :server-name="pingTarget?.server_name ?? ''"
+        :models="pingModels"
+        :results="pingResults"
+        :pinging-all="pingingAll"
+        @ping="pingOne"
+        @ping-all="pingAll"
+      />
+
       <q-dialog v-model="showEditServer">
         <q-card style="width: 400px">
           <q-card-section><div class="text-h6">Edit Server</div></q-card-section>
@@ -1605,8 +1616,10 @@ import { subKeyUsageColumns as subKeyUsageColumnsDef } from 'src/utils/subKeyUsa
 import SubKeyUsage from 'components/SubKeyUsage.vue';
 import TtftChart from 'components/TtftChart.vue';
 import UptimeBars from 'components/UptimeBars.vue';
+import ServerPingDialog from 'components/ServerPingDialog.vue';
 import type { Bucket } from 'components/UptimeBars.vue';
 import { getSubTypeLabel } from 'src/composables/useSubscriptionType';
+import { pingModelOptions, type PingModelOption, type PingRowStatus } from 'src/utils/pingModels';
 
 const $q = useQuasar();
 const route = useRoute();
@@ -1635,6 +1648,13 @@ const addServerOptions = computed(() => [
 const showMappings = ref(false);
 const editingMapping = ref<GroupServerDetail | null>(null);
 const mappingEntries = ref<{ from: string; to: string }[]>([]);
+
+const showPing = ref(false);
+const pingTarget = ref<GroupServerDetail | null>(null);
+const pingModels = ref<PingModelOption[]>([]);
+const pingResults = ref<Record<string, PingRowStatus>>({});
+const pingingAll = ref(false);
+const pingCatalog = ref<string[]>([]);
 
 const showEditServer = ref(false);
 const editServerId = ref('');
@@ -2684,6 +2704,64 @@ async function saveMappings() {
   await groupsStore.updateAssignment(group.value.id, editingMapping.value.server_id, { model_mappings: mappings });
   showMappings.value = false;
   loadGroup();
+}
+
+async function ensurePingCatalog() {
+  if (pingCatalog.value.length) return;
+  try {
+    const result = await modelsStore.fetchModels({ limit: 100 });
+    pingCatalog.value = result.data.map((m) => m.name);
+  } catch {
+    pingCatalog.value = [];
+  }
+}
+
+async function openPingDialog(s: GroupServerDetail) {
+  pingTarget.value = s;
+  pingResults.value = {};
+  pingingAll.value = false;
+  await ensurePingCatalog();
+  pingModels.value = pingModelOptions({
+    supportedModels: s.supported_models || [],
+    allowedModels: allowedModels.value.map((m) => m.name),
+    allModels: pingCatalog.value,
+    mappings: s.model_mappings || {},
+  });
+  showPing.value = true;
+}
+
+async function pingOne(model: string) {
+  if (!group.value || !pingTarget.value) return;
+  pingResults.value = { ...pingResults.value, [model]: { state: 'pending' } };
+  try {
+    const result = await groupsStore.pingServer(group.value.id, pingTarget.value.server_id, model);
+    pingResults.value = {
+      ...pingResults.value,
+      [model]: result.ok
+        ? {
+            state: 'ok',
+            ttftMs: result.ttft_ms ?? 0,
+            model: result.model,
+            mappedModel: result.mapped_model,
+          }
+        : { state: 'error', status: result.status, error: result.error },
+    };
+  } catch (e: unknown) {
+    const msg =
+      (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Ping failed';
+    pingResults.value = {
+      ...pingResults.value,
+      [model]: { state: 'error', status: 0, error: msg },
+    };
+  }
+}
+
+async function pingAll() {
+  pingingAll.value = true;
+  for (const m of pingModels.value) {
+    await pingOne(m.name);
+  }
+  pingingAll.value = false;
 }
 
 async function unlockDialog(serverId: string): Promise<void> {
